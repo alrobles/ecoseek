@@ -3,17 +3,17 @@
 # Works on Linux, macOS, and Windows (WSL).
 #
 # Usage:
-#   git clone https://github.com/alrobles/ecoseek.git
-#   cd ecoseek
-#   bash setup.sh
+#   DEEPSEEK_API_KEY=sk-xxx bash setup.sh   # with DeepSeek API
+#   bash setup.sh                            # prompts for API key
 #
 # What it does:
 #   1. Checks prerequisites (git, docker)
-#   2. Clones dependency repos into .repos/ (uses YOUR git auth)
-#   3. Builds Docker images from the local checkouts
-#   4. Starts the stack and verifies services are healthy
+#   2. Asks for your DeepSeek API key (if not set)
+#   3. Clones dependency repos into .repos/ (uses YOUR git auth)
+#   4. Builds Docker images from the local checkouts
+#   5. Starts the full stack and verifies services are healthy
 #
-# No Node.js, Python, or npm required on the host.
+# No Node.js, Python, or npm required on the host — just Git + Docker.
 # Works with private repos — git clone runs on the host where you
 # are already authenticated, then Docker COPY's the files in.
 
@@ -56,6 +56,27 @@ if ! docker info &>/dev/null 2>&1; then
   exit 1
 fi
 
+# ── DeepSeek API key ──────────────────────────────────────────────────────
+if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
+  echo ""
+  info "No DEEPSEEK_API_KEY found in environment."
+  info "Get your key at: https://platform.deepseek.com/api_keys"
+  echo ""
+  printf "${GREEN}[ecoseek]${NC} Enter your DeepSeek API key (or press Enter to skip): "
+  read -r DEEPSEEK_API_KEY
+  if [ -z "$DEEPSEEK_API_KEY" ]; then
+    warn "No API key provided. The stack will start but AI features won't work."
+    warn "You can set it later: DEEPSEEK_API_KEY=sk-xxx docker compose up -d"
+  fi
+fi
+export DEEPSEEK_API_KEY
+
+# Write .env file for docker compose (persists across restarts)
+if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
+  echo "DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}" > .env
+  info "API key saved to .env (git-ignored, local only)"
+fi
+
 # ── Clone dependency repos ────────────────────────────────────────────────
 clone_repo() {
   local repo_url="$1"
@@ -71,18 +92,23 @@ clone_repo() {
 
 mkdir -p .repos
 clone_repo "https://github.com/alrobles/agenticplug.git" ".repos/agenticplug"
+clone_repo "https://github.com/alrobles/agenticSeek.git"  ".repos/agenticSeek"
 
 # ── Build and start ───────────────────────────────────────────────────────
-info "Building EcoSeek stack (first run takes 2-5 minutes)..."
-info "  - AgenticPlug broker (gateway)"
-info "  - Ollama (local model inference)"
+info "Building EcoSeek stack (first run takes 5-10 minutes)..."
+info "  - AgenticSeek backend  (API + agents)"
+info "  - AgenticSeek frontend (React UI)"
+info "  - AgenticPlug broker   (gateway)"
+info "  - SearxNG              (private web search)"
+info "  - Redis                (task queue)"
+info "  - Ollama               (local model inference)"
 echo ""
 
 docker compose up --build -d
 
 # ── Health check ──────────────────────────────────────────────────────────
-info "Waiting for broker to become healthy..."
-MAX_WAIT=120
+info "Waiting for services to become healthy..."
+MAX_WAIT=180
 ELAPSED=0
 
 broker_healthy() {
@@ -97,6 +123,7 @@ while ! broker_healthy; do
   if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then
     warn "Broker did not become healthy within ${MAX_WAIT}s."
     warn "Check logs with: docker compose logs broker"
+    warn "The other services may still be starting — check: docker compose ps"
     exit 1
   fi
   printf "."
@@ -106,12 +133,22 @@ echo ""
 # ── Summary ───────────────────────────────────────────────────────────────
 info "EcoSeek stack is running!"
 echo ""
-printf "  %-25s %s\n" "AgenticPlug broker:" "http://localhost:3000"
-printf "  %-25s %s\n" "Ollama:" "http://localhost:11434"
+printf "  %-25s %s\n" "AgenticSeek UI:"     "http://localhost:3000"
+printf "  %-25s %s\n" "AgenticSeek API:"    "http://localhost:7777"
+printf "  %-25s %s\n" "AgenticPlug broker:" "http://localhost:3100"
+printf "  %-25s %s\n" "SearxNG:"            "http://localhost:8080"
+printf "  %-25s %s\n" "Ollama:"             "http://localhost:11434"
+echo ""
+if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
+  info "DeepSeek API key: configured"
+else
+  warn "DeepSeek API key: not set (AI features disabled)"
+  warn "Set it with: DEEPSEEK_API_KEY=sk-xxx docker compose up -d"
+fi
 echo ""
 info "To stop:    docker compose down"
 info "To restart: docker compose up -d"
 info "Logs:       docker compose logs -f"
 info "Rebuild:    bash setup.sh"
 echo ""
-warn "This is a pre-alpha development stack. Do NOT use real secrets or production credentials."
+info "Open http://localhost:3000 in your browser to start using EcoSeek."

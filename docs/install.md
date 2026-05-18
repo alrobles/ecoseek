@@ -1,62 +1,60 @@
 # Install
 
-> **Status: pre-alpha.** EcoSeek is not yet a single installable product. This document describes how to set up the companion components for local development and review. **Do not use real secrets, real API keys, or real production data with EcoSeek at this stage.**
+> **Status: pre-alpha.** This document describes how to install and run EcoSeek locally. **Do not use real production data with EcoSeek at this stage.**
 
-**Last updated:** 2026-05-18, after P0 stabilization.
+**Last updated:** 2026-05-18
 
 ## Prerequisites
 
-**Docker path (recommended — works on any OS):**
-
 - **Git** (any recent version)
 - **Docker** and **Docker Compose v2** (Docker Desktop on Windows/macOS, or docker-ce on Linux)
+- **DeepSeek API key** — get one at https://platform.deepseek.com/api_keys
 
 No Node.js, Python, or npm required on the host. Everything runs inside containers.
 
-**Manual path (for development):**
+## Quick start (any OS)
 
-- **Git** (any recent version)
-- **Python 3.10+** with pip
-- **Node.js 18+** with npm (**must be the Linux version inside WSL**, not the Windows one)
-- **Ollama** (optional, for local model inference)
-
-## Quick start — Docker (any OS)
-
-This is the recommended path. Works identically on Linux, macOS, and Windows (WSL or native Docker Desktop).
+Works identically on Linux, macOS, and Windows (WSL or native Docker Desktop).
 
 ```bash
 git clone https://github.com/alrobles/ecoseek.git
 cd ecoseek
-bash setup.sh
+DEEPSEEK_API_KEY=sk-your-key-here bash setup.sh
 ```
 
-Or manually:
+The script will:
+1. Clone dependency repos (agenticplug, agenticSeek) using your git auth
+2. Build all Docker images (~5-10 min first time, cached after)
+3. Start the full stack (6 services)
+4. Open `http://localhost:3000` in your browser to start working
 
-```bash
-git clone https://github.com/alrobles/ecoseek.git
-cd ecoseek
-git clone --depth 1 https://github.com/alrobles/agenticplug.git .repos/agenticplug
-docker compose up --build
-```
+If you don't pass the API key, the script will prompt you interactively.
 
-The setup script clones dependency repos into `.repos/` using your existing git auth (works with private repos), then Docker builds from those local checkouts. First build takes 2-5 minutes. Subsequent runs use cached images.
-
-### Using `gh` CLI (WSL / Windows)
+### Using `gh` CLI
 
 ```bash
 gh repo clone alrobles/ecoseek
 cd ecoseek
-bash setup.sh
+DEEPSEEK_API_KEY=sk-your-key-here bash setup.sh
+```
+
+### Windows (PowerShell, no WSL)
+
+```powershell
+$env:DEEPSEEK_API_KEY="sk-your-key-here"
+.\setup.ps1
 ```
 
 ### What starts
 
 | Service | URL | What it does |
 |---------|-----|-------------|
-| AgenticPlug broker | `http://localhost:3000` | Gateway — auth, sessions, scopes, approvals |
+| **AgenticSeek UI** | `http://localhost:3000` | Web interface — start here |
+| AgenticSeek API | `http://localhost:7777` | Agent backend (API + task execution) |
+| AgenticPlug broker | `http://localhost:3100` | Security gateway — auth, sessions, scopes |
+| SearxNG | `http://localhost:8080` | Private web search for agents |
 | Ollama | `http://localhost:11434` | Local model inference |
-
-The EcoSeek client (agenticSeek) runs directly on the host — see "Manual setup" below.
+| Redis | (internal) | Task queue |
 
 ### Stop / restart / logs
 
@@ -64,10 +62,21 @@ The EcoSeek client (agenticSeek) runs directly on the host — see "Manual setup
 docker compose down          # stop
 docker compose up -d         # restart (detached)
 docker compose logs -f       # follow logs
-docker compose up --build    # rebuild after upstream changes
+bash setup.sh                # rebuild after upstream changes
 ```
 
-## Quick start — manual (for development)
+### Changing the API key
+
+```bash
+# Option 1: edit .env file
+echo "DEEPSEEK_API_KEY=sk-new-key" > .env
+docker compose up -d
+
+# Option 2: re-run setup
+DEEPSEEK_API_KEY=sk-new-key bash setup.sh
+```
+
+## Manual setup (for development)
 
 Use this if you need to edit source code across repos.
 
@@ -114,37 +123,16 @@ python -m ecocoder.api --port 8200
 
 ```bash
 cd agenticSeek
+python3 -m venv .venv
+source .venv/bin/activate
+sudo apt install portaudio19-dev python3-dev   # Linux only
 pip install -r requirements.txt
-python -m sources.ecoseek_entrypoint --version
+python api.py
 ```
 
-## What you can do today
+## Upstream tracking
 
-- Run AgenticPlug with the mock gateway and verify dual-layer auth, session management, and scope enforcement.
-- Run EcoAgent's 30+ ecological tools via the HTTP server.
-- Run EcoCoder's OpenAI-compatible endpoint against a local Ollama model.
-- Run the EcoSeek client with local providers (DIY mode).
-- Use the DeepSeek BYOK provider with your own API key stored in the Fernet-encrypted keystore.
-
-## What you should not do today
-
-- Connect EcoSeek to a shared lab AgenticPlug in production.
-- Use EcoSeek to handle data you would not be comfortable losing or leaking.
-- Expose any EcoSeek component on a public network without additional hardening.
-
-## BYOK setup (DeepSeek)
-
-The BYOK provider is functional. Keys are stored locally using Fernet encryption.
-
-```bash
-cd agenticSeek
-# Store your API key (encrypted locally, never transmitted to EcoSeek infra)
-python -m sources.keystore set deepseek_api_key
-# Verify it's stored
-python -m sources.keystore list
-```
-
-See [deepseek-byok.md](https://github.com/alrobles/agenticSeek/blob/main/docs/deepseek-byok.md) for the full guide.
+EcoSeek's agenticSeek fork tracks upstream [Fosowl/agenticSeek](https://github.com/Fosowl/agenticSeek). See [upstream.md](upstream.md) for the sync strategy and TODO list.
 
 ## Running tests
 

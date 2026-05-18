@@ -26,9 +26,9 @@ RUN npm install --production \
 ENV BROKER_PORT=3000 \
     BROKER_SESSION_STORE=memory
 
-EXPOSE 3000
+EXPOSE ${BROKER_PORT}
 
 HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/healthz', r => { process.exit(r.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"
+  CMD node -e "require('http').get('http://localhost:'+(process.env.BROKER_PORT||3000)+'/healthz', r => { process.exit(r.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"
 
 CMD ["node", "broker/server.js"]
