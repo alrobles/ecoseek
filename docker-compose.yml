@@ -1,39 +1,134 @@
-# EcoSeek DIY-mode Docker Compose
+# EcoSeek — full Docker Compose stack
 #
-# Starts the minimum viable stack for local development:
-# - AgenticPlug broker (gateway)
-# - Ollama (local model inference)
+# One-command install:
+#   DEEPSEEK_API_KEY=sk-xxx bash setup.sh
 #
-# Usage (recommended):
-#   bash setup.sh                    # clones repos + builds + starts
-#
-# Manual:
-#   git clone https://github.com/alrobles/agenticplug.git .repos/agenticplug
-#   docker compose up --build
+# What starts:
+#   - AgenticSeek backend  (API + agents)          → http://localhost:7777
+#   - AgenticSeek frontend (React UI)              → http://localhost:3000
+#   - AgenticPlug broker   (gateway)               → http://localhost:3100
+#   - SearxNG              (private web search)    → http://localhost:8080
+#   - Redis                (task queue)             (internal)
+#   - Ollama               (local model inference) → http://localhost:11434
 #
 # Works on Linux, macOS, and Windows (WSL or native Docker Desktop).
+# No Python, Node.js, or npm required on the host — just Git + Docker.
+#
 # Repos are cloned on the host (where your git auth works), then
 # COPY'd into Docker — no GitHub credentials needed inside containers.
-#
-# The EcoSeek client (agenticSeek) is not containerized here because
-# it needs access to the user's display, browser, and local filesystem.
-# Run it directly on the host — see docs/install.md.
-#
-# Do NOT use real secrets, API keys, or production credentials at this stage.
 
 services:
+  # ── AgenticSeek backend (API + agents) ──────────────────────────────────
+  backend:
+    build:
+      context: .repos/agenticSeek
+      dockerfile: Dockerfile.backend
+    ports:
+      - "${BACKEND_PORT:-7777}:${BACKEND_PORT:-7777}"
+    volumes:
+      - workspace:/opt/workspace
+      - screenshots:/app/.screenshots
+    environment:
+      SEARXNG_BASE_URL: "http://searxng:8080"
+      REDIS_URL: "redis://redis:6379/0"
+      WORK_DIR: "/opt/workspace"
+      BACKEND_PORT: "${BACKEND_PORT:-7777}"
+      BACKEND_HOST: "0.0.0.0"
+      DOCKER_INTERNAL_URL: "http://host.docker.internal"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+    depends_on:
+      - redis
+      - searxng
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - ecoseek-net
+
+  # ── AgenticSeek frontend (React UI) ────────────────────────────────────
+  frontend:
+    build:
+      context: .repos/agenticSeek/frontend
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: "development"
+      CHOKIDAR_USEPOLLING: "true"
+      REACT_APP_BACKEND_URL: "${REACT_APP_BACKEND_URL:-http://localhost:7777}"
+    depends_on:
+      - backend
+    networks:
+      - ecoseek-net
+
+  # ── AgenticPlug broker (gateway) ───────────────────────────────────────
   broker:
     build:
       context: .repos/agenticplug
       dockerfile: ../../docker/broker.Dockerfile
     environment:
       BROKER_HOST: "0.0.0.0"
-      BROKER_PORT: "3000"
+      BROKER_PORT: "3100"
       BROKER_SESSION_STORE: memory
     ports:
-      - "3000:3000"
+      - "3100:3100"
     volumes:
       - broker-data:/data
+    networks:
+      - ecoseek-net
+
+  # ── SearxNG (private web search) ───────────────────────────────────────
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - .repos/agenticSeek/searxng:/etc/searxng:rw
+    environment:
+      SEARXNG_BASE_URL: "${SEARXNG_BASE_URL:-http://localhost:8080/}"
+      UWSGI_WORKERS: "4"
+      UWSGI_THREADS: "4"
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    depends_on:
+      - redis
+    networks:
+      - ecoseek-net
+
+  # ── Redis (task queue for Celery) ──────────────────────────────────────
+  redis:
+    image: docker.io/valkey/valkey:8-alpine
+    command: valkey-server --save 30 1 --loglevel warning
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+    networks:
+      - ecoseek-net
+
+  # ── Ollama (local model inference) ─────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-data:/root/.ollama
+    ports:
+      - "11434:11434"
+    networks:
+      - ecoseek-net
+    # GPU passthrough (uncomment if NVIDIA GPU available):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
 
   # ecoagent: (uncomment when ecoagent is ready for release)
   #   build:
@@ -44,22 +139,16 @@ services:
   #     ECOAGENT_HOST: "0.0.0.0"
   #   ports:
   #     - "8100:8100"
-
-  ollama:
-    image: ollama/ollama:latest
-    volumes:
-      - ollama-data:/root/.ollama
-    ports:
-      - "11434:11434"
-    # GPU passthrough (uncomment if NVIDIA GPU available):
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+  #   networks:
+  #     - ecoseek-net
 
 volumes:
   broker-data:
   ollama-data:
+  redis-data:
+  workspace:
+  screenshots:
+
+networks:
+  ecoseek-net:
+    driver: bridge

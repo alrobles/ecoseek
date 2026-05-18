@@ -2,17 +2,17 @@
 # Works with Docker Desktop on Windows (no WSL required).
 #
 # Usage:
-#   git clone https://github.com/alrobles/ecoseek.git
-#   cd ecoseek
-#   .\setup.ps1
+#   $env:DEEPSEEK_API_KEY="sk-xxx"; .\setup.ps1   # with DeepSeek API
+#   .\setup.ps1                                     # prompts for API key
 #
 # What it does:
 #   1. Checks prerequisites (git, docker)
-#   2. Clones dependency repos into .repos/ (uses YOUR git auth)
-#   3. Builds Docker images from the local checkouts
-#   4. Starts the stack and verifies services are healthy
+#   2. Asks for your DeepSeek API key (if not set)
+#   3. Clones dependency repos into .repos/ (uses YOUR git auth)
+#   4. Builds Docker images from the local checkouts
+#   5. Starts the full stack and verifies services are healthy
 #
-# No Node.js, Python, or npm required on the host.
+# No Node.js, Python, or npm required on the host — just Git + Docker.
 # Works with private repos — git clone runs on the host where you
 # are already authenticated, then Docker COPY's the files in.
 
@@ -53,6 +53,27 @@ try {
     exit 1
 }
 
+# ── DeepSeek API key ──────────────────────────────────────────────────────
+if (-not $env:DEEPSEEK_API_KEY) {
+    Write-Host ""
+    Write-Info "No DEEPSEEK_API_KEY found in environment."
+    Write-Info "Get your key at: https://platform.deepseek.com/api_keys"
+    Write-Host ""
+    $key = Read-Host "[ecoseek] Enter your DeepSeek API key (or press Enter to skip)"
+    if ($key) {
+        $env:DEEPSEEK_API_KEY = $key
+    } else {
+        Write-Warn "No API key provided. The stack will start but AI features won't work."
+        Write-Warn "You can set it later: `$env:DEEPSEEK_API_KEY='sk-xxx'; docker compose up -d"
+    }
+}
+
+# Write .env file for docker compose (persists across restarts)
+if ($env:DEEPSEEK_API_KEY) {
+    "DEEPSEEK_API_KEY=$($env:DEEPSEEK_API_KEY)" | Set-Content -Path ".env" -NoNewline
+    Write-Info "API key saved to .env (git-ignored, local only)"
+}
+
 # ── Clone dependency repos ────────────────────────────────────────────────
 function Clone-Repo($url, $dest) {
     if (Test-Path "$dest\.git") {
@@ -71,11 +92,16 @@ function Clone-Repo($url, $dest) {
 
 if (-not (Test-Path ".repos")) { New-Item -ItemType Directory -Path ".repos" | Out-Null }
 Clone-Repo "https://github.com/alrobles/agenticplug.git" ".repos\agenticplug"
+Clone-Repo "https://github.com/alrobles/agenticSeek.git"  ".repos\agenticSeek"
 
 # ── Build and start ───────────────────────────────────────────────────────
-Write-Info "Building EcoSeek stack (first run takes 2-5 minutes)..."
-Write-Info "  - AgenticPlug broker (gateway)"
-Write-Info "  - Ollama (local model inference)"
+Write-Info "Building EcoSeek stack (first run takes 5-10 minutes)..."
+Write-Info "  - AgenticSeek backend  (API + agents)"
+Write-Info "  - AgenticSeek frontend (React UI)"
+Write-Info "  - AgenticPlug broker   (gateway)"
+Write-Info "  - SearxNG              (private web search)"
+Write-Info "  - Redis                (task queue)"
+Write-Info "  - Ollama               (local model inference)"
 Write-Host ""
 
 docker compose up --build -d
@@ -85,8 +111,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # ── Health check ──────────────────────────────────────────────────────────
-Write-Info "Waiting for broker to become healthy..."
-$maxWait = 120
+Write-Info "Waiting for services to become healthy..."
+$maxWait = 180
 $elapsed = 0
 
 while ($elapsed -lt $maxWait) {
@@ -103,19 +129,30 @@ Write-Host ""
 if ($elapsed -ge $maxWait) {
     Write-Warn "Broker did not become healthy within ${maxWait}s."
     Write-Warn "Check logs with: docker compose logs broker"
+    Write-Warn "The other services may still be starting — check: docker compose ps"
     exit 1
 }
 
 # ── Summary ───────────────────────────────────────────────────────────────
 Write-Info "EcoSeek stack is running!"
 Write-Host ""
-Write-Host ("  {0,-25} {1}" -f "AgenticPlug broker:", "http://localhost:3000")
-Write-Host ("  {0,-25} {1}" -f "Ollama:", "http://localhost:11434")
+Write-Host ("  {0,-25} {1}" -f "AgenticSeek UI:",     "http://localhost:3000")
+Write-Host ("  {0,-25} {1}" -f "AgenticSeek API:",    "http://localhost:7777")
+Write-Host ("  {0,-25} {1}" -f "AgenticPlug broker:", "http://localhost:3100")
+Write-Host ("  {0,-25} {1}" -f "SearxNG:",            "http://localhost:8080")
+Write-Host ("  {0,-25} {1}" -f "Ollama:",             "http://localhost:11434")
+Write-Host ""
+if ($env:DEEPSEEK_API_KEY) {
+    Write-Info "DeepSeek API key: configured"
+} else {
+    Write-Warn "DeepSeek API key: not set (AI features disabled)"
+    Write-Warn "Set it with: `$env:DEEPSEEK_API_KEY='sk-xxx'; docker compose up -d"
+}
 Write-Host ""
 Write-Info "To stop:    docker compose down"
 Write-Info "To restart: docker compose up -d"
 Write-Info "Logs:       docker compose logs -f"
 Write-Info "Rebuild:    .\setup.ps1"
 Write-Host ""
-Write-Warn "This is a pre-alpha development stack. Do NOT use real secrets or production credentials."
+Write-Info "Open http://localhost:3000 in your browser to start using EcoSeek."
 Pop-Location
