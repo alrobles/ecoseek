@@ -65,15 +65,25 @@ docker compose logs -f       # follow logs
 bash setup.sh                # rebuild after upstream changes
 ```
 
+### How LLM provider is configured
+
+`setup.sh` generates a `config.ini` file automatically:
+
+- **With `DEEPSEEK_API_KEY`:** Uses the DeepSeek cloud API (`deepseek-chat` model)
+- **Without API key:** Uses local Ollama (`deepseek-r1:14b` — you need to pull the model first)
+
+The generated `config.ini` is mounted into the backend container at runtime. Docker networking hostnames are used automatically (e.g., `ollama:11434` instead of `127.0.0.1:11434`).
+
 ### Changing the API key
 
 ```bash
-# Option 1: edit .env file
-echo "DEEPSEEK_API_KEY=sk-new-key" > .env
-docker compose up -d
-
-# Option 2: re-run setup
+# Option 1: re-run setup (regenerates config.ini + .env)
 DEEPSEEK_API_KEY=sk-new-key bash setup.sh
+
+# Option 2: edit .env and config.ini manually, then restart
+echo "DEEPSEEK_API_KEY=sk-new-key" > .env
+# Edit config.ini: set provider_name = deepseek, provider_model = deepseek-chat
+docker compose up -d
 ```
 
 ## Manual setup (for development)

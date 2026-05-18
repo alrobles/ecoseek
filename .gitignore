@@ -92,5 +92,8 @@ Thumbs.db
 local.config.*
 *.local
 
+# Generated config (created by setup.sh based on your API key)
+config.ini
+
 # Cloned dependency repos (created by setup.sh)
 .repos/
