@@ -89,7 +89,7 @@ if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
 else
   PROVIDER_NAME="ollama"
   PROVIDER_MODEL="deepseek-r1:14b"
-  PROVIDER_ADDRESS="ollama:11434"
+  PROVIDER_ADDRESS="http://ollama:11434"
   info "LLM provider: Ollama (local) — pull a model with: docker compose exec ollama ollama pull deepseek-r1:14b"
 fi
 
