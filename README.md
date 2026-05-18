@@ -46,20 +46,18 @@ EcoSeek supports three deployment modes:
 
 ## Quick start
 
-```bash
-# Clone all components
-mkdir ecoseek-stack && cd ecoseek-stack
-git clone https://github.com/alrobles/ecoseek.git
-git clone https://github.com/alrobles/agenticSeek.git
-git clone https://github.com/alrobles/agenticplug.git
-git clone https://github.com/alrobles/ecoagent.git
-git clone https://github.com/alrobles/ecocoder.git
+Only **Git** and **Docker** are required. No Node.js, Python, or npm needed on the host.
 
-# Or use Docker Compose (from ecoseek repo root)
-docker compose up
+```bash
+git clone https://github.com/alrobles/ecoseek.git
+cd ecoseek
+bash setup.sh          # Linux / macOS / WSL
+# .\setup.ps1          # Windows PowerShell (native Docker Desktop)
 ```
 
-See [docs/install.md](./docs/install.md) for the full setup guide.
+Or manually: `docker compose up --build`
+
+First build takes 2-5 minutes (clones repos inside containers). See [docs/install.md](./docs/install.md) for the full guide, manual setup, and BYOK configuration.
 
 ---
 

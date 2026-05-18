@@ -6,7 +6,11 @@
 # - Ollama (local model inference)
 #
 # Usage:
-#   docker compose up
+#   docker compose up --build        # first run (builds images from GitHub)
+#   docker compose up                # subsequent runs (uses cached images)
+#
+# Works on Linux, macOS, and Windows (WSL or native Docker Desktop).
+# No sibling repo clones required — each service fetches its own source.
 #
 # The EcoSeek client (agenticSeek) is not containerized here because
 # it needs access to the user's display, browser, and local filesystem.
@@ -16,42 +20,30 @@
 
 services:
   broker:
-    image: node:18-slim
-    working_dir: /app
-    volumes:
-      - ../agenticplug:/app:ro
-      - broker-node-modules:/app/node_modules
-      - broker-data:/data
+    build:
+      context: .
+      dockerfile: docker/broker.Dockerfile
+      args:
+        AGENTICPLUG_REF: main
     environment:
       BROKER_PORT: "3000"
-      # Use memory store by default (no native deps needed).
-      # For persistent sessions, set BROKER_SESSION_STORE=sqlite
-      # and run `npm install` in agenticplug first.
       BROKER_SESSION_STORE: memory
-    command: >
-      sh -c "npm install --production 2>/dev/null; node broker/server.js"
     ports:
       - "3000:3000"
-    healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', r => { process.exit(r.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+    volumes:
+      - broker-data:/data
 
   ecoagent:
     build:
-      context: ../ecoagent
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: docker/ecoagent.Dockerfile
+      args:
+        ECOAGENT_REF: main
     environment:
       ECOAGENT_PORT: "8100"
       ECOAGENT_HOST: "0.0.0.0"
     ports:
       - "8100:8100"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/v1/tools')"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
 
   ollama:
     image: ollama/ollama:latest
@@ -69,6 +61,5 @@ services:
     #           capabilities: [gpu]
 
 volumes:
-  broker-node-modules:
   broker-data:
   ollama-data:
