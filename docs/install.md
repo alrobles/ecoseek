@@ -1,45 +1,137 @@
 # Install
 
-> **Status: alpha / stub.** There is no installable EcoSeek product yet. This document describes how to set up a *local, mocked* environment for development and review. **Do not use real secrets, real API keys, or real production data with EcoSeek at this stage.**
+> **Status: pre-alpha.** EcoSeek is not yet a single installable product. This document describes how to set up the companion components for local development and review. **Do not use real secrets, real API keys, or real production data with EcoSeek at this stage.**
+
+**Last updated:** 2026-05-18, after P0 stabilization.
+
+## Prerequisites
+
+- **Git** (any recent version)
+- **Python 3.10+** with pip
+- **Node.js 18+** with npm
+- **Docker** and **Docker Compose** (optional, for containerized setup)
+- **Ollama** (optional, for local model inference)
+
+## Quick start (DIY mode)
+
+### 1. Clone the repositories
+
+```bash
+mkdir ecoseek-stack && cd ecoseek-stack
+
+git clone https://github.com/alrobles/ecoseek.git
+git clone https://github.com/alrobles/agenticSeek.git
+git clone https://github.com/alrobles/agenticplug.git
+git clone https://github.com/alrobles/ecoagent.git
+git clone https://github.com/alrobles/ecocoder.git
+git clone https://github.com/alrobles/knowledgebase.git   # read-only reference
+```
+
+### 2. Set up AgenticPlug (gateway)
+
+```bash
+cd agenticplug
+npm install
+# Start the broker in local-only mode (no real secrets)
+BROKER_SESSION_STORE=memory node broker/server.js
+```
+
+The broker starts on `http://localhost:3000` by default. No external accounts are needed for local-only mode.
+
+### 3. Set up EcoAgent (ecological tool server)
+
+```bash
+cd ecoagent
+pip install -e ".[dev]"
+# Start the tool server
+python -m ecoagent.tool_server --port 8100
+```
+
+The tool server exposes `/v1/tools` and `/v1/tools/{name}/execute` for AgenticPlug connector discovery.
+
+### 4. Set up EcoCoder (inference endpoint)
+
+```bash
+cd ecocoder
+pip install -e ".[dev]"
+# Start the OpenAI-compatible endpoint (requires Ollama running with a model)
+python -m ecocoder.api --port 8200
+```
+
+### 5. Set up the EcoSeek client
+
+```bash
+cd agenticSeek
+pip install -r requirements.txt
+# Verify the entry point works
+python -m sources.ecoseek_entrypoint --version
+```
+
+### 6. Run with Docker Compose (alternative)
+
+From the `ecoseek` repo root:
+
+```bash
+docker compose up
+```
+
+This starts AgenticPlug (broker), EcoAgent (tool server), and an Ollama instance. See [`docker-compose.yml`](../docker-compose.yml) for configuration.
 
 ## What you can do today
 
-- Read the documentation in this repository and the related repos linked from the [README](../README.md).
-- Run the companion components (AgenticPlug, EcoCoder, EcoAgent) in their own repositories in their own development modes, where they exist.
-- Wire them together against **mock** providers — no real DeepSeek key, no real cloud calls.
+- Run AgenticPlug with the mock gateway and verify dual-layer auth, session management, and scope enforcement.
+- Run EcoAgent's 30+ ecological tools via the HTTP server.
+- Run EcoCoder's OpenAI-compatible endpoint against a local Ollama model.
+- Run the EcoSeek client with local providers (DIY mode).
+- Use the DeepSeek BYOK provider with your own API key stored in the Fernet-encrypted keystore.
 
 ## What you should not do today
 
-- Point EcoSeek at a real BYOK provider with a real key.
-- Connect EcoSeek to a shared lab AgenticPlug.
+- Connect EcoSeek to a shared lab AgenticPlug in production.
 - Use EcoSeek to handle data you would not be comfortable losing or leaking.
-- Expose any EcoSeek component on a public network or behind a tunnel that bypasses local-only assumptions.
+- Expose any EcoSeek component on a public network without additional hardening.
 
-## Local / mock setup (target shape)
+## BYOK setup (DeepSeek)
 
-The intended local development flow, once the companion repos catch up, is:
+The BYOK provider is functional. Keys are stored locally using Fernet encryption.
 
-1. **Clone the relevant repos** under a single parent directory:
-   - `alrobles/agenticplug`
-   - `alrobles/ecoagent`
-   - `alrobles/ecocoder`
-   - `alrobles/knowledgebase` (read-only references)
-2. **Run AgenticPlug in local-only mode.** No real keys configured. The gateway should refuse outbound calls that require credentials it does not have.
-3. **Run a local model substrate** (inherited from the AgenticSeek fork — see [`alrobles/agenticSeek`](https://github.com/alrobles/agenticSeek)).
-4. **Author a trivial agent in EcoCoder** that performs a deterministic, offline task (e.g. transform a small input file).
-5. **Run it under EcoAgent**, pointed at the local AgenticPlug.
-6. **Inspect the audit log** AgenticPlug emits. The gateway's audit trail is the source of truth for what happened.
+```bash
+cd agenticSeek
+# Store your API key (encrypted locally, never transmitted to EcoSeek infra)
+python -m sources.keystore set deepseek_api_key
+# Verify it's stored
+python -m sources.keystore list
+```
 
-Each of these steps will be documented in the respective companion repository as it stabilizes.
+See [deepseek-byok.md](https://github.com/alrobles/agenticSeek/blob/main/docs/deepseek-byok.md) for the full guide.
 
-## BYOK (when you are ready, and not before)
+## Running tests
 
-When BYOK is documented as supported (not yet):
+Each component has its own test suite:
 
-- Configure your API key **only** inside AgenticPlug, using its documented configuration surface.
-- Do not commit the key, do not put it in an environment variable that other processes inherit, do not paste it into chat logs.
-- Verify in AgenticPlug's audit output that the key is being used only for the providers and actors you expect.
-- Rotate the key on a schedule that matches your provider's recommendations.
+```bash
+# AgenticPlug (308 tests across 6 suites)
+cd agenticplug
+npm run test:scoped-sessions    # 52 tests
+npm run test:remote-symlink     # 29 tests
+npm run test:approval-workflow  # 32 tests
+npm run test:mock-gateway-security  # 89 tests
+npm run test:hpc                # 86 tests
+npm run test:connector-discovery    # 20 tests
+
+# AgenticSeek / EcoSeek client (72 P0 tests)
+cd agenticSeek
+python -m pytest tests/test_safety.py tests/test_keystore.py \
+    tests/test_tool_save_block_jail.py tests/test_ecoseek_entrypoint.py -v
+
+# EcoAgent
+cd ecoagent
+python -m pytest tests/ -v
+
+# EcoCoder
+cd ecocoder
+python -m pytest tests/ -v
+```
 
 ## Reporting setup issues
 

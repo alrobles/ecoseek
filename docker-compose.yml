@@ -1,0 +1,69 @@
+# EcoSeek DIY-mode Docker Compose
+#
+# Starts the minimum viable stack for local development:
+# - AgenticPlug broker (gateway)
+# - EcoAgent tool server (ecological tools)
+# - Ollama (local model inference)
+#
+# Usage:
+#   docker compose up
+#
+# The EcoSeek client (agenticSeek) is not containerized here because
+# it needs access to the user's display, browser, and local filesystem.
+# Run it directly on the host — see docs/install.md.
+#
+# Do NOT use real secrets, API keys, or production credentials at this stage.
+
+services:
+  broker:
+    image: node:18-slim
+    working_dir: /app
+    volumes:
+      - ../agenticplug:/app:ro
+      - broker-data:/data
+    environment:
+      BROKER_PORT: "3000"
+      BROKER_SESSION_STORE: sqlite
+      BROKER_SESSION_DB_PATH: /data/sessions.db
+    command: ["node", "broker/server.js"]
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', r => { process.exit(r.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  ecoagent:
+    build:
+      context: ../ecoagent
+      dockerfile: Dockerfile
+    environment:
+      ECOAGENT_PORT: "8100"
+      ECOAGENT_HOST: "0.0.0.0"
+    ports:
+      - "8100:8100"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/v1/tools')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-data:/root/.ollama
+    ports:
+      - "11434:11434"
+    # GPU passthrough (uncomment if NVIDIA GPU available):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+volumes:
+  broker-data:
+  ollama-data:
