@@ -1,23 +1,25 @@
-# AgenticPlug broker — self-contained build.
-# Clones the repo at build time so no sibling checkout is needed on the host.
+# AgenticPlug broker — builds from a local checkout.
+# The setup script clones agenticplug into .repos/agenticplug/ before
+# building, so Docker never needs GitHub credentials.
 #
-#   docker build -f docker/broker.Dockerfile -t ecoseek-broker .
+#   # Automatic (recommended):
+#   bash setup.sh
 #
-# To pin a specific commit or branch, pass --build-arg AGENTICPLUG_REF=<sha|branch>
+#   # Manual:
+#   git clone https://github.com/alrobles/agenticplug.git .repos/agenticplug
+#   docker compose up --build
 
 FROM node:18-slim
 
-ARG AGENTICPLUG_REPO=https://github.com/alrobles/agenticplug.git
-ARG AGENTICPLUG_REF=main
-
-RUN apt-get update && apt-get install -y --no-install-recommends git python3 make g++ \
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-RUN git clone --depth 1 --branch "${AGENTICPLUG_REF}" "${AGENTICPLUG_REPO}" . \
-    && npm install --production \
-    && apt-get purge -y git python3 make g++ \
+COPY . .
+
+RUN npm install --production \
+    && apt-get purge -y python3 make g++ \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/* .git
 
