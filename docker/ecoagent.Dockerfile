@@ -1,22 +1,22 @@
-# EcoAgent tool server — self-contained build.
-# Clones the repo at build time so no sibling checkout is needed on the host.
+# EcoAgent tool server — builds from a local checkout.
+# The setup script clones ecoagent into .repos/ecoagent/ before
+# building, so Docker never needs GitHub credentials.
 #
-#   docker build -f docker/ecoagent.Dockerfile -t ecoseek-ecoagent .
+#   # Automatic (recommended):
+#   bash setup.sh
 #
-# To pin a specific commit or branch, pass --build-arg ECOAGENT_REF=<sha|branch>
+#   # Manual:
+#   git clone https://github.com/alrobles/ecoagent.git .repos/ecoagent
+#   docker compose up --build
 
 # ── Stage 1: builder ──────────────────────────────────────────────────────
 FROM python:3.11-slim AS builder
 
-ARG ECOAGENT_REPO=https://github.com/alrobles/ecoagent.git
-ARG ECOAGENT_REF=main
-
-RUN apt-get update && apt-get install -y --no-install-recommends git \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /build
-RUN git clone --depth 1 --branch "${ECOAGENT_REF}" "${ECOAGENT_REPO}" . \
-    && pip install --no-cache-dir --upgrade pip setuptools wheel \
+
+COPY . .
+
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
     && pip install --no-cache-dir --prefix=/install ".[full,test]"
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────
