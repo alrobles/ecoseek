@@ -9,12 +9,18 @@
 #
 # What it does:
 #   1. Checks prerequisites (git, docker)
-#   2. Builds and starts the DIY-mode stack via Docker Compose
-#   3. Verifies services are healthy
+#   2. Clones dependency repos into .repos/ (uses YOUR git auth)
+#   3. Builds Docker images from the local checkouts
+#   4. Starts the stack and verifies services are healthy
 #
 # No Node.js, Python, or npm required on the host.
+# Works with private repos — git clone runs on the host where you
+# are already authenticated, then Docker COPY's the files in.
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -50,33 +56,47 @@ if ! docker info &>/dev/null 2>&1; then
   exit 1
 fi
 
+# ── Clone dependency repos ────────────────────────────────────────────────
+clone_repo() {
+  local repo_url="$1"
+  local dest="$2"
+  if [ -d "$dest/.git" ]; then
+    info "Updating $dest ..."
+    git -C "$dest" pull --ff-only 2>/dev/null || warn "Could not update $dest (non-fatal)"
+  else
+    info "Cloning $repo_url into $dest ..."
+    git clone --depth 1 "$repo_url" "$dest"
+  fi
+}
+
+mkdir -p .repos
+clone_repo "https://github.com/alrobles/agenticplug.git" ".repos/agenticplug"
+
 # ── Build and start ───────────────────────────────────────────────────────
 info "Building EcoSeek stack (first run takes 2-5 minutes)..."
 info "  - AgenticPlug broker (gateway)"
-info "  - EcoAgent tool server (ecological tools)"
 info "  - Ollama (local model inference)"
 echo ""
 
 docker compose up --build -d
 
 # ── Health check ──────────────────────────────────────────────────────────
-info "Waiting for services to become healthy..."
+info "Waiting for broker to become healthy..."
 MAX_WAIT=120
 ELAPSED=0
 
-all_healthy() {
-  local broker_health ecoagent_health
-  broker_health=$(docker compose ps broker --format '{{.Health}}' 2>/dev/null || echo "unknown")
-  ecoagent_health=$(docker compose ps ecoagent --format '{{.Health}}' 2>/dev/null || echo "unknown")
-  [[ "$broker_health" == "healthy" && "$ecoagent_health" == "healthy" ]]
+broker_healthy() {
+  local health
+  health=$(docker compose ps broker --format '{{.Health}}' 2>/dev/null || echo "unknown")
+  [[ "$health" == "healthy" ]]
 }
 
-while ! all_healthy; do
+while ! broker_healthy; do
   sleep 5
   ELAPSED=$((ELAPSED + 5))
   if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then
-    warn "Services did not become healthy within ${MAX_WAIT}s."
-    warn "Check logs with: docker compose logs"
+    warn "Broker did not become healthy within ${MAX_WAIT}s."
+    warn "Check logs with: docker compose logs broker"
     exit 1
   fi
   printf "."
@@ -87,11 +107,11 @@ echo ""
 info "EcoSeek stack is running!"
 echo ""
 printf "  %-25s %s\n" "AgenticPlug broker:" "http://localhost:3000"
-printf "  %-25s %s\n" "EcoAgent tool server:" "http://localhost:8100"
 printf "  %-25s %s\n" "Ollama:" "http://localhost:11434"
 echo ""
 info "To stop:    docker compose down"
 info "To restart: docker compose up -d"
 info "Logs:       docker compose logs -f"
+info "Rebuild:    bash setup.sh"
 echo ""
 warn "This is a pre-alpha development stack. Do NOT use real secrets or production credentials."

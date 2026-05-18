@@ -91,3 +91,6 @@ Thumbs.db
 .agenticplug/
 local.config.*
 *.local
+
+# Cloned dependency repos (created by setup.sh)
+.repos/
