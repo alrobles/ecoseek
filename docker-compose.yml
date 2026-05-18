@@ -27,6 +27,7 @@ services:
       context: .repos/agenticplug
       dockerfile: ../../docker/broker.Dockerfile
     environment:
+      BROKER_HOST: "0.0.0.0"
       BROKER_PORT: "3000"
       BROKER_SESSION_STORE: memory
     ports:
