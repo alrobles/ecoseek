@@ -28,6 +28,7 @@ services:
     volumes:
       - workspace:/opt/workspace
       - screenshots:/app/.screenshots
+      - ./config.ini:/app/config.ini:ro
     environment:
       SEARXNG_BASE_URL: "http://searxng:8080"
       REDIS_URL: "redis://redis:6379/0"
