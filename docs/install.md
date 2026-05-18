@@ -35,10 +35,11 @@ Or manually:
 ```bash
 git clone https://github.com/alrobles/ecoseek.git
 cd ecoseek
+git clone --depth 1 https://github.com/alrobles/agenticplug.git .repos/agenticplug
 docker compose up --build
 ```
 
-First build takes 2-5 minutes (clones repos and installs deps inside containers). Subsequent runs use cached images.
+The setup script clones dependency repos into `.repos/` using your existing git auth (works with private repos), then Docker builds from those local checkouts. First build takes 2-5 minutes. Subsequent runs use cached images.
 
 ### Using `gh` CLI (WSL / Windows)
 
@@ -53,7 +54,6 @@ bash setup.sh
 | Service | URL | What it does |
 |---------|-----|-------------|
 | AgenticPlug broker | `http://localhost:3000` | Gateway — auth, sessions, scopes, approvals |
-| EcoAgent tool server | `http://localhost:8100` | 30+ ecological tools via HTTP |
 | Ollama | `http://localhost:11434` | Local model inference |
 
 The EcoSeek client (agenticSeek) runs directly on the host — see "Manual setup" below.

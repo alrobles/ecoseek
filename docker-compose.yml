@@ -2,15 +2,18 @@
 #
 # Starts the minimum viable stack for local development:
 # - AgenticPlug broker (gateway)
-# - EcoAgent tool server (ecological tools)
 # - Ollama (local model inference)
 #
-# Usage:
-#   docker compose up --build        # first run (builds images from GitHub)
-#   docker compose up                # subsequent runs (uses cached images)
+# Usage (recommended):
+#   bash setup.sh                    # clones repos + builds + starts
+#
+# Manual:
+#   git clone https://github.com/alrobles/agenticplug.git .repos/agenticplug
+#   docker compose up --build
 #
 # Works on Linux, macOS, and Windows (WSL or native Docker Desktop).
-# No sibling repo clones required — each service fetches its own source.
+# Repos are cloned on the host (where your git auth works), then
+# COPY'd into Docker — no GitHub credentials needed inside containers.
 #
 # The EcoSeek client (agenticSeek) is not containerized here because
 # it needs access to the user's display, browser, and local filesystem.
@@ -21,10 +24,8 @@
 services:
   broker:
     build:
-      context: .
-      dockerfile: docker/broker.Dockerfile
-      args:
-        AGENTICPLUG_REF: main
+      context: .repos/agenticplug
+      dockerfile: ../../docker/broker.Dockerfile
     environment:
       BROKER_PORT: "3000"
       BROKER_SESSION_STORE: memory
@@ -33,17 +34,15 @@ services:
     volumes:
       - broker-data:/data
 
-  ecoagent:
-    build:
-      context: .
-      dockerfile: docker/ecoagent.Dockerfile
-      args:
-        ECOAGENT_REF: main
-    environment:
-      ECOAGENT_PORT: "8100"
-      ECOAGENT_HOST: "0.0.0.0"
-    ports:
-      - "8100:8100"
+  # ecoagent: (uncomment when ecoagent is ready for release)
+  #   build:
+  #     context: .repos/ecoagent
+  #     dockerfile: ../../docker/ecoagent.Dockerfile
+  #   environment:
+  #     ECOAGENT_PORT: "8100"
+  #     ECOAGENT_HOST: "0.0.0.0"
+  #   ports:
+  #     - "8100:8100"
 
   ollama:
     image: ollama/ollama:latest
