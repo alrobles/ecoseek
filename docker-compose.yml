@@ -20,12 +20,16 @@ services:
     working_dir: /app
     volumes:
       - ../agenticplug:/app:ro
+      - broker-node-modules:/app/node_modules
       - broker-data:/data
     environment:
       BROKER_PORT: "3000"
-      BROKER_SESSION_STORE: sqlite
-      BROKER_SESSION_DB_PATH: /data/sessions.db
-    command: ["node", "broker/server.js"]
+      # Use memory store by default (no native deps needed).
+      # For persistent sessions, set BROKER_SESSION_STORE=sqlite
+      # and run `npm install` in agenticplug first.
+      BROKER_SESSION_STORE: memory
+    command: >
+      sh -c "npm install --production 2>/dev/null; node broker/server.js"
     ports:
       - "3000:3000"
     healthcheck:
@@ -65,5 +69,6 @@ services:
     #           capabilities: [gpu]
 
 volumes:
+  broker-node-modules:
   broker-data:
   ollama-data:

@@ -2,7 +2,7 @@
 
 **EcoSeek** is an independent, downstream scientific adaptation built on top of a fork of [AgenticSeek](https://github.com/Fosowl/agenticSeek). It is the final product direction for a community- and lab-oriented agentic assistant focused on scientific workflows, reproducibility, and safe local-first operation.
 
-EcoSeek is built on a fork of AgenticSeek. We gratefully acknowledge the AgenticSeek project and contributors as the foundation for this work. EcoSeek is an independent downstream adaptation focused on scientific and ecological computing.
+EcoSeek is built on a fork of AgenticSeek. We gratefully acknowledge the AgenticSeek project and contributors as the foundation for this work. EcoSeek is an independent downstream adaptation focused on scientific and ecological computing. See [`UPSTREAM_CREDITS.md`](./UPSTREAM_CREDITS.md) for detailed acknowledgements and license obligations.
 
 EcoSeek is **not** an official AgenticSeek release. It is **not affiliated with**, **not endorsed by**, and **not maintained by** the AgenticSeek project or its contributors unless and until such a relationship is publicly established.
 
