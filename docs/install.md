@@ -6,15 +6,72 @@
 
 ## Prerequisites
 
+**Docker path (recommended — works on any OS):**
+
+- **Git** (any recent version)
+- **Docker** and **Docker Compose v2** (Docker Desktop on Windows/macOS, or docker-ce on Linux)
+
+No Node.js, Python, or npm required on the host. Everything runs inside containers.
+
+**Manual path (for development):**
+
 - **Git** (any recent version)
 - **Python 3.10+** with pip
-- **Node.js 18+** with npm
-- **Docker** and **Docker Compose** (optional, for containerized setup)
+- **Node.js 18+** with npm (**must be the Linux version inside WSL**, not the Windows one)
 - **Ollama** (optional, for local model inference)
 
-## Quick start (DIY mode)
+## Quick start — Docker (any OS)
 
-### 1. Clone the repositories
+This is the recommended path. Works identically on Linux, macOS, and Windows (WSL or native Docker Desktop).
+
+```bash
+git clone https://github.com/alrobles/ecoseek.git
+cd ecoseek
+bash setup.sh
+```
+
+Or manually:
+
+```bash
+git clone https://github.com/alrobles/ecoseek.git
+cd ecoseek
+docker compose up --build
+```
+
+First build takes 2-5 minutes (clones repos and installs deps inside containers). Subsequent runs use cached images.
+
+### Using `gh` CLI (WSL / Windows)
+
+```bash
+gh repo clone alrobles/ecoseek
+cd ecoseek
+bash setup.sh
+```
+
+### What starts
+
+| Service | URL | What it does |
+|---------|-----|-------------|
+| AgenticPlug broker | `http://localhost:3000` | Gateway — auth, sessions, scopes, approvals |
+| EcoAgent tool server | `http://localhost:8100` | 30+ ecological tools via HTTP |
+| Ollama | `http://localhost:11434` | Local model inference |
+
+The EcoSeek client (agenticSeek) runs directly on the host — see "Manual setup" below.
+
+### Stop / restart / logs
+
+```bash
+docker compose down          # stop
+docker compose up -d         # restart (detached)
+docker compose logs -f       # follow logs
+docker compose up --build    # rebuild after upstream changes
+```
+
+## Quick start — manual (for development)
+
+Use this if you need to edit source code across repos.
+
+### 1. Clone all repositories
 
 ```bash
 mkdir ecoseek-stack && cd ecoseek-stack
@@ -32,29 +89,24 @@ git clone https://github.com/alrobles/knowledgebase.git   # read-only reference
 ```bash
 cd agenticplug
 npm install
-# Start the broker in local-only mode (no real secrets)
 BROKER_SESSION_STORE=memory node broker/server.js
 ```
 
-The broker starts on `http://localhost:3000` by default. No external accounts are needed for local-only mode.
+> **WSL users:** Make sure `which node` returns `/usr/bin/node` (Linux), not `/mnt/c/.../node.exe` (Windows). If it returns the Windows path, install Node.js inside WSL: `curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash - && sudo apt install -y nodejs`
 
 ### 3. Set up EcoAgent (ecological tool server)
 
 ```bash
 cd ecoagent
 pip install -e ".[dev]"
-# Start the tool server
 python -m ecoagent.tool_server --port 8100
 ```
-
-The tool server exposes `/v1/tools` and `/v1/tools/{name}/execute` for AgenticPlug connector discovery.
 
 ### 4. Set up EcoCoder (inference endpoint)
 
 ```bash
 cd ecocoder
 pip install -e ".[dev]"
-# Start the OpenAI-compatible endpoint (requires Ollama running with a model)
 python -m ecocoder.api --port 8200
 ```
 
@@ -63,19 +115,8 @@ python -m ecocoder.api --port 8200
 ```bash
 cd agenticSeek
 pip install -r requirements.txt
-# Verify the entry point works
 python -m sources.ecoseek_entrypoint --version
 ```
-
-### 6. Run with Docker Compose (alternative)
-
-From the `ecoseek` repo root:
-
-```bash
-docker compose up
-```
-
-This starts AgenticPlug (broker), EcoAgent (tool server), and an Ollama instance. See [`docker-compose.yml`](../docker-compose.yml) for configuration.
 
 ## What you can do today
 
