@@ -77,6 +77,41 @@ if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
   info "API key saved to .env (git-ignored, local only)"
 fi
 
+# ── Generate config.ini ──────────────────────────────────────────────────
+# The backend reads config.ini at startup. We generate it here so Docker
+# networking hostnames are used (ollama:11434 instead of 127.0.0.1:11434)
+# and the provider is set based on whether an API key was provided.
+if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
+  PROVIDER_NAME="deepseek"
+  PROVIDER_MODEL="deepseek-chat"
+  PROVIDER_ADDRESS="https://api.deepseek.com"
+  info "LLM provider: DeepSeek API (cloud)"
+else
+  PROVIDER_NAME="ollama"
+  PROVIDER_MODEL="deepseek-r1:14b"
+  PROVIDER_ADDRESS="ollama:11434"
+  info "LLM provider: Ollama (local) — pull a model with: docker compose exec ollama ollama pull deepseek-r1:14b"
+fi
+
+cat > config.ini <<EOF
+[MAIN]
+is_local = True
+provider_name = ${PROVIDER_NAME}
+provider_model = ${PROVIDER_MODEL}
+provider_server_address = ${PROVIDER_ADDRESS}
+agent_name = Jarvis
+recover_last_session = False
+save_session = False
+speak = False
+listen = False
+jarvis_personality = False
+languages = en
+[BROWSER]
+headless_browser = True
+stealth_mode = False
+EOF
+info "Generated config.ini (provider: ${PROVIDER_NAME})"
+
 # ── Clone dependency repos ────────────────────────────────────────────────
 clone_repo() {
   local repo_url="$1"
