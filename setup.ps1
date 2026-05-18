@@ -86,11 +86,11 @@ if ($env:DEEPSEEK_API_KEY) {
 } else {
     $providerName = "ollama"
     $providerModel = "deepseek-r1:14b"
-    $providerAddress = "ollama:11434"
+    $providerAddress = "http://ollama:11434"
     Write-Info "LLM provider: Ollama (local) - pull a model with: docker compose exec ollama ollama pull deepseek-r1:14b"
 }
 
-@"
+$configContent = @"
 [MAIN]
 is_local = True
 provider_name = $providerName
@@ -106,7 +106,8 @@ languages = en
 [BROWSER]
 headless_browser = True
 stealth_mode = False
-"@ | Set-Content -Path "config.ini" -Encoding UTF8
+"@
+[System.IO.File]::WriteAllText((Join-Path $PSScriptRoot 'config.ini'), $configContent, (New-Object System.Text.UTF8Encoding $false))
 Write-Info "Generated config.ini (provider: $providerName)"
 
 # ── Clone dependency repos ────────────────────────────────────────────────
