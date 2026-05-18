@@ -2,62 +2,88 @@
 
 **EcoSeek** is an independent, downstream scientific adaptation built on top of a fork of [AgenticSeek](https://github.com/Fosowl/agenticSeek). It is the final product direction for a community- and lab-oriented agentic assistant focused on scientific workflows, reproducibility, and safe local-first operation.
 
-EcoSeek is **not** an official AgenticSeek release. It is **not affiliated with**, **not endorsed by**, and **not maintained by** the AgenticSeek project or its contributors unless and until such a relationship is publicly established. All references to AgenticSeek are made with gratitude, attribution, and respect for the upstream license.
+EcoSeek is built on a fork of AgenticSeek. We gratefully acknowledge the AgenticSeek project and contributors as the foundation for this work. EcoSeek is an independent downstream adaptation focused on scientific and ecological computing. See [`UPSTREAM_CREDITS.md`](./UPSTREAM_CREDITS.md) for detailed acknowledgements and license obligations.
+
+EcoSeek is **not** an official AgenticSeek release. It is **not affiliated with**, **not endorsed by**, and **not maintained by** the AgenticSeek project or its contributors unless and until such a relationship is publicly established.
 
 ---
 
-## Gratitude and attribution
+## Current state
 
-EcoSeek would not exist without the work of the AgenticSeek authors and contributors. The upstream project provided the core agent loop, browser/research patterns, and many of the architectural ideas that EcoSeek builds on. We thank everyone who has contributed to AgenticSeek.
+EcoSeek is **pre-alpha** — components work individually and are tested, but the end-to-end demo is not yet wired. See [alpha-checklist.md](./docs/alpha-checklist.md) for what works, what is mocked, and the gate for the first public alpha.
 
-See [`UPSTREAM_CREDITS.md`](./UPSTREAM_CREDITS.md) for a more detailed acknowledgement of upstream work and the license obligations that flow from it.
+### What is working
 
----
+| Component | Status | Tests |
+|-----------|--------|-------|
+| [AgenticPlug gateway](https://github.com/alrobles/agenticplug) | Functional — auth, sessions, scopes, approvals, discovery, audit | 600+ |
+| [EcoSeek client](https://github.com/alrobles/agenticSeek) | Functional — providers, keystore, safety, entry point | 72 P0 + others |
+| [EcoAgent tools](https://github.com/alrobles/ecoagent) | Functional — 30+ ecological tools via HTTP server | Unit + integration |
+| [EcoCoder inference](https://github.com/alrobles/ecocoder) | Functional — OpenAI-compatible endpoint | Unit tests |
+| [Landing page](https://alrobles.github.io/ecoseek.html) | Live | — |
+| [Threat model](./docs/security.md) | Complete — 24 scenarios, 12 assets, 6 actor profiles | — |
 
-## What EcoSeek is
+### Security highlights
 
-EcoSeek is a **product shell**, not yet a runnable product. This repository currently contains documentation, architecture notes, and the roadmap. Working code, integrations, and binaries live in companion repositories (see below) and will be referenced as they stabilize.
-
-EcoSeek is composed of three cooperating concepts:
-
-- **AgenticPlug** — the secure gateway. AgenticPlug is the trust boundary between EcoSeek and the outside world. It brokers credentials (BYOK), authenticates clients, gates risky actions, and is the only component permitted to hold long-lived secrets in the deployed product.
-- **EcoCoder / EcoAgent** — the community/scientific intelligence path. EcoCoder is the developer-facing surface for building, testing, and sharing scientific agents and tools. EcoAgent is the runtime that executes those agents against EcoSeek's local-first stack.
-- **DeepSeek BYOK (optional)** — for users who want stronger low-cost reasoning, EcoSeek supports bringing your own DeepSeek API key. This is optional. EcoSeek is designed to run with local models by default; DeepSeek is one of several supported BYOK providers.
-
-For a deeper picture, see [`docs/architecture.md`](./docs/architecture.md).
+- **Dual-layer auth:** GitHub identity → opaque session. Raw GitHub tokens rejected as bearer.
+- **BYOK keystore:** Fernet-encrypted (AES-128-CBC + HMAC-SHA256). Fails closed without `cryptography`.
+- **Approval workflow:** 6 risky capabilities gated. SHA-256 request binding. TOCTOU-safe.
+- **Path traversal jail:** `save_block` uses realpath + commonpath. Blocks `../`, absolute escapes, symlinks.
+- **HPC log containment:** 3-layer defense (input validation → remote symlink resolution → shell safety).
+- **600+ security-focused tests** across all components.
 
 ---
 
 ## Product modes
 
-EcoSeek will be usable in three modes:
+EcoSeek supports three deployment modes:
 
 1. **DIY** — self-hosted, fully local, no external accounts. The default for privacy-sensitive users and offline labs.
-2. **BYOK** — self-hosted with user-provided API keys for frontier or low-cost cloud models (e.g. DeepSeek). Keys never leave the user's AgenticPlug instance.
-3. **Lab-managed** — a research group or institution operates a shared AgenticPlug for its members. Members do not handle keys directly; the lab's gateway does.
+2. **BYOK** — self-hosted with user-provided API keys for cloud models (e.g. DeepSeek). Keys stored in Fernet-encrypted local keystore; never leave the user's machine.
+3. **Lab-managed** — a research group operates a shared AgenticPlug for its members. Members do not handle keys directly.
 
 ---
 
-## Status
+## Quick start
 
-This repository is **pre-alpha**. There is no installable product yet. See:
+```bash
+# Clone all components
+mkdir ecoseek-stack && cd ecoseek-stack
+git clone https://github.com/alrobles/ecoseek.git
+git clone https://github.com/alrobles/agenticSeek.git
+git clone https://github.com/alrobles/agenticplug.git
+git clone https://github.com/alrobles/ecoagent.git
+git clone https://github.com/alrobles/ecocoder.git
 
-- [`docs/alpha-checklist.md`](./docs/alpha-checklist.md) — what works, what is mocked, what is unsafe, and the gate for the first public alpha.
-- [`docs/roadmap.md`](./docs/roadmap.md) — Now / Next / Later.
-- [`docs/install.md`](./docs/install.md) — local/mock setup. **Do not use real secrets yet.**
-- [`docs/security.md`](./docs/security.md) — security posture, BYOK rules, gating principles.
+# Or use Docker Compose (from ecoseek repo root)
+docker compose up
+```
+
+See [docs/install.md](./docs/install.md) for the full setup guide.
+
+---
+
+## Documentation
+
+- [Architecture](./docs/architecture.md) — three-layer design, product modes, cross-cutting principles
+- [Security posture](./docs/security.md) — threat model summary, auth model, BYOK rules, containment
+- [Alpha checklist](./docs/alpha-checklist.md) — what works, what is mocked, pre-alpha gates
+- [Roadmap](./docs/roadmap.md) — Done / Now / Next / Later
+- [Install guide](./docs/install.md) — prerequisites, quick start, running tests
+- [Full threat model](https://github.com/alrobles/knowledgebase/blob/main/plans/ecoSeek/threat-model.md) — 24 scenarios, risk matrix, incident response
 
 ---
 
 ## Related repositories
 
-EcoSeek is one piece of a small constellation of repositories. None of these are official upstream projects.
-
-- [`alrobles/agenticSeek`](https://github.com/alrobles/agenticSeek) — the fork EcoSeek descends from.
-- [`alrobles/agenticplug`](https://github.com/alrobles/agenticplug) — the AgenticPlug secure gateway.
-- [`alrobles/ecocoder`](https://github.com/alrobles/ecocoder) — developer surface for scientific agents and tools.
-- [`alrobles/ecoagent`](https://github.com/alrobles/ecoagent) — runtime executing EcoCoder-authored agents.
-- [`alrobles/knowledgebase`](https://github.com/alrobles/knowledgebase) — shared knowledge and curated references for the scientific stack.
+| Repository | Role |
+|-----------|------|
+| [`alrobles/agenticSeek`](https://github.com/alrobles/agenticSeek) | EcoSeek client (fork of upstream AgenticSeek) |
+| [`alrobles/agenticplug`](https://github.com/alrobles/agenticplug) | Secure gateway — auth, sessions, policy, approvals, audit |
+| [`alrobles/ecocoder`](https://github.com/alrobles/ecocoder) | Domain-specialized ecological/code LLM path |
+| [`alrobles/ecoagent`](https://github.com/alrobles/ecoagent) | Scientific workflow and tool layer (30+ ecological tools) |
+| [`alrobles/knowledgebase`](https://github.com/alrobles/knowledgebase) | Architecture, security docs, planning source of truth |
+| [`alrobles/alrobles.github.io`](https://github.com/alrobles/alrobles.github.io) | Public landing page |
 
 ---
 
