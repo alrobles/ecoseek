@@ -73,10 +73,14 @@ export DEEPSEEK_API_KEY
 
 # Write .env file for docker compose (persists across restarts)
 {
-  [ -n "${DEEPSEEK_API_KEY:-}" ]       && echo "DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}"
+  if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
+    echo "DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}"
+  fi
   echo "ECOSEEK_AAR_ENABLED=${ECOSEEK_AAR_ENABLED:-false}"
   echo "ECOSEEK_JUDGE_MODEL=${ECOSEEK_JUDGE_MODEL:-auto}"
-  [ -n "${PHOENIX_ENDPOINT:-}" ]        && echo "PHOENIX_ENDPOINT=${PHOENIX_ENDPOINT}"
+  if [ -n "${PHOENIX_ENDPOINT:-}" ]; then
+    echo "PHOENIX_ENDPOINT=${PHOENIX_ENDPOINT}"
+  fi
   echo "PHOENIX_PROJECT_NAME=${PHOENIX_PROJECT_NAME:-ecoseek}"
 } > .env
 info "Config saved to .env (git-ignored, local only)"
