@@ -20,7 +20,7 @@ EcoSeek is **pre-alpha** — components work individually and are tested, but th
 | [EcoSeek client](https://github.com/alrobles/agenticSeek) | Functional — providers, keystore, safety, entry point | 72 P0 + others |
 | [EcoAgent tools](https://github.com/alrobles/ecoagent) | Functional — 30+ ecological tools via HTTP server | Unit + integration |
 | [EcoCoder inference](https://github.com/alrobles/ecocoder) | Functional — OpenAI-compatible endpoint | Unit tests |
-| [Landing page](https://alrobles.github.io/ecoseek.html) | Live | — |
+| [Landing page](https://ecoseek.org) | Live | — |
 | [Threat model](./docs/security.md) | Complete — 24 scenarios, 12 assets, 6 actor profiles | — |
 
 ### Security highlights
@@ -81,7 +81,7 @@ First build takes 2-5 minutes (clones repos inside containers). See [docs/instal
 | [`alrobles/ecocoder`](https://github.com/alrobles/ecocoder) | Domain-specialized ecological/code LLM path |
 | [`alrobles/ecoagent`](https://github.com/alrobles/ecoagent) | Scientific workflow and tool layer (30+ ecological tools) |
 | [`alrobles/knowledgebase`](https://github.com/alrobles/knowledgebase) | Architecture, security docs, planning source of truth |
-| [`alrobles/alrobles.github.io`](https://github.com/alrobles/alrobles.github.io) | Public landing page |
+| [`alrobles/alrobles.github.io`](https://github.com/alrobles/alrobles.github.io) | Author portfolio (redirects to ecoseek.org) |
 
 ---
 

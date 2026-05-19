@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>EcoSeek — Scientific Agent Environment for Ecology</title>
+    <meta name="description" content="EcoSeek is a scientific agent environment for ecological and computational biology workflows. Open-source, secure, and built for researchers.">
+    <meta name="author" content="Angel L. Robles">
+    <link rel="canonical" href="https://ecoseek.org/">
+    <link rel="shortcut icon" type="image/x-icon" href="/img/ecoseek-logo.svg">
+    <link rel="stylesheet" href="/css/main.min.css">
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="EcoSeek — Scientific Agent Environment for Ecology">
+    <meta property="og:description" content="An open-source scientific agent environment for ecological and computational biology workflows. Three modes: DIY, BYOK, and Lab/Managed.">
+    <meta property="og:url" content="https://ecoseek.org/">
+    <meta property="og:image" content="https://ecoseek.org/img/ecoseek-logo.svg">
+    <meta property="og:site_name" content="EcoSeek">
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="EcoSeek — Scientific Agent Environment for Ecology">
+    <meta name="twitter:description" content="Open-source scientific agent environment for ecological computing. Built on AgenticSeek.">
+    <meta name="twitter:image" content="https://ecoseek.org/img/ecoseek-logo.svg">
+
+    <!-- JSON-LD -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "EcoSeek",
+      "description": "A scientific agent environment for ecological and computational biology workflows.",
+      "url": "https://ecoseek.org/",
+      "applicationCategory": "Scientific Software",
+      "operatingSystem": "Linux, macOS, Windows (Docker)",
+      "author": {
+        "@type": "Person",
+        "name": "Angel L. Robles",
+        "url": "https://alrobles.github.io/"
+      }
+    }
+    </script>
+
+    <script>
+      (function(){
+        try {
+          var saved = localStorage.getItem('theme');
+          if (saved === 'dark' || saved === 'light') {
+            document.documentElement.setAttribute('data-theme', saved);
+          }
+        } catch (e) {}
+      })();
+    </script>
+
+    <style>
+      /* EcoSeek-specific overrides */
+      .ecoseek-hero {
+        padding: 3.5rem 0 2rem;
+        text-align: center;
+      }
+      .ecoseek-hero .logo-wrap {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 1.25rem;
+        margin-bottom: 1rem;
+      }
+      .ecoseek-hero .logo-wrap img {
+        width: 80px;
+        height: 80px;
+      }
+      .ecoseek-hero .product-name {
+        font-size: 2.6rem;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        margin: 0;
+        color: var(--text);
+      }
+      .ecoseek-hero .product-name span {
+        color: var(--accent);
+      }
+      .ecoseek-hero .subtitle {
+        font-size: 1.15rem;
+        color: var(--muted);
+        margin: 0.5rem 0 1.5rem;
+      }
+      .ecoseek-hero .lead-text {
+        font-size: 1.05rem;
+        color: var(--text);
+        max-width: 640px;
+        margin: 0 auto 1.5rem;
+        line-height: 1.65;
+      }
+      .ecoseek-hero .cta-row {
+        display: flex;
+        gap: 0.75rem;
+        justify-content: center;
+        flex-wrap: wrap;
+        margin-top: 1.5rem;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.6rem 1.25rem;
+        border-radius: 8px;
+        font-size: 0.95rem;
+        font-weight: 500;
+        text-decoration: none;
+        border: 1px solid transparent;
+        transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+        border-color: var(--accent);
+      }
+      .btn-primary:hover {
+        background: var(--accent-hover);
+        border-color: var(--accent-hover);
+        color: #fff;
+      }
+      .btn-secondary {
+        background: var(--surface-alt);
+        color: var(--text);
+        border-color: var(--border);
+      }
+      .btn-secondary:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      /* Modes section */
+      .modes {
+        padding: 2rem 0;
+      }
+      .mode-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+        gap: 1rem;
+        margin-top: 1.25rem;
+      }
+      .mode-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 1.25rem;
+        transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+      }
+      .mode-card:hover {
+        transform: translateY(-2px);
+        box-shadow: var(--shadow);
+        border-color: var(--accent);
+      }
+      .mode-card h3 {
+        margin: 0 0 0.5rem;
+        font-size: 1.1rem;
+      }
+      .mode-card .mode-badge {
+        display: inline-block;
+        font-size: 0.72rem;
+        font-family: var(--mono);
+        padding: 0.15rem 0.45rem;
+        border-radius: 4px;
+        background: var(--surface-alt);
+        color: var(--muted);
+        border: 1px solid var(--border);
+        margin-bottom: 0.6rem;
+      }
+      .mode-card p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.95rem;
+        line-height: 1.5;
+      }
+
+      /* Architecture diagram */
+      .arch-diagram {
+        background: var(--surface-alt);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 1.5rem;
+        font-family: var(--mono);
+        font-size: 0.85rem;
+        line-height: 1.7;
+        overflow-x: auto;
+        white-space: pre;
+        color: var(--text);
+        margin: 1.25rem 0;
+      }
+
+      /* Components section */
+      .component-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        margin-top: 1.25rem;
+        list-style: none;
+        padding: 0;
+      }
+      .component-list li {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.75rem;
+        padding: 1rem 1.15rem;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+      }
+      .component-list .comp-name {
+        font-weight: 600;
+        font-size: 0.95rem;
+        min-width: 130px;
+        color: var(--text);
+      }
+      .component-list .comp-desc {
+        color: var(--muted);
+        font-size: 0.95rem;
+        line-height: 1.5;
+      }
+
+      /* Attribution */
+      .attribution {
+        background: var(--surface-alt);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 1.25rem 1.5rem;
+        margin: 1.5rem 0;
+        font-size: 0.95rem;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+      .attribution strong {
+        color: var(--text);
+      }
+
+      /* Security callout */
+      .security-rule {
+        font-family: var(--mono);
+        font-size: 0.88rem;
+        background: var(--surface-alt);
+        border-left: 3px solid var(--accent);
+        padding: 0.75rem 1rem;
+        margin: 1rem 0;
+        border-radius: 0 var(--radius) var(--radius) 0;
+        color: var(--text);
+      }
+
+      @media (max-width: 600px) {
+        .ecoseek-hero .product-name { font-size: 2rem; }
+        .ecoseek-hero .logo-wrap { flex-direction: column; gap: 0.75rem; }
+        .ecoseek-hero .logo-wrap img { width: 64px; height: 64px; }
+        .mode-grid { grid-template-columns: 1fr; }
+        .component-list li { flex-direction: column; gap: 0.4rem; }
+        .component-list .comp-name { min-width: auto; }
+      }
+    </style>
+  </head>
+  <body>
+    <a href="#main" class="skip">Skip to content</a>
+
+    <header class="site-header">
+      <div class="container nav-wrap">
+        <a class="brand" href="/" aria-label="Home">EcoSeek</a>
+        <nav aria-label="Primary">
+          <ul class="nav-links">
+            <li><a href="https://github.com/alrobles/ecoseek">GitHub</a></li>
+            <li><a href="https://alrobles.github.io/">Author</a></li>
+            <li>
+              <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Toggle color theme" title="Toggle theme">
+                <span class="moon" aria-hidden="true">&#9789;</span>
+                <span class="sun" aria-hidden="true">&#9728;</span>
+              </button>
+            </li>
+          </ul>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <!-- Hero -->
+      <section class="ecoseek-hero">
+        <div class="container">
+          <div class="logo-wrap">
+            <img src="/img/ecoseek-logo.svg" alt="EcoSeek logo" width="80" height="80">
+            <h1 class="product-name">Eco<span>Seek</span></h1>
+          </div>
+          <p class="subtitle">Scientific Agent Environment for Ecology</p>
+          <p class="lead-text">
+            EcoSeek is an open-source scientific agent environment for ecological and computational biology workflows.
+            It combines domain-specialized language models, ecological tool pipelines, and a secure gateway
+            to help researchers run species distribution models, analyze biodiversity data, and build knowledge graphs
+            from their laptop or an HPC cluster.
+          </p>
+          <div class="cta-row">
+            <a class="btn btn-primary" href="https://github.com/alrobles/ecoseek">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.52-1.33-1.28-1.68-1.28-1.68-1.05-.72.08-.71.08-.71 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.51-1.47.11-3.06 0 0 .97-.31 3.17 1.18a11.04 11.04 0 0 1 5.78 0c2.2-1.49 3.17-1.18 3.17-1.18.62 1.59.23 2.77.12 3.06.74.81 1.18 1.84 1.18 3.1 0 4.43-2.7 5.4-5.27 5.69.41.35.78 1.05.78 2.12v3.14c0 .31.21.67.8.56C20.21 21.39 23.5 17.08 23.5 12 23.5 5.65 18.35.5 12 .5z"/></svg>
+              View on GitHub
+            </a>
+            <a class="btn btn-secondary" href="https://github.com/alrobles/agenticSeek">
+              AgenticSeek Fork
+            </a>
+            <a class="btn btn-secondary" href="https://github.com/alrobles/ecoagent">
+              EcoAgent Tools
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <!-- Product Modes -->
+      <section class="modes">
+        <div class="container">
+          <div class="section-title">
+            <h2>Three ways to use EcoSeek</h2>
+          </div>
+          <div class="mode-grid">
+            <div class="mode-card">
+              <span class="mode-badge">FREE</span>
+              <h3>DIY / Community</h3>
+              <p>Run everything locally with EcoCoder and EcoAgent. Free, reproducible, and fully open.
+                 Uses local Ollama inference and 30+ ecological tools. No API keys needed.</p>
+            </div>
+            <div class="mode-card">
+              <span class="mode-badge">BYOK</span>
+              <h3>Bring Your Own Key</h3>
+              <p>Use your DeepSeek API key for stronger reasoning when you lack local GPU hardware.
+                 Keys are stored locally and never leave your machine. Combine with EcoAgent tools for hybrid workflows.</p>
+            </div>
+            <div class="mode-card">
+              <span class="mode-badge">LAB</span>
+              <h3>Lab / Managed</h3>
+              <p>Connect to lab servers, workstations, and HPC clusters through AgenticPlug.
+                 Audit trails, approval gates for compute operations, and persistent sessions.
+                 Designed for multi-user research environments.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Architecture -->
+      <section>
+        <div class="container">
+          <div class="section-title">
+            <h2>Architecture</h2>
+          </div>
+          <div class="arch-diagram">EcoSeek client (UI / CLI / agent runtime)
+        |
+        v
+AgenticPlug gateway (auth, sessions, policy, approvals, audit)
+        |
+        v
+Compute backends
+  EcoCoder local ---- domain-specialized ecological LLM
+  EcoCoder cluster -- remote HPC inference via tunnel
+  EcoAgent tools ---- 30+ ecological analysis tools
+  DeepSeek BYOK ----- user-provided API key
+  HPC / OpenClaw ---- lab servers and clusters</div>
+
+          <div class="security-rule">
+            GitHub proves who the user is. AgenticPlug decides what the user can do.
+          </div>
+        </div>
+      </section>
+
+      <!-- Components -->
+      <section>
+        <div class="container">
+          <div class="section-title">
+            <h2>Components</h2>
+          </div>
+          <ul class="component-list">
+            <li>
+              <span class="comp-name"><a href="https://github.com/alrobles/agenticSeek">AgenticSeek</a></span>
+              <span class="comp-desc">User-facing client foundation. Provides the agent runtime, CLI, and web UI. EcoSeek adds ecological providers (EcoCoder local, EcoCoder cluster, DeepSeek BYOK) and connector discovery.</span>
+            </li>
+            <li>
+              <span class="comp-name"><a href="https://github.com/alrobles/agenticplug">AgenticPlug</a></span>
+              <span class="comp-desc">Secure gateway and connector layer. Handles authentication (GitHub identity), scoped sessions, role-based authorization, approval workflows for risky operations, and audit logging.</span>
+            </li>
+            <li>
+              <span class="comp-name"><a href="https://github.com/alrobles/ecocoder">EcoCoder</a></span>
+              <span class="comp-desc">Domain-adapted QLoRA fine-tune of Qwen2.5-Coder-7B-Instruct on ~80K lines of ecological computing code. Exposes an OpenAI-compatible inference endpoint. Runs on Ollama locally or on HPC clusters.</span>
+            </li>
+            <li>
+              <span class="comp-name"><a href="https://github.com/alrobles/ecoagent">EcoAgent</a></span>
+              <span class="comp-desc">Ecological workflow and tool layer. 30+ tools including species queries (GBIF), literature search, diversity analysis, species distribution modeling (MaxEnt, SDM), triplet extraction, taxonomy resolution, and knowledge graph construction.</span>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- EcoAgent Tools -->
+      <section>
+        <div class="container">
+          <div class="section-title">
+            <h2>Ecological Tools</h2>
+          </div>
+          <p>EcoAgent exposes 30+ tools via an HTTP API with risk classification and AgenticPlug approval gating:</p>
+          <ul class="pills" aria-label="Tool categories" style="margin: 1rem 0; gap: 0.5rem;">
+            <li class="pill">query_species</li>
+            <li class="pill">query_papers</li>
+            <li class="pill">compute_diversity</li>
+            <li class="pill">fit_sdm</li>
+            <li class="pill">fit_maxent</li>
+            <li class="pill">extract_triplets</li>
+            <li class="pill">resolve_taxonomy</li>
+            <li class="pill">build_knowledge_graph</li>
+            <li class="pill">compute_bioclim</li>
+            <li class="pill">classify_abstract</li>
+            <li class="pill">query_gbif_parquet</li>
+            <li class="pill">evaluate_niche</li>
+            <li class="pill">predict_susceptibility</li>
+            <li class="pill">compute_effort_bias</li>
+          </ul>
+          <p style="color: var(--muted); font-size: 0.92rem; margin-top: 0.5rem;">
+            Read-only tools run freely. Compute-intensive tools (SDM, MaxEnt, niche evaluation) carry risk metadata
+            and can require approval through AgenticPlug before execution.
+          </p>
+        </div>
+      </section>
+
+      <!-- Getting Started -->
+      <section>
+        <div class="container">
+          <div class="section-title">
+            <h2>Getting Started</h2>
+          </div>
+          <h3>DIY / Community mode</h3>
+          <p>Run the EcoAgent tool server locally:</p>
+          <pre><code>pip install ecoagent[full]
+python -m ecoagent.tool_server --port 8200
+
+# Or with Docker
+docker run -p 8200:8200 -e ECOAGENT_PROFILE=ci ghcr.io/alrobles/ecoagent:0.1.0</code></pre>
+
+          <h3>BYOK mode</h3>
+          <p>Store your DeepSeek API key locally, then configure EcoSeek:</p>
+          <pre><code>python -m sources.keystore set deepseek YOUR_KEY
+# Key stored in OS keychain or ~/.config/ecoseek/keys.json
+# Never committed, logged, or sent to GitHub</code></pre>
+
+          <h3>Lab / Managed mode</h3>
+          <p>Deploy AgenticPlug as the gateway, connect to your HPC cluster:</p>
+          <pre><code>cd agenticplug && npm start
+# Configure connectors, sessions, and approval policies
+# See docs/approval-workflow.md for risky operation gates</code></pre>
+        </div>
+      </section>
+
+      <!-- Attribution -->
+      <section>
+        <div class="container">
+          <div class="attribution">
+            <strong>Attribution:</strong> EcoSeek is built on a fork of
+            <a href="https://github.com/Fosowl/agenticSeek">AgenticSeek</a>.
+            We gratefully acknowledge the AgenticSeek project and contributors
+            as the foundation for this work. EcoSeek is an independent downstream
+            adaptation focused on scientific and ecological computing.
+            AgenticSeek is licensed under GPLv3.
+          </div>
+        </div>
+      </section>
+
+      <!-- Contact -->
+      <section>
+        <div class="container" style="text-align: center; padding-bottom: 2rem;">
+          <h2>Contact</h2>
+          <p>
+            <a href="https://github.com/alrobles">github.com/alrobles</a>
+            &middot;
+            <a href="mailto:a.l.robles.fernandez@gmail.com">a.l.robles.fernandez@gmail.com</a>
+          </p>
+          <p style="color: var(--muted); font-size: 0.9rem;">
+            EcoSeek is developed at the
+            <a href="https://reumanlab.ku.edu/">Reuman Lab</a>,
+            University of Kansas.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container">
+        <span>&copy; 2026 Angel L. Robles</span>
+        <span>
+          <a href="https://github.com/alrobles/ecoseek">EcoSeek</a> &middot;
+          <a href="https://alrobles.github.io/">alrobles.github.io</a>
+        </span>
+      </div>
+    </footer>
+
+    <script>
+      (function () {
+        var btn = document.getElementById('theme-toggle');
+        if (!btn) return;
+        btn.addEventListener('click', function () {
+          var current = document.documentElement.getAttribute('data-theme');
+          var next;
+          if (current === 'dark') next = 'light';
+          else if (current === 'light') next = 'dark';
+          else next = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'light' : 'dark';
+          document.documentElement.setAttribute('data-theme', next);
+          try { localStorage.setItem('theme', next); } catch (e) {}
+        });
+      })();
+    </script>
+  </body>
+</html>
