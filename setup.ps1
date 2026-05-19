@@ -98,12 +98,15 @@ is_local = $isLocal
 provider_name = $providerName
 provider_model = $providerModel
 provider_server_address = $providerAddress
-agent_name = Jarvis
+agent_name = EcoSeek
 recover_last_session = False
 save_session = False
 speak = False
 listen = False
 jarvis_personality = False
+personality = ecoseek
+temperature = 0.3
+top_p = 0.9
 languages = en
 [BROWSER]
 headless_browser = True
@@ -174,8 +177,8 @@ if ($elapsed -ge $maxWait) {
 # ── Summary ───────────────────────────────────────────────────────────────
 Write-Info "EcoSeek stack is running!"
 Write-Host ""
-Write-Host ("  {0,-25} {1}" -f "AgenticSeek UI:",     "http://localhost:3000")
-Write-Host ("  {0,-25} {1}" -f "AgenticSeek API:",    "http://localhost:7777")
+Write-Host ("  {0,-25} {1}" -f "EcoSeek UI:",         "http://localhost:3000")
+Write-Host ("  {0,-25} {1}" -f "EcoSeek API:",        "http://localhost:7777")
 Write-Host ("  {0,-25} {1}" -f "AgenticPlug broker:", "http://localhost:3100")
 Write-Host ("  {0,-25} {1}" -f "SearxNG:",            "http://localhost:8080")
 Write-Host ("  {0,-25} {1}" -f "Ollama:",             "http://localhost:11434")
