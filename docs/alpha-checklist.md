@@ -16,7 +16,7 @@ EcoSeek is pre-alpha. This checklist is the honest accounting of where things st
 - **EcoCoder cluster provider** — routes inference through AgenticPlug to remote clusters via OpenAI-compatible API.
 - **EcoAgent tool server** — 30+ ecological tools exposed via HTTP (`/v1/tools`, `/v1/tools/{name}/execute`), discoverable by AgenticPlug connector manifest. Docker-packaged.
 - **Security hardening** — path traversal jail on `save_block` (realpath + commonpath), remote symlink containment on HPC logs (readlink -f over SSH), safety.py unsafe command list fix, rate limiting, secret redaction in audit logs.
-- **Landing page** — live at [alrobles.github.io/ecoseek.html](https://alrobles.github.io/ecoseek.html).
+- **Landing page** — live at [ecoseek.org](https://ecoseek.org).
 - **Full-stack threat model** — 24 scenarios, 12 assets, 6 actor profiles. See [security.md](./security.md).
 
 ## What is mocked or partial
