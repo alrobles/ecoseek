@@ -72,10 +72,14 @@ fi
 export DEEPSEEK_API_KEY
 
 # Write .env file for docker compose (persists across restarts)
-if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
-  echo "DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}" > .env
-  info "API key saved to .env (git-ignored, local only)"
-fi
+{
+  [ -n "${DEEPSEEK_API_KEY:-}" ]       && echo "DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}"
+  echo "ECOSEEK_AAR_ENABLED=${ECOSEEK_AAR_ENABLED:-false}"
+  echo "ECOSEEK_JUDGE_MODEL=${ECOSEEK_JUDGE_MODEL:-auto}"
+  [ -n "${PHOENIX_ENDPOINT:-}" ]        && echo "PHOENIX_ENDPOINT=${PHOENIX_ENDPOINT}"
+  echo "PHOENIX_PROJECT_NAME=${PHOENIX_PROJECT_NAME:-ecoseek}"
+} > .env
+info "Config saved to .env (git-ignored, local only)"
 
 # ── Generate config.ini ──────────────────────────────────────────────────
 # The backend reads config.ini at startup. We generate it here so Docker
@@ -184,6 +188,11 @@ if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
 else
   warn "DeepSeek API key: not set (AI features disabled)"
   warn "Set it with: DEEPSEEK_API_KEY=sk-xxx docker compose up -d"
+fi
+if [ "${ECOSEEK_AAR_ENABLED:-false}" = "true" ]; then
+  info "AAR mode: ENABLED (adaptive retrieval loop active)"
+else
+  info "AAR mode: disabled (set ECOSEEK_AAR_ENABLED=true to enable)"
 fi
 echo ""
 info "To stop:    docker compose down"
