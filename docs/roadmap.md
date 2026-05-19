@@ -13,7 +13,7 @@ The following milestones have been completed:
 - **Phase 2:** AgenticPlug production hardening — connector discovery API, scoped sessions, persistent SQLite session store, approval workflow (6 gated capabilities), remote symlink containment, HPC log path docs, full-stack threat model.
 - **Phase 3:** EcoSeek providers — DeepSeek BYOK with Fernet keystore, EcoCoder local provider (Ollama), EcoCoder cluster provider (AgenticPlug), connector discovery + tool registration, install docs, sandbox security review.
 - **Phase 4:** EcoCoder/EcoAgent backends — OpenAI-compatible inference endpoint, model card + release checklist, EcoAgent tool plugin HTTP server, Docker packaging.
-- **Phase 5:** Public landing page at [alrobles.github.io/ecoseek.html](https://alrobles.github.io/ecoseek.html).
+- **Phase 5:** Public landing page at [ecoseek.org](https://ecoseek.org).
 - **P0 Stabilization:** agenticSeek PR #33 (safety.py comma fix, Fernet keystore fail-closed, save_block realpath jail, ecoseek entry point) and agenticplug PR #74 (scope enforcement on all routes, TOCTOU fix on approval execution, 502 vs 403 distinction for HPC logs). 380 tests pass on main, 0 regressions.
 
 ## Now
