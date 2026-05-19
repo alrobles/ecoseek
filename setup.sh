@@ -85,17 +85,19 @@ if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
   PROVIDER_NAME="deepseek"
   PROVIDER_MODEL="deepseek-chat"
   PROVIDER_ADDRESS="https://api.deepseek.com"
+  IS_LOCAL="False"
   info "LLM provider: DeepSeek API (cloud)"
 else
   PROVIDER_NAME="ollama"
   PROVIDER_MODEL="deepseek-r1:14b"
   PROVIDER_ADDRESS="http://ollama:11434"
+  IS_LOCAL="True"
   info "LLM provider: Ollama (local) — pull a model with: docker compose exec ollama ollama pull deepseek-r1:14b"
 fi
 
 cat > config.ini <<EOF
 [MAIN]
-is_local = True
+is_local = ${IS_LOCAL}
 provider_name = ${PROVIDER_NAME}
 provider_model = ${PROVIDER_MODEL}
 provider_server_address = ${PROVIDER_ADDRESS}

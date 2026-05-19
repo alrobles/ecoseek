@@ -82,17 +82,19 @@ if ($env:DEEPSEEK_API_KEY) {
     $providerName = "deepseek"
     $providerModel = "deepseek-chat"
     $providerAddress = "https://api.deepseek.com"
+    $isLocal = "False"
     Write-Info "LLM provider: DeepSeek API (cloud)"
 } else {
     $providerName = "ollama"
     $providerModel = "deepseek-r1:14b"
     $providerAddress = "http://ollama:11434"
+    $isLocal = "True"
     Write-Info "LLM provider: Ollama (local) - pull a model with: docker compose exec ollama ollama pull deepseek-r1:14b"
 }
 
 $configContent = @"
 [MAIN]
-is_local = True
+is_local = $isLocal
 provider_name = $providerName
 provider_model = $providerModel
 provider_server_address = $providerAddress
