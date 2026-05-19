@@ -37,6 +37,10 @@ services:
       BACKEND_HOST: "0.0.0.0"
       DOCKER_INTERNAL_URL: "http://host.docker.internal"
       DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+      ECOSEEK_AAR_ENABLED: "${ECOSEEK_AAR_ENABLED:-false}"
+      ECOSEEK_JUDGE_MODEL: "${ECOSEEK_JUDGE_MODEL:-auto}"
+      PHOENIX_ENDPOINT: "${PHOENIX_ENDPOINT:-}"
+      PHOENIX_PROJECT_NAME: "${PHOENIX_PROJECT_NAME:-ecoseek}"
     depends_on:
       - redis
       - searxng
