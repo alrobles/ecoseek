@@ -101,12 +101,15 @@ is_local = ${IS_LOCAL}
 provider_name = ${PROVIDER_NAME}
 provider_model = ${PROVIDER_MODEL}
 provider_server_address = ${PROVIDER_ADDRESS}
-agent_name = Jarvis
+agent_name = EcoSeek
 recover_last_session = False
 save_session = False
 speak = False
 listen = False
 jarvis_personality = False
+personality = ecoseek
+temperature = 0.3
+top_p = 0.9
 languages = en
 [BROWSER]
 headless_browser = True
@@ -170,8 +173,8 @@ echo ""
 # ── Summary ───────────────────────────────────────────────────────────────
 info "EcoSeek stack is running!"
 echo ""
-printf "  %-25s %s\n" "AgenticSeek UI:"     "http://localhost:3000"
-printf "  %-25s %s\n" "AgenticSeek API:"    "http://localhost:7777"
+printf "  %-25s %s\n" "EcoSeek UI:"         "http://localhost:3000"
+printf "  %-25s %s\n" "EcoSeek API:"        "http://localhost:7777"
 printf "  %-25s %s\n" "AgenticPlug broker:" "http://localhost:3100"
 printf "  %-25s %s\n" "SearxNG:"            "http://localhost:8080"
 printf "  %-25s %s\n" "Ollama:"             "http://localhost:11434"
