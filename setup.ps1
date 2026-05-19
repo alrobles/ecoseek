@@ -104,6 +104,9 @@ save_session = False
 speak = False
 listen = False
 jarvis_personality = False
+personality = ecoseek
+temperature = 0.3
+top_p = 0.9
 languages = en
 [BROWSER]
 headless_browser = True
