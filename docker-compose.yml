@@ -120,6 +120,16 @@ services:
       BROKER_SESSION_STORE: "${BROKER_SESSION_STORE:-memory}"
       ECOAGENT_URL: "http://ecoagent:${ECOAGENT_PORT:-8000}"
       OLLAMA_URL: "http://ollama:${OLLAMA_PORT:-11434}"
+      # Required by /v1/chat/completions (AgenticPlug PR #80). Fixed path
+      # /api/chat is appended by the broker; the client never picks the
+      # upstream URL. Without this, every chat-completions request returns
+      # 503 model_route_unconfigured (the route fails closed by design).
+      OLLAMA_BASE_URL: "http://ollama:${OLLAMA_PORT:-11434}"
+      # Optional GitHub login allowlist for CLI session handshake. Comma-
+      # separated GitHub logins. Empty = fail-closed (no sessions can be
+      # issued). The smoke test reads AGENTICPLUG_SESSION from .env; set
+      # this list to your GitHub login if you want to obtain one.
+      AGENTICPLUG_ALLOWED_LOGINS: "${AGENTICPLUG_ALLOWED_LOGINS:-}"
     ports:
       - "127.0.0.1:${AGENTICPLUG_PORT:-8080}:${AGENTICPLUG_PORT:-8080}"
     volumes:

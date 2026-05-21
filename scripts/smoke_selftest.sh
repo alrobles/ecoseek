@@ -2,9 +2,13 @@
 # Self-test for scripts/smoke.sh.
 #
 # This does NOT spin up the full Docker stack. It stands up a tiny Python
-# HTTP server that fakes AgenticPlug /healthz, /v1/connectors and Ollama
-# /api/tags and /api/generate, then runs scripts/smoke.sh against those
-# mock ports with SMOKE_PULL=0 (we pre-declare the model in /api/tags).
+# HTTP server that fakes AgenticPlug /healthz, /v1/connectors,
+# /v1/chat/completions (the new broker-mediated route from AgenticPlug
+# PR #80), and Ollama /api/tags, then runs scripts/smoke.sh against
+# those mock ports with SMOKE_PULL=0 (we pre-declare the model in
+# /api/tags). The mock /v1/chat/completions enforces a Bearer
+# Authorization header so the selftest exercises the new auth path,
+# not a fake unauthenticated bypass.
 #
 # Run from the repo root:
 #   bash scripts/smoke_selftest.sh
@@ -20,6 +24,10 @@ cd "$REPO_ROOT"
 PORT_GATEWAY="${SELFTEST_GATEWAY_PORT:-18080}"
 PORT_OLLAMA="${SELFTEST_OLLAMA_PORT:-21434}"
 PORT_API="${SELFTEST_API_PORT:-13000}"
+# Fixed selftest session id — the mock gateway accepts any non-empty
+# Bearer, but we use a real-looking opaque value so a future change that
+# starts validating the token format will surface immediately.
+SELFTEST_SESSION="selftest-session-0123456789abcdef0123456789abcdef"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"; [ -n "${MOCK_PID:-}" ] && kill "$MOCK_PID" 2>/dev/null || true' EXIT
@@ -33,31 +41,63 @@ OLLAMA  = int(os.environ["PORT_OLLAMA"])
 API     = int(os.environ["PORT_API"])
 MODEL   = os.environ.get("OLLAMA_MODEL", "tinyllama")
 
+def _json(self, code, body):
+    self.send_response(code)
+    self.send_header("Content-Type", "application/json")
+    self.end_headers()
+    self.wfile.write(json.dumps(body).encode())
+
 class Gateway(BaseHTTPRequestHandler):
     def log_message(self, *a, **kw): pass
     def do_GET(self):
         if self.path == "/healthz":
             self.send_response(200); self.end_headers(); self.wfile.write(b"ok"); return
         if self.path == "/v1/connectors":
-            self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
-            self.wfile.write(json.dumps({"connectors": []}).encode()); return
+            _json(self, 200, {"connectors": []}); return
+        self.send_response(404); self.end_headers()
+    def do_POST(self):
+        if self.path == "/v1/chat/completions":
+            # Enforce the same auth surface the real broker uses: a
+            # Bearer token is required. We intentionally do NOT verify
+            # the token contents — the broker's session validation lives
+            # in its own test suite; here we are proving smoke.sh sends
+            # the header at all and parses the OpenAI-shape response.
+            auth = self.headers.get("Authorization", "")
+            if not auth.startswith("Bearer ") or len(auth) <= len("Bearer "):
+                _json(self, 401, {"error": "no_session"}); return
+            length = int(self.headers.get("Content-Length", "0") or 0)
+            raw = self.rfile.read(length)
+            try:
+                body = json.loads(raw)
+            except Exception:
+                _json(self, 400, {"error": {"code": "invalid_json", "message": "bad json"}}); return
+            # Minimal shape check so we notice if smoke.sh stops sending
+            # the OpenAI envelope.
+            if not isinstance(body, dict) or "model" not in body or "messages" not in body:
+                _json(self, 400, {"error": {"code": "invalid_request_body", "message": "bad shape"}}); return
+            if body.get("stream") is True:
+                _json(self, 400, {"error": {"code": "streaming_not_supported", "message": "no stream"}}); return
+            # Emit a minimal valid OpenAI-shape response.
+            _json(self, 200, {
+                "id": "chatcmpl-selftest",
+                "object": "chat.completion",
+                "created": 0,
+                "model": body["model"],
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "pong"},
+                    "finish_reason": "stop",
+                }],
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            })
+            return
         self.send_response(404); self.end_headers()
 
 class Ollama(BaseHTTPRequestHandler):
     def log_message(self, *a, **kw): pass
     def do_GET(self):
         if self.path == "/api/tags":
-            body = {"models": [{"name": f"{MODEL}:latest"}]}
-            self.send_response(200); self.send_header("Content-Type","application/json"); self.end_headers()
-            self.wfile.write(json.dumps(body).encode()); return
-        self.send_response(404); self.end_headers()
-    def do_POST(self):
-        if self.path == "/api/generate":
-            length = int(self.headers.get("Content-Length","0") or 0)
-            _ = self.rfile.read(length)
-            body = {"model": MODEL, "response": "pong", "done": True}
-            self.send_response(200); self.send_header("Content-Type","application/json"); self.end_headers()
-            self.wfile.write(json.dumps(body).encode()); return
+            _json(self, 200, {"models": [{"name": f"{MODEL}:latest"}]}); return
         self.send_response(404); self.end_headers()
 
 class Api(BaseHTTPRequestHandler):
@@ -92,6 +132,7 @@ ECOSEEK_API_PORT=${PORT_API}
 AGENTICPLUG_PORT=${PORT_GATEWAY}
 OLLAMA_PORT=${PORT_OLLAMA}
 OLLAMA_MODEL=tinyllama
+AGENTICPLUG_SESSION=${SELFTEST_SESSION}
 EOF
 chmod 600 .env
 
@@ -128,9 +169,28 @@ exit 0
 STUB
 chmod +x "$STUB_DIR/docker"
 
+# ── Sub-test 1: missing AGENTICPLUG_SESSION must fail Step 3 cleanly ─────
+echo "[selftest] case 1: missing AGENTICPLUG_SESSION → expected fail (exit 4)"
+cp .env "$WORK/env.backup"
+sed -i.bak 's/^AGENTICPLUG_SESSION=.*/AGENTICPLUG_SESSION=/' .env
+set +e
+SMOKE_PULL=0 PATH="$STUB_DIR:$PATH" bash scripts/smoke.sh > "$WORK/case1.log" 2>&1
+rc1=$?
+set -e
+cp "$WORK/env.backup" .env
+if [ "$rc1" -ne 4 ]; then
+  echo "[selftest] FAIL — case 1 expected exit 4, got $rc1" >&2
+  cat "$WORK/case1.log" >&2
+  exit 1
+fi
+echo "[selftest] case 1: OK (exit 4 as expected)"
+
+# ── Sub-test 2: happy path with a session → PASS ─────────────────────────
+echo "[selftest] case 2: with AGENTICPLUG_SESSION → expected PASS"
 if SMOKE_PULL=0 \
    PATH="$STUB_DIR:$PATH" \
    bash scripts/smoke.sh; then
+  echo "[selftest] case 2: OK (PASS)"
   echo "[selftest] PASS"
   exit 0
 else
