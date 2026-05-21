@@ -16,7 +16,7 @@ This document is the reproducible bar for the **alpha demo**. If any step fails,
 
 - `git`, `docker`, `docker compose v2`, `curl`.
 - Repo cloned and current working directory is the repo root.
-- Ports `${ECOSEEK_API_PORT}`, `${AGENTICPLUG_PORT}`, `${ECOAGENT_PORT}`, `${OLLAMA_PORT}` free on `localhost`.
+- Ports `${ECOSEEK_API_PORT}`, `${AGENTICPLUG_PORT}`, `${ECOAGENT_PORT}`, `${OLLAMA_PORT}` free on `localhost`. If you use the `observability` profile, `${PHOENIX_PORT}` (default `6006`) must also be free.
 - After step 1 the values of those variables are loaded into your shell via `source .env`.
 
 Throughout the document the placeholders `$ECOSEEK_API_PORT` (`3000`), `$AGENTICPLUG_PORT` (`8080`), `$ECOAGENT_PORT` (`8000`), and `$OLLAMA_PORT` (`11434`) are the defaults written by `setup.sh`.
@@ -46,6 +46,7 @@ On Windows (PowerShell):
   - `AGENTICPLUG_PORT=8080`
   - `ECOAGENT_PORT=8000`
   - `OLLAMA_PORT=11434`
+  - `PHOENIX_PORT=6006`
   - `OLLAMA_MODEL=tinyllama`
   - `ECOSEEK_AAR_ENABLED=false`
   - `ECOSEEK_JUDGE_MODEL=auto`
@@ -58,7 +59,7 @@ On Windows (PowerShell):
 Verify quickly:
 
 ```bash
-grep -E '^(COMPOSE_PROFILES|ECOSEEK_API_PORT|AGENTICPLUG_PORT|ECOAGENT_PORT|OLLAMA_PORT|OLLAMA_MODEL|ECOSEEK_AAR_ENABLED|ECOSEEK_JUDGE_MODEL|PHOENIX_ENDPOINT|PHOENIX_PROJECT_NAME|DEEPSEEK_API_KEY)=' .env
+grep -E '^(COMPOSE_PROFILES|ECOSEEK_API_PORT|AGENTICPLUG_PORT|ECOAGENT_PORT|OLLAMA_PORT|PHOENIX_PORT|OLLAMA_MODEL|ECOSEEK_AAR_ENABLED|ECOSEEK_JUDGE_MODEL|PHOENIX_ENDPOINT|PHOENIX_PROJECT_NAME|DEEPSEEK_API_KEY)=' .env
 ```
 
 ---
@@ -176,7 +177,24 @@ curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:${ECOSEEK_API_PORT}/"
 
 ---
 
-### Step 7 — Query the API and confirm the call traverses AgenticPlug
+### Step 7 — Confirm AgenticPlug exposes its stable Phase 1 surface
+
+**Background — what is and isn't stable in Phase 1.** AgenticPlug's
+gateway exposes a handful of endpoints that are part of its public Phase 1
+contract: `/healthz` (already covered in Step 3), `/v1/connectors`,
+`/v1/connectors/:id`, `/v1/connectors/:id/health`, `/v1/clusters`,
+`/v1/cli/session`, `/v1/tasks`, and `/v1/approvals` (see
+[`alrobles/agenticplug` → `broker/server.js`](https://github.com/alrobles/agenticplug/blob/main/broker/server.js)).
+There is **no** OpenAI-compatible `/v1/chat/completions` route and **no**
+`/v1/proxy/ollama/*` route in Phase 1 — model traffic flows through the
+`ecoseek-api` orchestrator (which already verified end-to-end in Step 6),
+not through AgenticPlug. A first-class "send a prompt, get a response"
+gateway endpoint is tracked as a Phase 2 follow-up.
+
+This step therefore pins the smoke test to the gateway's actually-stable
+contract: a request to AgenticPlug returns a well-formed connector
+listing, demonstrating that the broker is up, routing JSON, and reachable
+from the host loopback.
 
 **Command:**
 
@@ -186,28 +204,42 @@ In one terminal, tail AgenticPlug:
 docker compose logs -f agenticplug
 ```
 
-In another terminal, send the test query through AgenticPlug to the model:
+In another terminal, hit the connector listing through the gateway:
 
 ```bash
 source .env
-curl -s -X POST "http://127.0.0.1:${AGENTICPLUG_PORT}/v1/chat/completions" \
-  -H "Content-Type: application/json" \
-  -d "{\"model\":\"${OLLAMA_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"¿Qué herramientas tienes disponibles?\"}]}"
-```
-
-If your AgenticPlug build does not expose an OpenAI-compatible completions endpoint, fall back to direct Ollama generation through the gateway:
-
-```bash
-curl -s -X POST "http://127.0.0.1:${AGENTICPLUG_PORT}/v1/proxy/ollama/api/generate" \
-  -H "Content-Type: application/json" \
-  -d "{\"model\":\"${OLLAMA_MODEL}\",\"prompt\":\"¿Qué herramientas tienes disponibles?\"}"
+curl -s -o /tmp/ecoseek-connectors.json \
+     -w "%{http_code}\n" \
+     "http://127.0.0.1:${AGENTICPLUG_PORT}/v1/connectors"
+python -c "import json; d=json.load(open('/tmp/ecoseek-connectors.json')); print('ok' if isinstance(d, (list, dict)) else 'bad')"
 ```
 
 **Expected result:**
 
-- HTTP `200` with a non-empty JSON body containing a model response in natural language. The response should mention the kinds of tools exposed by EcoAgent (ecological lookups, taxonomy, etc.) — the exact wording depends on the local model.
-- The `agenticplug` log shows at least one inbound request and one outbound request to either `ecoagent` (`/v1/tools` / `/v1/tools/{name}/execute`) or `ollama` (`/api/generate` / `/api/chat`). Each line carries an actor, action, and decision; no value of `DEEPSEEK_API_KEY` or any other secret-named variable appears in the log.
-- With `OLLAMA_MODEL=tinyllama` (the default) the answer comes from the local model. Set `OLLAMA_MODEL=ecocoder` and pull that image to swap in EcoCoder once it ships publicly. If `DEEPSEEK_API_KEY` is set in `.env`, AgenticPlug may route to DeepSeek instead.
+- The `curl` line prints `200`.
+- The `python` line prints `ok` (the body parses as JSON — either an
+  array of connector entries or an object wrapping one).
+- The `agenticplug` log shows the inbound request, carrying an actor,
+  action, and decision. **No value of `DEEPSEEK_API_KEY` or of any other
+  variable whose name contains `KEY`, `TOKEN`, `SECRET`, or `PASSWORD`
+  appears in the log.**
+- With `OLLAMA_MODEL=tinyllama` (the default) and the model pulled in
+  Step 5, the orchestrator from Step 6 is already wired to use it. End-
+  to-end model traffic through the gateway is a Phase 2 deliverable —
+  see "Known follow-ups" below.
+
+### Known follow-ups (tracked, not in scope for Phase 1)
+
+- **Gateway model-routing endpoint** (issue #13 follow-up, Phase 2).
+  AgenticPlug does not yet expose an OpenAI-compatible
+  `/v1/chat/completions` or `/v1/proxy/ollama/api/generate` route. The
+  smoke test will pin one of those once the contract lands in
+  `alrobles/agenticplug` and the orchestrator is wired to use it.
+- **Durable broker session/audit store** (Phase 2). `BROKER_SESSION_STORE`
+  defaults to `memory`, which is intentional for the Phase 1 DIY demo:
+  sessions and audit log reset on `docker compose restart agenticplug`,
+  so this configuration is **not suitable for production**. Phase 2
+  switches to a durable SQLite-backed store.
 
 ---
 
@@ -229,7 +261,7 @@ Add `-v` to also remove the named volumes (`ollama-data`, `redis-data`, `broker-
   docker compose --profile gpu up -d
   ```
 
-- Observability (adds Arize Phoenix at `http://127.0.0.1:6006`, on top of the CPU or GPU profile):
+- Observability (adds Arize Phoenix at `http://127.0.0.1:${PHOENIX_PORT}` — default `6006`, on top of the CPU or GPU profile):
 
   ```bash
   docker compose --profile observability up -d        # adds phoenix to CPU base
@@ -242,4 +274,10 @@ Add `-v` to also remove the named volumes (`ollama-data`, `redis-data`, `broker-
 - `docker compose ps` to confirm which containers never reached `(healthy)`.
 - For step 7, also check `docker compose logs ecoseek-api` and `docker compose logs ecoagent` — most end-to-end failures are wiring problems between those two.
 
-Reproducibility note: a passing run of all 7 steps satisfies alpha-checklist criteria 1–3 (`DIY mode without real secrets`, `EcoAgent loads a small EcoCoder agent`, `the agent makes at least one call through AgenticPlug to a local model`). Criteria 4 (audit log fidelity) and 5 (deterministic re-run) are tracked in Phase 2. AgenticPlug session storage in this Phase 1 is in-memory (`BROKER_SESSION_STORE=memory`), so audit/log persistence resets on `docker compose restart agenticplug`; Phase 2 will switch to a durable store.
+Reproducibility note: a passing run of all 7 steps satisfies alpha-checklist criteria 1–3 (`DIY mode without real secrets`, `EcoAgent loads a small EcoCoder agent`, `the agent makes at least one call through AgenticPlug to a local model`). Criteria 4 (audit log fidelity) and 5 (deterministic re-run) are tracked in Phase 2.
+
+> **Phase 1 / non-production:** AgenticPlug session storage defaults to
+> `BROKER_SESSION_STORE=memory`. Sessions and audit log live in process
+> memory and reset on `docker compose restart agenticplug`. This is
+> intentional for the DIY demo and **must not be used in production**
+> — Phase 2 will switch to a durable SQLite-backed store.
