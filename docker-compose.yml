@@ -4,37 +4,54 @@
 #   bash setup.sh && docker compose up -d
 #
 # What starts (base stack, CPU-only):
-#   - EcoSeek UI         (AgenticSeek client / orchestrator)  → http://localhost:${ECOSEEK_UI_PORT:-3000}
-#   - AgenticPlug        (gateway: auth, policy, audit)       → http://localhost:${AGENTICPLUG_PORT:-8080}
-#   - EcoAgent           (tool server, 30+ ecological tools)  → http://localhost:${ECOAGENT_PORT:-8000}
-#   - Ollama             (local model inference, CPU)         → http://localhost:${OLLAMA_PORT:-11434}
-#   - SearxNG            (private web search, used by UI)     (internal)
-#   - Redis              (task queue for the client)          (internal)
+#   - EcoSeek API        (FastAPI backend / orchestrator)     → http://127.0.0.1:${ECOSEEK_API_PORT:-3000}
+#   - AgenticPlug        (gateway: auth, policy, audit)       → http://127.0.0.1:${AGENTICPLUG_PORT:-8080}
+#   - EcoAgent           (tool server, 30+ ecological tools)  → http://127.0.0.1:${ECOAGENT_PORT:-8000}
+#   - Ollama             (local model inference, CPU)         → http://127.0.0.1:${OLLAMA_PORT:-11434}
+#   - SearxNG            (private web search, used by API)    (internal)
+#   - Redis              (task queue)                         (internal)
 #
 # Optional profiles:
-#   - gpu             — enables NVIDIA GPU passthrough for Ollama
+#   - gpu             — replaces CPU Ollama with NVIDIA-passthrough Ollama
 #                       docker compose --profile gpu up
+#                       (CPU `ollama` is in profile `cpu`; default base stack
+#                        activates `cpu` automatically; see COMPOSE_PROFILES below.)
 #   - observability   — adds Arize Phoenix tracing UI
 #                       docker compose --profile observability up
 #
-# All ports, model names, and credentials are configurable via .env.
+# All host port publications are bound to 127.0.0.1 so the stack is reachable
+# only from the local machine. If you need LAN/remote access, edit the
+# `ports:` entries explicitly — do not let unauthenticated services
+# (Ollama, /healthz) leak onto a network.
+#
+# All ports, model names, and endpoints are configurable via .env.
 # Run setup.sh / setup.ps1 to generate a starter .env on first use.
+#
+# NOTE: `COMPOSE_PROFILES` is set in .env by setup.sh to `cpu` so that
+# the default `docker compose up` brings the CPU Ollama variant. Using
+# `--profile gpu` swaps in the GPU variant. The two are mutually
+# exclusive because they share the host port ${OLLAMA_PORT}.
 
 services:
-  # ── EcoSeek UI (AgenticSeek client + orchestrator) ─────────────────────
-  ecoseek-ui:
+  # ── EcoSeek API (AgenticSeek FastAPI backend / orchestrator) ───────────
+  # This service builds the upstream `Dockerfile.backend` from agenticSeek:
+  # a FastAPI app exposing the orchestrator API. It is NOT the React UI
+  # — that lives in agenticSeek's `Dockerfile.frontend` and is not built
+  # by this compose file in Phase 1. End-to-end query verification in
+  # `docs/smoke-test.md` therefore exercises the API directly.
+  ecoseek-api:
     build:
       context: .repos/agenticSeek
       dockerfile: Dockerfile.backend
-    container_name: ecoseek-ui
+    container_name: ecoseek-api
     ports:
-      - "${ECOSEEK_UI_PORT:-3000}:${ECOSEEK_UI_PORT:-3000}"
+      - "127.0.0.1:${ECOSEEK_API_PORT:-3000}:${ECOSEEK_API_PORT:-3000}"
     volumes:
       - workspace:/opt/workspace
       - screenshots:/app/.screenshots
       - ./config.ini:/app/config.ini:ro
     environment:
-      BACKEND_PORT: "${ECOSEEK_UI_PORT:-3000}"
+      BACKEND_PORT: "${ECOSEEK_API_PORT:-3000}"
       BACKEND_HOST: "0.0.0.0"
       WORK_DIR: "/opt/workspace"
       SEARXNG_BASE_URL: "${SEARXNG_BASE_URL:-http://searxng:8080}"
@@ -43,7 +60,7 @@ services:
       AGENTICPLUG_URL: "http://agenticplug:${AGENTICPLUG_PORT:-8080}"
       ECOAGENT_URL: "http://ecoagent:${ECOAGENT_PORT:-8000}"
       OLLAMA_URL: "http://ollama:${OLLAMA_PORT:-11434}"
-      OLLAMA_MODEL: "${OLLAMA_MODEL:-ecocoder}"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-tinyllama}"
       DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
       ECOSEEK_AAR_ENABLED: "${ECOSEEK_AAR_ENABLED:-false}"
       ECOSEEK_JUDGE_MODEL: "${ECOSEEK_JUDGE_MODEL:-auto}"
@@ -52,12 +69,11 @@ services:
     depends_on:
       agenticplug:
         condition: service_healthy
-      ollama:
-        condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       searxng:
         condition: service_started
+    restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -88,12 +104,13 @@ services:
       ECOAGENT_URL: "http://ecoagent:${ECOAGENT_PORT:-8000}"
       OLLAMA_URL: "http://ollama:${OLLAMA_PORT:-11434}"
     ports:
-      - "${AGENTICPLUG_PORT:-8080}:${AGENTICPLUG_PORT:-8080}"
+      - "127.0.0.1:${AGENTICPLUG_PORT:-8080}:${AGENTICPLUG_PORT:-8080}"
     volumes:
       - broker-data:/data
     depends_on:
       ecoagent:
         condition: service_healthy
+    restart: unless-stopped
     healthcheck:
       test:
         - CMD-SHELL
@@ -118,7 +135,7 @@ services:
       ECOAGENT_PORT: "${ECOAGENT_PORT:-8000}"
       ECOAGENT_PROFILE: "${ECOAGENT_PROFILE:-ci}"
     ports:
-      - "${ECOAGENT_PORT:-8000}:${ECOAGENT_PORT:-8000}"
+      - "127.0.0.1:${ECOAGENT_PORT:-8000}:${ECOAGENT_PORT:-8000}"
     command:
       - python
       - -m
@@ -127,6 +144,7 @@ services:
       - 0.0.0.0
       - --port
       - "${ECOAGENT_PORT:-8000}"
+    restart: unless-stopped
     healthcheck:
       test:
         - CMD-SHELL
@@ -140,16 +158,18 @@ services:
     networks:
       - ecoseek-net
 
-  # ── Ollama (local model inference, CPU by default) ─────────────────────
+  # ── Ollama, CPU variant (profile: cpu — default via COMPOSE_PROFILES) ──
   ollama:
     image: ollama/ollama:latest
     container_name: ollama
+    profiles: ["cpu"]
     volumes:
       - ollama-data:/root/.ollama
     ports:
-      - "${OLLAMA_PORT:-11434}:11434"
+      - "127.0.0.1:${OLLAMA_PORT:-11434}:11434"
     environment:
       OLLAMA_HOST: "0.0.0.0:11434"
+    restart: unless-stopped
     healthcheck:
       test:
         - CMD-SHELL
@@ -161,17 +181,17 @@ services:
     networks:
       - ecoseek-net
 
-  # ── Ollama with NVIDIA GPU passthrough (profile: gpu) ──────────────────
+  # ── Ollama, NVIDIA GPU variant (profile: gpu) ──────────────────────────
   # Activate with: docker compose --profile gpu up
-  # Replaces the CPU `ollama` service when the profile is active.
+  # Mutually exclusive with the CPU variant — both publish ${OLLAMA_PORT}.
   ollama-gpu:
     image: ollama/ollama:latest
-    container_name: ollama-gpu
+    container_name: ollama
     profiles: ["gpu"]
     volumes:
       - ollama-data:/root/.ollama
     ports:
-      - "${OLLAMA_PORT:-11434}:11434"
+      - "127.0.0.1:${OLLAMA_PORT:-11434}:11434"
     environment:
       OLLAMA_HOST: "0.0.0.0:11434"
     deploy:
@@ -181,6 +201,7 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+    restart: unless-stopped
     healthcheck:
       test:
         - CMD-SHELL
@@ -192,7 +213,7 @@ services:
     networks:
       - ecoseek-net
 
-  # ── SearxNG (private web search, used by the UI) ───────────────────────
+  # ── SearxNG (private web search, used by the API) ──────────────────────
   searxng:
     image: docker.io/searxng/searxng:latest
     container_name: searxng
@@ -208,7 +229,16 @@ services:
       - SETUID
     depends_on:
       redis:
-        condition: service_started
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "wget -qO- http://localhost:8080/healthz >/dev/null 2>&1 || exit 1"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
       - ecoseek-net
 
@@ -235,15 +265,15 @@ services:
       - ecoseek-net
 
   # ── Phoenix observability (profile: observability) ─────────────────────
-  # Activate with: docker compose --profile observability up
   phoenix:
     image: arizephoenix/phoenix:latest
     container_name: phoenix
     profiles: ["observability"]
     ports:
-      - "${PHOENIX_PORT:-6006}:6006"
+      - "127.0.0.1:${PHOENIX_PORT:-6006}:6006"
     environment:
       PHOENIX_PROJECT_NAME: "${PHOENIX_PROJECT_NAME:-ecoseek}"
+    restart: unless-stopped
     healthcheck:
       test:
         - CMD-SHELL
