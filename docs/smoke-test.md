@@ -14,16 +14,47 @@ After `bash setup.sh && docker compose up -d`, a single command proves the Phase
 bash scripts/smoke.sh
 ```
 
-It performs four checks and prints `Phase 2 smoke: PASS` on success:
+It performs three load-bearing checks plus an Ollama diagnostic, and prints `Phase 2 smoke: PASS` on success:
 
 1. AgenticPlug `/healthz` returns `200`.
 2. AgenticPlug `/v1/connectors` returns well-formed JSON (the gateway's Phase 1 stable surface).
-3. The local model named in `${OLLAMA_MODEL}` is present in Ollama (pulled automatically on first run).
-4. `POST /api/generate` on Ollama with a tiny prompt returns a non-empty `response` field — i.e. a real local model produced real text.
+3. **`POST /v1/chat/completions` on AgenticPlug returns a non-empty assistant message.** This is the canonical Phase 2 product success criterion (EcoSeek issue #15): prompt → AgenticPlug → local Ollama → assistant text, with the broker's session/scope/audit layer in the loop.
 
-The script reads ports and the model name from `.env`, never logs values of variables named like secrets, talks only to `127.0.0.1`, and is idempotent (re-running is safe). See [Troubleshooting](#troubleshooting) below if any step fails.
+Between steps 2 and 3 the script also probes Ollama `/api/tags` directly to confirm `${OLLAMA_MODEL}` is present locally — purely as a diagnostic prerequisite so that a missing model surfaces as `exit 3` (clear) rather than as a sanitized `502/503` from the broker (ambiguous). The Ollama probe is **not** the product success criterion; step 3 is.
 
-**Honesty notes for Phase 2.** This proves the **local model leg** — the same Ollama endpoint that the `ecoseek-api` orchestrator (`OLLAMA_URL`) and the AgenticPlug gateway (`OLLAMA_URL`) both point at. It does **not** yet prove that model traffic flows through AgenticPlug's policy/audit layer, because AgenticPlug Phase 1 does not yet expose an OpenAI-compatible `/v1/chat/completions` or `/v1/proxy/ollama/*` route. That gateway model-routing contract is tracked as a Phase 2 follow-up — see [Known follow-ups](#known-follow-ups-tracked-not-in-scope-for-phase-1) below. The smoke command pins the strongest honest contract available today.
+The script reads ports, the model name, and the AgenticPlug session id from `.env`, never logs values of variables named like secrets, sends the session id as `Authorization: Bearer …` (passed via a `chmod 600` config file, never on the command line), talks only to `127.0.0.1`, and is idempotent (re-running is safe). See [Troubleshooting](#troubleshooting) below if any step fails.
+
+**Honesty notes for Phase 2.** This is the **local DIY demo** — `docker compose` on a laptop with a public model (`tinyllama`) and no private credentials. It is not the reumanlab-connector path and not the KU-HPC production path; those live in lab-internal documentation and the AgenticPlug HPC test suite respectively (see [Deployment paths](#deployment-paths--what-this-smoke-covers-and-what-it-does-not) below). What this smoke now proves end-to-end is that model traffic genuinely traverses AgenticPlug's gateway via the OpenAI-compatible `/v1/chat/completions` route (added in [AgenticPlug PR #80](https://github.com/alrobles/agenticplug/pull/80)), not just that Ollama is alive on a sibling port.
+
+### Obtaining an AgenticPlug session
+
+`/v1/chat/completions` uses the same auth as every other `/v1/*` route — there is no smoke-mode bypass. To get an opaque session id for `scripts/smoke.sh`:
+
+1. Add your GitHub login to the broker allowlist and recreate the broker so it picks up the env change:
+
+   ```bash
+   # in .env (created by setup.sh)
+   AGENTICPLUG_ALLOWED_LOGINS=your-github-login
+   ```
+
+   ```bash
+   docker compose up -d --force-recreate agenticplug
+   ```
+
+2. Mint a personal GitHub access token (`read:user` scope is enough — no repo access needed) and exchange it for an opaque AgenticPlug session id. The broker forgets the GitHub token immediately; the CLI persists only the returned `session_id`:
+
+   ```bash
+   source .env
+   GITHUB_TOKEN=ghp_xxx \
+     curl -sS -X POST "http://127.0.0.1:${AGENTICPLUG_PORT}/v1/cli/session" \
+          -H 'Content-Type: application/json' \
+          -d "{\"github_access_token\":\"$GITHUB_TOKEN\"}" \
+       | python -c "import json,sys; print(json.load(sys.stdin)['session_id'])"
+   ```
+
+3. Put the returned session id in `.env` as `AGENTICPLUG_SESSION=<session_id>` (the file is already mode `600`; the value is treated as a secret by `setup.sh` and `scripts/smoke.sh`) and rerun `bash scripts/smoke.sh`.
+
+If you do not provide a session, `scripts/smoke.sh` fails step 3 with a copy of these instructions instead of pretending it passed.
 
 **Swapping the model.** The default is the public `tinyllama`. To switch to EcoCoder once it is published in the public Ollama registry:
 
@@ -208,28 +239,13 @@ curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:${ECOSEEK_API_PORT}/"
 
 ---
 
-### Step 7 — Confirm AgenticPlug exposes its stable Phase 1 surface, and a local model answers a real prompt
+### Step 7 — Confirm AgenticPlug exposes its stable surface, and a local model answers a real prompt **through the broker**
 
-**Tip:** The canonical Phase 2 smoke command (`bash scripts/smoke.sh`, documented at the top of this file) automates the four sub-checks below. Run it for the standard pass/fail; keep this step for the manual walk-through and as the reference for what `smoke.sh` actually verifies.
+**Tip:** The canonical Phase 2 smoke command (`bash scripts/smoke.sh`, documented at the top of this file) automates the three sub-checks below. Run it for the standard pass/fail; keep this step for the manual walk-through and as the reference for what `smoke.sh` actually verifies.
 
-**Background — what is and isn't stable in Phase 1.** AgenticPlug's
-gateway exposes a handful of endpoints that are part of its public Phase 1
-contract: `/healthz` (already covered in Step 3), `/v1/connectors`,
-`/v1/connectors/:id`, `/v1/connectors/:id/health`, `/v1/clusters`,
-`/v1/cli/session`, `/v1/tasks`, and `/v1/approvals` (see
-[`alrobles/agenticplug` → `broker/server.js`](https://github.com/alrobles/agenticplug/blob/main/broker/server.js)).
-There is **no** OpenAI-compatible `/v1/chat/completions` route and **no**
-`/v1/proxy/ollama/*` route in Phase 1 — model traffic flows through the
-`ecoseek-api` orchestrator (which already verified end-to-end in Step 6),
-not through AgenticPlug. A first-class "send a prompt, get a response"
-gateway endpoint is tracked as a Phase 2 follow-up.
+**Background.** AgenticPlug now exposes an OpenAI-compatible `/v1/chat/completions` route (added in [AgenticPlug PR #80](https://github.com/alrobles/agenticplug/pull/80), tracking AgenticPlug issue #79 and EcoSeek issue #15). The route reuses the broker's existing session/scope middleware — there is no smoke-mode bypass — and forwards a fixed `/api/chat` path to an operator-configured Ollama backend (`OLLAMA_BASE_URL` in `docker-compose.yml`). The client never picks the upstream URL.
 
-This step therefore pins the smoke test to the gateway's actually-stable
-contract: a request to AgenticPlug returns a well-formed connector
-listing, demonstrating that the broker is up, routing JSON, and reachable
-from the host loopback.
-
-**Command:**
+**Sub-check 7a — gateway connector surface.**
 
 In one terminal, tail AgenticPlug:
 
@@ -247,54 +263,40 @@ curl -s -o /tmp/ecoseek-connectors.json \
 python -c "import json; d=json.load(open('/tmp/ecoseek-connectors.json')); print('ok' if isinstance(d, (list, dict)) else 'bad')"
 ```
 
-**Expected result:**
+Expected: the `curl` line prints `200`; the `python` line prints `ok`; the `agenticplug` log shows the inbound request with an actor, action, and decision; **no value of `DEEPSEEK_API_KEY`, `AGENTICPLUG_SESSION`, or any variable whose name contains `KEY`/`TOKEN`/`SECRET`/`PASSWORD` appears in the log.**
 
-- The `curl` line prints `200`.
-- The `python` line prints `ok` (the body parses as JSON — either an
-  array of connector entries or an object wrapping one).
-- The `agenticplug` log shows the inbound request, carrying an actor,
-  action, and decision. **No value of `DEEPSEEK_API_KEY` or of any other
-  variable whose name contains `KEY`, `TOKEN`, `SECRET`, or `PASSWORD`
-  appears in the log.**
-- With `OLLAMA_MODEL=tinyllama` (the default) and the model pulled in
-  Step 5, the orchestrator from Step 6 is already wired to use it. End-
-  to-end model traffic through the gateway is a Phase 2 deliverable —
-  see "Known follow-ups" below.
-
-**Phase 2 add-on — real local model response.** As the final sub-check of
-Step 7, send a tiny prompt directly to the same Ollama endpoint that the
-gateway and the orchestrator are both configured to use, and assert the
-local model returns non-empty text:
+**Sub-check 7b — broker-mediated chat (the product success criterion).** Send a tiny prompt to AgenticPlug's `/v1/chat/completions` with the session id you obtained in [Obtaining an AgenticPlug session](#obtaining-an-agenticplug-session), and assert the broker returns a non-empty assistant message:
 
 ```bash
 source .env
-curl -s --max-time 120 \
+curl -sS --max-time 120 \
+     -H "Authorization: Bearer ${AGENTICPLUG_SESSION}" \
      -H 'Content-Type: application/json' \
-     -d "{\"model\":\"${OLLAMA_MODEL}\",\"prompt\":\"Reply with exactly the single word: pong.\",\"stream\":false,\"options\":{\"num_predict\":64,\"temperature\":0}}" \
-     "http://127.0.0.1:${OLLAMA_PORT}/api/generate" \
-  | python -c "import json,sys; d=json.load(sys.stdin); r=d.get('response',''); assert r.strip(), 'empty response'; print('model says:', r.strip()[:240])"
+     -d "{\"model\":\"${OLLAMA_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly the single word: pong.\"}],\"temperature\":0,\"stream\":false}" \
+     "http://127.0.0.1:${AGENTICPLUG_PORT}/v1/chat/completions" \
+  | python -c "import json,sys; d=json.load(sys.stdin); c=d['choices'][0]['message']['content']; assert c.strip(), 'empty content'; print('model says (via broker):', c.strip()[:240])"
 ```
 
-Expected: prints `model says: <some text>`. An empty response, a non-200
-status, or a JSON parse error means the local model leg of the stack is
-broken — see the troubleshooting matrix below.
+Expected: prints `model says (via broker): <some text>`. A `401 no_session` means the session is missing or expired; a `403 scope_denied` means the session lacks the `model.chat` capability; a `503 model_route_unconfigured` means `OLLAMA_BASE_URL` is not set on the broker container; a `502 upstream_error` or `503 upstream_unavailable` means Ollama is down or the model name is wrong. See the troubleshooting matrix below for each.
 
-`scripts/smoke.sh` is the canonical wrapper around the four sub-checks of
-Step 7 (gateway `/healthz`, gateway `/v1/connectors`, Ollama `/api/tags`
-contains `${OLLAMA_MODEL}`, and the prompt-to-response check above).
+`scripts/smoke.sh` is the canonical wrapper around the three sub-checks of Step 7 (`/healthz`, `/v1/connectors`, broker-mediated `/v1/chat/completions`) and additionally probes Ollama `/api/tags` as a diagnostic prerequisite so that a missing model is reported with a clearer message than the broker's sanitized error vocabulary can give on its own.
 
 ### Known follow-ups (tracked, not in scope for Phase 1)
 
-- **Gateway model-routing endpoint** (issue #13 follow-up, Phase 2).
-  AgenticPlug does not yet expose an OpenAI-compatible
-  `/v1/chat/completions` or `/v1/proxy/ollama/api/generate` route. The
-  smoke test will pin one of those once the contract lands in
-  `alrobles/agenticplug` and the orchestrator is wired to use it.
-- **Durable broker session/audit store** (Phase 2). `BROKER_SESSION_STORE`
-  defaults to `memory`, which is intentional for the Phase 1 DIY demo:
-  sessions and audit log reset on `docker compose restart agenticplug`,
-  so this configuration is **not suitable for production**. Phase 2
-  switches to a durable SQLite-backed store.
+- **Orchestrator wiring** (Phase 2 follow-up). The `ecoseek-api`
+  orchestrator's `OLLAMA_URL` still points at Ollama directly. Routing
+  the orchestrator's model traffic through `/v1/chat/completions`
+  instead is the next step now that the broker exposes the route. It is
+  out of scope for this smoke, which validates the contract at the
+  smoke-test layer.
+- **Durable broker session/audit store** (Phase 2). Default is now
+  `BROKER_SESSION_STORE=sqlite` (persistent, survives broker restarts
+  via the `broker-data` Docker volume). The legacy `memory` backend
+  remains available for ephemeral tests but is **not suitable for
+  production**.
+- **Streaming chat completions**. `stream: true` is intentionally
+  rejected by `/v1/chat/completions` today — streaming requires more
+  careful audit-log hygiene than the MVP provides. Tracked upstream.
 
 ---
 
@@ -419,10 +421,16 @@ Steps 1–7) and the fastest way to unstick each one.
 |---|---|---|
 | `Missing prerequisite: docker` or `docker compose v2 plugin not found` | Docker Desktop / Docker Engine is not installed or the v2 compose plugin is missing. | Install Docker (Linux / macOS / WSL): https://docs.docker.com/get-docker/. On Linux, ensure the user is in the `docker` group or invoke via `sudo` once to verify. Re-run `bash setup.sh`. |
 | `docker: Cannot connect to the Docker daemon` (setup.sh or compose) | Docker Desktop is installed but not running, or on Linux the daemon is stopped. | Start Docker Desktop, or `sudo systemctl start docker`. Confirm with `docker info`. |
-| `[1/4] AgenticPlug /healthz ...` returns `000` or `502` | `agenticplug` container is not running, not healthy, or the host port is shadowed. | `docker compose ps agenticplug` then `docker compose logs --tail=200 agenticplug`. If healthy but unreachable from host, see "port collision" below. |
-| `[2/4] AgenticPlug /v1/connectors ...` returns non-JSON or 5xx | Broker started but its config is wrong (e.g. unreadable `BROKER_SESSION_STORE`, missing connector manifest). | `docker compose logs agenticplug \| tail -200`. Most often this is a broken `.env` — re-run `bash setup.sh` to regenerate. |
-| `[3/4] Ollama model '...' not present` and pull fails | The default `tinyllama` requires network egress from the Ollama container, or you set `OLLAMA_MODEL=ecocoder` before it is published. | For `tinyllama`, confirm `docker compose exec ollama curl -s https://ollama.ai/` works. For `ecocoder`, **EcoCoder is not yet in the public Ollama registry** — keep `OLLAMA_MODEL=tinyllama` until it ships. Once published, `OLLAMA_MODEL=ecocoder bash setup.sh && docker compose exec ollama ollama pull ecocoder`. |
-| `[4/4] Ollama /api/generate ... empty 'response' field` | Model loaded but generated nothing (rare with `tinyllama`), or your prompt and `num_predict` are too small for the model to produce text. | Re-run with a clearer prompt: `SMOKE_PROMPT="Write one sentence about ecology." bash scripts/smoke.sh`. If still empty, `docker compose logs ollama` — first call after a fresh pull can time out while the model warms up; re-run. |
+| `[1/3] AgenticPlug /healthz ...` returns `000` or `502` | `agenticplug` container is not running, not healthy, or the host port is shadowed. | `docker compose ps agenticplug` then `docker compose logs --tail=200 agenticplug`. If healthy but unreachable from host, see "port collision" below. |
+| `[2/3] AgenticPlug /v1/connectors ...` returns non-JSON or 5xx | Broker started but its config is wrong (e.g. unreadable `BROKER_SESSION_STORE`, missing connector manifest). | `docker compose logs agenticplug \| tail -200`. Most often this is a broken `.env` — re-run `bash setup.sh` to regenerate. |
+| `[diag] Ollama model '...' not present` and pull fails | The default `tinyllama` requires network egress from the Ollama container, or you set `OLLAMA_MODEL=ecocoder` before it is published. | For `tinyllama`, confirm `docker compose exec ollama curl -s https://ollama.ai/` works. For `ecocoder`, **EcoCoder is not yet in the public Ollama registry** — keep `OLLAMA_MODEL=tinyllama` until it ships. Once published, `OLLAMA_MODEL=ecocoder bash setup.sh && docker compose exec ollama ollama pull ecocoder`. |
+| `[3/3] AGENTICPLUG_SESSION is not set` (exit 4) | The broker-mediated chat route requires a session — there is no smoke-mode bypass. | Follow [Obtaining an AgenticPlug session](#obtaining-an-agenticplug-session) to mint one and put it in `.env` as `AGENTICPLUG_SESSION=<session_id>`. |
+| `[3/3] /v1/chat/completions returned HTTP 401` (`no_session`) | The session id is missing, expired, or for a user no longer in `AGENTICPLUG_ALLOWED_LOGINS`. | Re-issue the session via `POST /v1/cli/session`. If the broker was recreated and `BROKER_SESSION_STORE=memory`, all sessions were lost — switch to the default `sqlite` backend. |
+| `[3/3] /v1/chat/completions returned HTTP 403` (`scope_denied` or `forbidden`) | The session was issued with `scopes.capabilities` that does not include `model.chat`, OR the broker's `userAuthorizer` denied the user for that capability. | Re-issue the session without `scopes.capabilities` (unscoped sessions are backward compatible), or add `model.chat` to the scope list. Confirm your GitHub login is in `AGENTICPLUG_ALLOWED_LOGINS`. |
+| `[3/3] /v1/chat/completions returned HTTP 503` (`model_route_unconfigured`) | The broker container does not have `OLLAMA_BASE_URL` set. The route fails closed by design. | Confirm `OLLAMA_BASE_URL: "http://ollama:${OLLAMA_PORT:-11434}"` is present in the `agenticplug` service of `docker-compose.yml`, then `docker compose up -d --force-recreate agenticplug`. |
+| `[3/3] /v1/chat/completions returned HTTP 503` (`upstream_unavailable`) or `502` (`upstream_error`) | Broker reached upstream Ollama but Ollama refused or returned a non-2xx. Most often the model name does not exist on the Ollama side, or Ollama is still warming up. | `docker compose ps ollama`; pull the model (`docker compose exec ollama ollama pull "${OLLAMA_MODEL}"`); retry. First call after a cold pull can time out — re-run. |
+| `[3/3] /v1/chat/completions returned HTTP 400` (`invalid_model`, `streaming_not_supported`, `invalid_role`, …) | The request body shape is wrong: model name fails the `[A-Za-z0-9_.:/-]+` regex, `stream: true` was sent, or a message role/content is invalid. | Use the unmodified `scripts/smoke.sh`. If you patched it, verify `OLLAMA_MODEL` is a plain identifier and `stream` is `false` or omitted. |
+| `[3/3] /v1/chat/completions ... empty assistant 'content'` | Model loaded but generated nothing (rare with `tinyllama`), or the prompt is too short for the model to produce text. | Re-run with a clearer prompt: `SMOKE_PROMPT="Write one sentence about ecology." bash scripts/smoke.sh`. If still empty, `docker compose logs ollama`. |
 | `bind: address already in use` during `docker compose up` (port collision) | Another process on the host is bound to one of `${ECOSEEK_API_PORT}`, `${AGENTICPLUG_PORT}`, `${ECOAGENT_PORT}`, `${OLLAMA_PORT}`, or `${PHOENIX_PORT}`. | Find the offender: `ss -ltnp \| grep :${PORT}` (Linux) or `lsof -iTCP:${PORT} -sTCP:LISTEN` (macOS/WSL). Either stop it or pick a free port by editing `.env` (e.g. `AGENTICPLUG_PORT=8081`) and re-running `docker compose up -d`. Smoke reads ports from `.env`, so no other edits are needed. |
 | `bind: permission denied` when binding < 1024 | A non-root user trying to publish on a privileged port. | Set a port ≥ 1024 in `.env` (the defaults already are). Avoid 80/443 for the smoke. |
 | AgenticPlug `401 no_session` on a manual `/v1/tasks` POST | `POST /v1/tasks` requires a CLI session obtained from `POST /v1/cli/session` with a real GitHub access token and the user listed in `AGENTICPLUG_ALLOWED_LOGINS`. | The Phase 2 smoke does **not** exercise this path — it is documented in the upstream gateway and requires a non-secret GitHub token for the test user. For session lifecycle and persistence, see Step 8 above and [`session-store.md`](./session-store.md). |
