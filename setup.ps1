@@ -165,6 +165,19 @@ PHOENIX_PROJECT_NAME=$($env:PHOENIX_PROJECT_NAME)
 # SQLite sessions survive broker restarts via broker-data Docker volume
 BROKER_SESSION_STORE=$($env:BROKER_SESSION_STORE)
 
+# AgenticPlug GitHub allowlist for CLI session handshake. Comma-
+# separated GitHub logins. Empty = no sessions can be issued. Set
+# this to your own GitHub login if you want to exercise the
+# broker-mediated /v1/chat/completions route in scripts/smoke.sh.
+AGENTICPLUG_ALLOWED_LOGINS=$($env:AGENTICPLUG_ALLOWED_LOGINS)
+
+# AgenticPlug session id (opaque bearer token) for scripts/smoke.sh
+# to call /v1/chat/completions. Obtain via POST /v1/cli/session
+# with a personal GitHub access token; see docs/smoke-test.md.
+# Empty = smoke.sh will skip the broker-mediated chat check and
+# print a clear hint instead of pretending it passed.
+AGENTICPLUG_SESSION=$($env:AGENTICPLUG_SESSION)
+
 # BYOK - empty by default; fill in to use DeepSeek cloud
 DEEPSEEK_API_KEY=$deepseek
 "@
@@ -259,8 +272,16 @@ Write-Var "ECOSEEK_AAR_ENABLED"  $env:ECOSEEK_AAR_ENABLED
 Write-Var "ECOSEEK_JUDGE_MODEL"  $env:ECOSEEK_JUDGE_MODEL
 Write-Var "PHOENIX_PORT"         $env:PHOENIX_PORT
 Write-Var "PHOENIX_ENDPOINT"     $env:PHOENIX_ENDPOINT
-Write-Var "BROKER_SESSION_STORE" $env:BROKER_SESSION_STORE
-Write-Var "DEEPSEEK_API_KEY"     $env:DEEPSEEK_API_KEY
+Write-Var "BROKER_SESSION_STORE"        $env:BROKER_SESSION_STORE
+Write-Var "AGENTICPLUG_ALLOWED_LOGINS"  $env:AGENTICPLUG_ALLOWED_LOGINS
+# AGENTICPLUG_SESSION is an opaque bearer token; treat as a secret
+# even though its name does not match KEY|TOKEN|SECRET|PASSWORD.
+if ($env:AGENTICPLUG_SESSION) {
+    Write-Info "  AGENTICPLUG_SESSION: configured (value hidden)"
+} else {
+    Write-Info "  AGENTICPLUG_SESSION: not set"
+}
+Write-Var "DEEPSEEK_API_KEY"            $env:DEEPSEEK_API_KEY
 Write-Host ""
 Write-Info "All host ports bind to 127.0.0.1 (loopback only). If you need LAN"
 Write-Info "access, edit docker-compose.yml - do not expose Ollama or AgenticPlug"
