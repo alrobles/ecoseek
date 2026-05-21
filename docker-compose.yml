@@ -113,11 +113,13 @@ services:
     environment:
       BROKER_HOST: "0.0.0.0"
       BROKER_PORT: "${AGENTICPLUG_PORT:-8080}"
-      # Phase 1 / non-production: sessions and audit log live in process
-      # memory and reset on `docker compose restart agenticplug`. Phase 2
-      # will switch to a durable SQLite store. Do NOT use the memory
-      # store for production or anything that requires audit retention.
-      BROKER_SESSION_STORE: "${BROKER_SESSION_STORE:-memory}"
+      # Session store backend. `sqlite` is the alpha default: sessions
+      # persist across `docker compose restart agenticplug` via the
+      # broker-data named volume mounted at /data. Override with
+      # BROKER_SESSION_STORE=memory in .env for tests/dev where ephemeral
+      # state is acceptable. The memory backend is NOT suitable for
+      # production or anything that requires audit retention.
+      BROKER_SESSION_STORE: "${BROKER_SESSION_STORE:-sqlite}"
       ECOAGENT_URL: "http://ecoagent:${ECOAGENT_PORT:-8000}"
       OLLAMA_URL: "http://ollama:${OLLAMA_PORT:-11434}"
       # Required by /v1/chat/completions (AgenticPlug PR #80). Fixed path
