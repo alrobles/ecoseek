@@ -112,6 +112,9 @@ if (-not $env:OLLAMA_PORT)           { $env:OLLAMA_PORT           = "11434" }
 if (-not $env:OLLAMA_MODEL)          { $env:OLLAMA_MODEL          = "tinyllama" }
 if (-not $env:ECOSEEK_AAR_ENABLED)   { $env:ECOSEEK_AAR_ENABLED   = "false" }
 if (-not $env:ECOSEEK_JUDGE_MODEL)   { $env:ECOSEEK_JUDGE_MODEL   = "auto" }
+# PHOENIX_PORT is the loopback host port for the optional observability
+# profile; the Phoenix container always listens on 6006 internally.
+if (-not $env:PHOENIX_PORT)          { $env:PHOENIX_PORT          = "6006" }
 if (-not $env:PHOENIX_ENDPOINT)      { $env:PHOENIX_ENDPOINT      = "http://phoenix:6006" }
 if (-not $env:PHOENIX_PROJECT_NAME)  { $env:PHOENIX_PROJECT_NAME  = "ecoseek" }
 if (-not $env:COMPOSE_PROFILES)      { $env:COMPOSE_PROFILES      = "cpu" }
@@ -142,6 +145,7 @@ ECOSEEK_API_PORT=$($env:ECOSEEK_API_PORT)
 AGENTICPLUG_PORT=$($env:AGENTICPLUG_PORT)
 ECOAGENT_PORT=$($env:ECOAGENT_PORT)
 OLLAMA_PORT=$($env:OLLAMA_PORT)
+PHOENIX_PORT=$($env:PHOENIX_PORT)
 
 # Local model
 OLLAMA_MODEL=$($env:OLLAMA_MODEL)
@@ -239,13 +243,14 @@ Write-Host ("  {0,-25} {1}" -f "EcoSeek API:",         "http://127.0.0.1:$($env:
 Write-Host ("  {0,-25} {1}" -f "AgenticPlug gateway:", "http://127.0.0.1:$($env:AGENTICPLUG_PORT)")
 Write-Host ("  {0,-25} {1}" -f "EcoAgent tools:",      "http://127.0.0.1:$($env:ECOAGENT_PORT)/v1/tools")
 Write-Host ("  {0,-25} {1}" -f "Ollama API:",          "http://127.0.0.1:$($env:OLLAMA_PORT)")
-Write-Host ("  {0,-25} {1}" -f "Phoenix (optional):",  "http://127.0.0.1:6006  (--profile observability)")
+Write-Host ("  {0,-25} {1}" -f "Phoenix (optional):",  "http://127.0.0.1:$($env:PHOENIX_PORT)  (--profile observability)")
 Write-Host ""
 Write-Info "Configuration summary (values redacted for KEY/TOKEN/SECRET/PASSWORD):"
 Write-Var "COMPOSE_PROFILES"     $env:COMPOSE_PROFILES
 Write-Var "OLLAMA_MODEL"         $env:OLLAMA_MODEL
 Write-Var "ECOSEEK_AAR_ENABLED"  $env:ECOSEEK_AAR_ENABLED
 Write-Var "ECOSEEK_JUDGE_MODEL"  $env:ECOSEEK_JUDGE_MODEL
+Write-Var "PHOENIX_PORT"         $env:PHOENIX_PORT
 Write-Var "PHOENIX_ENDPOINT"     $env:PHOENIX_ENDPOINT
 Write-Var "DEEPSEEK_API_KEY"     $env:DEEPSEEK_API_KEY
 Write-Host ""
