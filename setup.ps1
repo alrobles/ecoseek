@@ -118,6 +118,8 @@ if (-not $env:PHOENIX_PORT)          { $env:PHOENIX_PORT          = "6006" }
 if (-not $env:PHOENIX_ENDPOINT)      { $env:PHOENIX_ENDPOINT      = "http://phoenix:6006" }
 if (-not $env:PHOENIX_PROJECT_NAME)  { $env:PHOENIX_PROJECT_NAME  = "ecoseek" }
 if (-not $env:COMPOSE_PROFILES)      { $env:COMPOSE_PROFILES      = "cpu" }
+# AgenticPlug session store: sqlite for alpha (persistent), memory for dev/test
+if (-not $env:BROKER_SESSION_STORE)  { $env:BROKER_SESSION_STORE  = "sqlite" }
 
 $overwrite = $true
 if (Test-Path ".env") {
@@ -157,6 +159,11 @@ ECOSEEK_JUDGE_MODEL=$($env:ECOSEEK_JUDGE_MODEL)
 # Phoenix observability (optional profile)
 PHOENIX_ENDPOINT=$($env:PHOENIX_ENDPOINT)
 PHOENIX_PROJECT_NAME=$($env:PHOENIX_PROJECT_NAME)
+
+# AgenticPlug session store backend
+# Options: memory (dev/test), sqlite (default for alpha, persistent)
+# SQLite sessions survive broker restarts via broker-data Docker volume
+BROKER_SESSION_STORE=$($env:BROKER_SESSION_STORE)
 
 # BYOK - empty by default; fill in to use DeepSeek cloud
 DEEPSEEK_API_KEY=$deepseek
@@ -252,6 +259,7 @@ Write-Var "ECOSEEK_AAR_ENABLED"  $env:ECOSEEK_AAR_ENABLED
 Write-Var "ECOSEEK_JUDGE_MODEL"  $env:ECOSEEK_JUDGE_MODEL
 Write-Var "PHOENIX_PORT"         $env:PHOENIX_PORT
 Write-Var "PHOENIX_ENDPOINT"     $env:PHOENIX_ENDPOINT
+Write-Var "BROKER_SESSION_STORE" $env:BROKER_SESSION_STORE
 Write-Var "DEEPSEEK_API_KEY"     $env:DEEPSEEK_API_KEY
 Write-Host ""
 Write-Info "All host ports bind to 127.0.0.1 (loopback only). If you need LAN"
