@@ -68,6 +68,8 @@ First build takes 2-5 minutes (clones repos inside containers). See [docs/instal
 - [Alpha checklist](./docs/alpha-checklist.md) — what works, what is mocked, pre-alpha gates
 - [Roadmap](./docs/roadmap.md) — Done / Now / Next / Later
 - [Install guide](./docs/install.md) — prerequisites, quick start, running tests
+- [Local DIY smoke test](./docs/smoke-test.md) — canonical Phase 2 smoke command (issue #15)
+- [Remote smoke (Phase 3 scaffold)](./docs/remote-smoke.md) — reumanlab / KU-HPC remote path verifier (issue #22)
 - [Full threat model](https://github.com/alrobles/knowledgebase/blob/main/plans/ecoSeek/threat-model.md) — 24 scenarios, risk matrix, incident response
 
 ---
