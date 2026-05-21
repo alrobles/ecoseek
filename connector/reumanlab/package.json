@@ -1,0 +1,15 @@
+{
+  "name": "reumanlab-connector",
+  "version": "0.3.0",
+  "description": "Persistent reumanlab connector for the AgenticPlug Phase 3 contract",
+  "main": "main.js",
+  "scripts": {
+    "start": "node main.js",
+    "test": "node ../../test/reumanlab-connector.test.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "GPL-3.0-only",
+  "private": true
+}
