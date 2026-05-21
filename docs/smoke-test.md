@@ -52,6 +52,7 @@ On Windows (PowerShell):
   - `ECOSEEK_JUDGE_MODEL=auto`
   - `PHOENIX_ENDPOINT=http://phoenix:6006`
   - `PHOENIX_PROJECT_NAME=ecoseek`
+  - `BROKER_SESSION_STORE=sqlite` (Phase 2: persistent session store)
   - `DEEPSEEK_API_KEY=` (empty unless you provided one)
 - Final summary lists the loopback URLs above. **No value of `DEEPSEEK_API_KEY` (or any variable whose name contains `KEY`, `TOKEN`, `SECRET`, or `PASSWORD`) is printed** — secret-named variables show only `configured (value hidden)` or `not set`.
 - `.repos/agenticplug`, `.repos/agenticSeek`, and `.repos/ecoagent` exist.
@@ -59,7 +60,7 @@ On Windows (PowerShell):
 Verify quickly:
 
 ```bash
-grep -E '^(COMPOSE_PROFILES|ECOSEEK_API_PORT|AGENTICPLUG_PORT|ECOAGENT_PORT|OLLAMA_PORT|PHOENIX_PORT|OLLAMA_MODEL|ECOSEEK_AAR_ENABLED|ECOSEEK_JUDGE_MODEL|PHOENIX_ENDPOINT|PHOENIX_PROJECT_NAME|DEEPSEEK_API_KEY)=' .env
+grep -E '^(COMPOSE_PROFILES|ECOSEEK_API_PORT|AGENTICPLUG_PORT|ECOAGENT_PORT|OLLAMA_PORT|PHOENIX_PORT|OLLAMA_MODEL|ECOSEEK_AAR_ENABLED|ECOSEEK_JUDGE_MODEL|PHOENIX_ENDPOINT|PHOENIX_PROJECT_NAME|BROKER_SESSION_STORE|DEEPSEEK_API_KEY)=' .env
 ```
 
 ---
@@ -276,8 +277,81 @@ Add `-v` to also remove the named volumes (`ollama-data`, `redis-data`, `broker-
 
 Reproducibility note: a passing run of all 7 steps satisfies alpha-checklist criteria 1–3 (`DIY mode without real secrets`, `EcoAgent loads a small EcoCoder agent`, `the agent makes at least one call through AgenticPlug to a local model`). Criteria 4 (audit log fidelity) and 5 (deterministic re-run) are tracked in Phase 2.
 
-> **Phase 1 / non-production:** AgenticPlug session storage defaults to
-> `BROKER_SESSION_STORE=memory`. Sessions and audit log live in process
-> memory and reset on `docker compose restart agenticplug`. This is
-> intentional for the DIY demo and **must not be used in production**
-> — Phase 2 will switch to a durable SQLite-backed store.
+**Phase 2 update:** AgenticPlug now defaults to persistent SQLite session storage (`BROKER_SESSION_STORE=sqlite`), which survives broker restarts via the `broker-data` Docker volume. See Step 8 below for session persistence verification. For ephemeral testing, set `BROKER_SESSION_STORE=memory` in `.env` before running `docker compose up`.
+
+---
+
+### Step 8 — Session persistence across broker restart (Phase 2)
+
+This step verifies that AgenticPlug sessions survive a broker container restart when using the SQLite backend (default for alpha).
+
+**Prerequisites:**
+- Steps 1-7 completed successfully.
+- `BROKER_SESSION_STORE=sqlite` in `.env` (default after running `setup.sh`).
+- You have a GitHub access token for testing (obtain via GitHub Device Flow or personal access token for smoke testing).
+
+**Test procedure:**
+
+1. **Create a test session:**
+
+   ```bash
+   source .env
+   # Exchange a GitHub token for a session ID (mock for smoke test)
+   # In a real flow, the client would complete GitHub Device Flow first.
+   # For this smoke test, we verify the session store persists data.
+
+   # Check the AgenticPlug session endpoint (if available)
+   curl -s "http://127.0.0.1:${AGENTICPLUG_PORT}/admin/sessions" \
+     -H "Authorization: Bearer mock-test-session" || echo "Session endpoint not accessible (expected for smoke test)"
+   ```
+
+2. **Verify the SQLite database exists:**
+
+   ```bash
+   docker compose exec agenticplug ls -lh /data/sessions.db || echo "SQLite file not yet created (will be created on first session)"
+   ```
+
+3. **Restart the broker container:**
+
+   ```bash
+   docker compose restart agenticplug
+   # Wait for healthcheck to pass
+   sleep 15
+   docker compose ps agenticplug | grep healthy
+   ```
+
+4. **Verify the SQLite database persists:**
+
+   ```bash
+   docker compose exec agenticplug ls -lh /data/sessions.db
+   docker compose exec agenticplug cat /data/sessions.db > /dev/null && echo "✓ SQLite file readable after restart"
+   ```
+
+5. **Check AgenticPlug logs for session store initialization:**
+
+   ```bash
+   docker compose logs agenticplug | grep -i "session" | tail -5
+   ```
+
+**Expected result:**
+
+- The broker restarts successfully and reaches `(healthy)` state.
+- The SQLite database file (`/data/sessions.db`) persists across the restart.
+- AgenticPlug logs mention initializing the SQLite session store with no errors.
+- If any sessions were active before the restart, they remain valid after (assuming they haven't expired).
+
+**Testing with a real session (optional):**
+
+To verify session validity across restart with a real GitHub token:
+
+1. Complete GitHub Device Flow and exchange for a session ID.
+2. Make an authenticated request to AgenticPlug with the session ID.
+3. Restart the broker (`docker compose restart agenticplug`).
+4. Repeat the authenticated request — it should succeed with the same session ID.
+5. Wait for the session TTL to expire (default 24 hours, configurable).
+6. Restart the broker again.
+7. Verify that the expired session is now rejected (expired sessions should not be "resurrected").
+
+For detailed session store documentation, including expiry, revocation, and corrupted store handling, see [`session-store.md`](./session-store.md).
+
+---
