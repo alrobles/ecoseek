@@ -18,6 +18,8 @@
 #                        activates `cpu` automatically; see COMPOSE_PROFILES below.)
 #   - observability   — adds Arize Phoenix tracing UI
 #                       docker compose --profile observability up
+#                       Publishes Phoenix on 127.0.0.1:${PHOENIX_PORT:-6006}
+#                       (the container always listens on 6006 internally).
 #
 # All host port publications are bound to 127.0.0.1 so the stack is reachable
 # only from the local machine. If you need LAN/remote access, edit the
@@ -45,12 +47,23 @@ services:
       dockerfile: Dockerfile.backend
     container_name: ecoseek-api
     ports:
+      # Loopback-only by design: the FastAPI backend has no authentication
+      # at this layer (auth lives in AgenticPlug). Do not change 127.0.0.1
+      # to 0.0.0.0 — that would expose the orchestrator to the LAN.
       - "127.0.0.1:${ECOSEEK_API_PORT:-3000}:${ECOSEEK_API_PORT:-3000}"
     volumes:
       - workspace:/opt/workspace
       - screenshots:/app/.screenshots
       - ./config.ini:/app/config.ini:ro
     environment:
+      # BACKEND_PORT is intentionally derived from ECOSEEK_API_PORT (and
+      # NOT read from a separate BACKEND_PORT env var) so the host-side
+      # publication and the in-container listener can never drift. To
+      # change the port, set ECOSEEK_API_PORT in .env — do not override
+      # BACKEND_PORT directly. BACKEND_HOST stays 0.0.0.0 so the FastAPI
+      # process binds inside the container's user-defined bridge network;
+      # the host-side bind above (127.0.0.1) is what actually gates
+      # external exposure.
       BACKEND_PORT: "${ECOSEEK_API_PORT:-3000}"
       BACKEND_HOST: "0.0.0.0"
       WORK_DIR: "/opt/workspace"
@@ -100,6 +113,10 @@ services:
     environment:
       BROKER_HOST: "0.0.0.0"
       BROKER_PORT: "${AGENTICPLUG_PORT:-8080}"
+      # Phase 1 / non-production: sessions and audit log live in process
+      # memory and reset on `docker compose restart agenticplug`. Phase 2
+      # will switch to a durable SQLite store. Do NOT use the memory
+      # store for production or anything that requires audit retention.
       BROKER_SESSION_STORE: "${BROKER_SESSION_STORE:-memory}"
       ECOAGENT_URL: "http://ecoagent:${ECOAGENT_PORT:-8000}"
       OLLAMA_URL: "http://ollama:${OLLAMA_PORT:-11434}"
