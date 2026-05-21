@@ -23,8 +23,12 @@ RUN npm install --production \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/* .git
 
+# BROKER_SESSION_STORE defaults to sqlite for alpha (persistent across
+# restarts via the broker-data volume mounted at /data in compose).
+# Override at runtime with `-e BROKER_SESSION_STORE=memory` for tests
+# or dev where ephemeral state is acceptable.
 ENV BROKER_PORT=3000 \
-    BROKER_SESSION_STORE=memory
+    BROKER_SESSION_STORE=sqlite
 
 EXPOSE ${BROKER_PORT}
 
