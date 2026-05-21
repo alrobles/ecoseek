@@ -123,6 +123,8 @@ PHOENIX_PROJECT_NAME="${PHOENIX_PROJECT_NAME:-ecoseek}"
 # Default profile = cpu so `docker compose up` brings the CPU Ollama
 # variant; the GPU profile (`--profile gpu`) is mutually exclusive.
 COMPOSE_PROFILES="${COMPOSE_PROFILES:-cpu}"
+# AgenticPlug session store: sqlite for alpha (persistent), memory for dev/test
+BROKER_SESSION_STORE="${BROKER_SESSION_STORE:-sqlite}"
 
 OVERWRITE=1
 if [ -f .env ]; then
@@ -166,6 +168,11 @@ if [ "$OVERWRITE" -eq 1 ]; then
     echo "# Phoenix observability (optional profile)"
     echo "PHOENIX_ENDPOINT=${PHOENIX_ENDPOINT}"
     echo "PHOENIX_PROJECT_NAME=${PHOENIX_PROJECT_NAME}"
+    echo ""
+    echo "# AgenticPlug session store backend"
+    echo "# Options: memory (dev/test), sqlite (default for alpha, persistent)"
+    echo "# SQLite sessions survive broker restarts via broker-data Docker volume"
+    echo "BROKER_SESSION_STORE=${BROKER_SESSION_STORE}"
     echo ""
     echo "# BYOK — empty by default; fill in to use DeepSeek cloud"
     echo "DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}"
@@ -257,6 +264,7 @@ print_var OLLAMA_MODEL       "${OLLAMA_MODEL}"
 print_var ECOSEEK_AAR_ENABLED "${ECOSEEK_AAR_ENABLED}"
 print_var ECOSEEK_JUDGE_MODEL "${ECOSEEK_JUDGE_MODEL}"
 print_var PHOENIX_ENDPOINT   "${PHOENIX_ENDPOINT}"
+print_var BROKER_SESSION_STORE "${BROKER_SESSION_STORE}"
 print_var DEEPSEEK_API_KEY   "${DEEPSEEK_API_KEY:-}"
 echo ""
 info "All host ports bind to 127.0.0.1 (loopback only). If you need LAN"

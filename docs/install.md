@@ -108,8 +108,13 @@ git clone https://github.com/alrobles/knowledgebase.git   # read-only reference
 ```bash
 cd agenticplug
 npm install
+# For development/testing: use memory store (sessions lost on restart)
 BROKER_SESSION_STORE=memory node broker/server.js
+# For persistent sessions: use sqlite store (default for alpha)
+BROKER_SESSION_STORE=sqlite node broker/server.js
 ```
+
+> **Session store:** AgenticPlug supports `memory` (ephemeral, for dev/test) and `sqlite` (persistent, survives restarts). See [`session-store.md`](./session-store.md) for details on choosing a backend.
 
 > **WSL users:** Make sure `which node` returns `/usr/bin/node` (Linux), not `/mnt/c/.../node.exe` (Windows). If it returns the Windows path, install Node.js inside WSL: `curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash - && sudo apt install -y nodejs`
 
