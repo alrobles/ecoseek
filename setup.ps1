@@ -2,29 +2,32 @@
 # Works with Docker Desktop on Windows (no WSL required).
 #
 # Usage:
-#   $env:DEEPSEEK_API_KEY="sk-xxx"; .\setup.ps1   # with DeepSeek API
-#   .\setup.ps1                                     # prompts for API key
+#   .\setup.ps1                                  # interactive, prompts for DeepSeek key
+#   $env:DEEPSEEK_API_KEY="sk-xxx"; .\setup.ps1  # non-interactive (BYOK)
 #
 # What it does:
-#   1. Checks prerequisites (git, docker)
-#   2. Asks for your DeepSeek API key (if not set)
-#   3. Clones dependency repos into .repos/ (uses YOUR git auth)
-#   4. Builds Docker images from the local checkouts
-#   5. Starts the full stack and verifies services are healthy
+#   1. Checks prerequisites (git, docker, docker compose v2)
+#   2. Generates / updates .env with all the variables docker-compose.yml expects
+#   3. Generates config.ini for the EcoSeek UI / orchestrator
+#   4. Clones dependency repos into .repos/ (uses YOUR git auth)
 #
-# No Node.js, Python, or npm required on the host — just Git + Docker.
-# Works with private repos — git clone runs on the host where you
-# are already authenticated, then Docker COPY's the files in.
+# After this script, start the stack with:
+#   docker compose up -d
 
 $ErrorActionPreference = "Stop"
 Push-Location $PSScriptRoot
 
-function Write-Info  { Write-Host "[ecoseek] $args" -ForegroundColor Green }
-function Write-Warn  { Write-Host "[ecoseek] $args" -ForegroundColor Yellow }
-function Write-Err   { Write-Host "[ecoseek] $args" -ForegroundColor Red }
+function Write-Info { Write-Host "[ecoseek] $args" -ForegroundColor Green }
+function Write-Warn { Write-Host "[ecoseek] $args" -ForegroundColor Yellow }
+function Write-Err  { Write-Host "[ecoseek] $args" -ForegroundColor Red }
+
+# Never print the value of an env var whose name contains a secret marker.
+function Test-SecretName($name) {
+    return ($name -match '(?i)KEY|TOKEN|SECRET|PASSWORD')
+}
 
 # ── Prerequisites ─────────────────────────────────────────────────────────
-function Test-Command($cmd, $help) {
+function Test-Cmd($cmd, $help) {
     if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) {
         Write-Err "Required: $cmd is not installed."
         Write-Err $help
@@ -32,10 +35,9 @@ function Test-Command($cmd, $help) {
     }
 }
 
-Test-Command "git"    "Install git: https://git-scm.com/downloads"
-Test-Command "docker" "Install Docker Desktop: https://docs.docker.com/get-docker/"
+Test-Cmd "git"    "Install git: https://git-scm.com/downloads"
+Test-Cmd "docker" "Install Docker Desktop: https://docs.docker.com/get-docker/"
 
-# Check docker compose v2
 try {
     docker compose version | Out-Null
 } catch {
@@ -44,7 +46,6 @@ try {
     exit 1
 }
 
-# Check Docker daemon
 try {
     docker info 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) { throw }
@@ -53,7 +54,7 @@ try {
     exit 1
 }
 
-# ── DeepSeek API key ──────────────────────────────────────────────────────
+# ── DeepSeek API key (BYOK — optional) ────────────────────────────────────
 if (-not $env:DEEPSEEK_API_KEY) {
     Write-Host ""
     Write-Info "No DEEPSEEK_API_KEY found in environment."
@@ -63,33 +64,74 @@ if (-not $env:DEEPSEEK_API_KEY) {
     if ($key) {
         $env:DEEPSEEK_API_KEY = $key
     } else {
-        Write-Warn "No API key provided. The stack will start but AI features won't work."
-        Write-Warn "You can set it later: `$env:DEEPSEEK_API_KEY='sk-xxx'; docker compose up -d"
+        Write-Warn "No API key provided. EcoSeek will run in local-only mode (Ollama)."
     }
 }
 
-# Write .env file for docker compose (persists across restarts)
-if ($env:DEEPSEEK_API_KEY) {
-    "DEEPSEEK_API_KEY=$($env:DEEPSEEK_API_KEY)" | Set-Content -Path ".env" -NoNewline
-    Write-Info "API key saved to .env (git-ignored, local only)"
+# ── Generate / update .env ────────────────────────────────────────────────
+if (-not $env:ECOSEEK_UI_PORT)       { $env:ECOSEEK_UI_PORT       = "3000" }
+if (-not $env:AGENTICPLUG_PORT)      { $env:AGENTICPLUG_PORT      = "8080" }
+if (-not $env:ECOAGENT_PORT)         { $env:ECOAGENT_PORT         = "8000" }
+if (-not $env:OLLAMA_PORT)           { $env:OLLAMA_PORT           = "11434" }
+if (-not $env:OLLAMA_MODEL)          { $env:OLLAMA_MODEL          = "ecocoder" }
+if (-not $env:ECOSEEK_AAR_ENABLED)   { $env:ECOSEEK_AAR_ENABLED   = "false" }
+if (-not $env:ECOSEEK_JUDGE_MODEL)   { $env:ECOSEEK_JUDGE_MODEL   = "auto" }
+if (-not $env:PHOENIX_ENDPOINT)      { $env:PHOENIX_ENDPOINT      = "http://phoenix:6006" }
+if (-not $env:PHOENIX_PROJECT_NAME)  { $env:PHOENIX_PROJECT_NAME  = "ecoseek" }
+
+$overwrite = $true
+if (Test-Path ".env") {
+    Write-Host ""
+    Write-Warn ".env already exists at $(Resolve-Path .env)"
+    $reply = Read-Host "[ecoseek] Overwrite it with the latest defaults? [y/N]"
+    if ($reply -notmatch '^(y|Y|yes|YES)$') { $overwrite = $false }
 }
 
-# -- Generate config.ini --------------------------------------------------------
-# The backend reads config.ini at startup. We generate it here so Docker
-# networking hostnames are used (ollama:11434 instead of 127.0.0.1:11434)
-# and the provider is set based on whether an API key was provided.
+if ($overwrite) {
+    $deepseek = if ($env:DEEPSEEK_API_KEY) { $env:DEEPSEEK_API_KEY } else { "" }
+    $envContent = @"
+# Generated by setup.ps1 — local only, do not commit
+
+# Ports
+ECOSEEK_UI_PORT=$($env:ECOSEEK_UI_PORT)
+AGENTICPLUG_PORT=$($env:AGENTICPLUG_PORT)
+ECOAGENT_PORT=$($env:ECOAGENT_PORT)
+OLLAMA_PORT=$($env:OLLAMA_PORT)
+
+# Local model
+OLLAMA_MODEL=$($env:OLLAMA_MODEL)
+
+# Adaptive Autonomous Retrieval
+ECOSEEK_AAR_ENABLED=$($env:ECOSEEK_AAR_ENABLED)
+ECOSEEK_JUDGE_MODEL=$($env:ECOSEEK_JUDGE_MODEL)
+
+# Phoenix observability (optional profile)
+PHOENIX_ENDPOINT=$($env:PHOENIX_ENDPOINT)
+PHOENIX_PROJECT_NAME=$($env:PHOENIX_PROJECT_NAME)
+
+# BYOK — empty by default; fill in to use DeepSeek cloud
+DEEPSEEK_API_KEY=$deepseek
+"@
+    [System.IO.File]::WriteAllText((Join-Path $PSScriptRoot '.env'), $envContent, (New-Object System.Text.UTF8Encoding $false))
+    Write-Info ".env written to $(Join-Path $PSScriptRoot '.env') (git-ignored, local only)"
+} else {
+    Write-Info "Keeping existing .env unchanged"
+}
+
+# ── Generate config.ini ──────────────────────────────────────────────────
 if ($env:DEEPSEEK_API_KEY) {
     $providerName = "deepseek"
     $providerModel = "deepseek-chat"
     $providerAddress = "https://api.deepseek.com"
     $isLocal = "False"
-    Write-Info "LLM provider: DeepSeek API (cloud)"
+    Write-Info "LLM provider: DeepSeek API (cloud, BYOK)"
 } else {
     $providerName = "ollama"
-    $providerModel = "deepseek-r1:14b"
-    $providerAddress = "http://ollama:11434"
+    $providerModel = $env:OLLAMA_MODEL
+    $providerAddress = "http://ollama:$($env:OLLAMA_PORT)"
     $isLocal = "True"
-    Write-Info "LLM provider: Ollama (local) - pull a model with: docker compose exec ollama ollama pull deepseek-r1:14b"
+    Write-Info "LLM provider: Ollama (local) - pull the model with:"
+    Write-Info "  docker compose exec ollama ollama pull $($env:OLLAMA_MODEL)"
 }
 
 $configContent = @"
@@ -134,66 +176,37 @@ function Clone-Repo($url, $dest) {
 if (-not (Test-Path ".repos")) { New-Item -ItemType Directory -Path ".repos" | Out-Null }
 Clone-Repo "https://github.com/alrobles/agenticplug.git" ".repos\agenticplug"
 Clone-Repo "https://github.com/alrobles/agenticSeek.git"  ".repos\agenticSeek"
-
-# ── Build and start ───────────────────────────────────────────────────────
-Write-Info "Building EcoSeek stack (first run takes 5-10 minutes)..."
-Write-Info "  - AgenticSeek backend  (API + agents)"
-Write-Info "  - AgenticSeek frontend (React UI)"
-Write-Info "  - AgenticPlug broker   (gateway)"
-Write-Info "  - SearxNG              (private web search)"
-Write-Info "  - Redis                (task queue)"
-Write-Info "  - Ollama               (local model inference)"
-Write-Host ""
-
-docker compose up --build -d
-if ($LASTEXITCODE -ne 0) {
-    Write-Err "docker compose up failed. Check the output above."
-    exit 1
-}
-
-# ── Health check ──────────────────────────────────────────────────────────
-Write-Info "Waiting for services to become healthy..."
-$maxWait = 180
-$elapsed = 0
-
-while ($elapsed -lt $maxWait) {
-    $brokerHealth = docker compose ps broker --format '{{.Health}}' 2>$null
-    if ($brokerHealth -eq "healthy") {
-        break
-    }
-    Start-Sleep -Seconds 5
-    $elapsed += 5
-    Write-Host "." -NoNewline
-}
-Write-Host ""
-
-if ($elapsed -ge $maxWait) {
-    Write-Warn "Broker did not become healthy within ${maxWait}s."
-    Write-Warn "Check logs with: docker compose logs broker"
-    Write-Warn "The other services may still be starting — check: docker compose ps"
-    exit 1
-}
+Clone-Repo "https://github.com/alrobles/ecoagent.git"     ".repos\ecoagent"
 
 # ── Summary ───────────────────────────────────────────────────────────────
-Write-Info "EcoSeek stack is running!"
 Write-Host ""
-Write-Host ("  {0,-25} {1}" -f "EcoSeek UI:",         "http://localhost:3000")
-Write-Host ("  {0,-25} {1}" -f "EcoSeek API:",        "http://localhost:7777")
-Write-Host ("  {0,-25} {1}" -f "AgenticPlug broker:", "http://localhost:3100")
-Write-Host ("  {0,-25} {1}" -f "SearxNG:",            "http://localhost:8080")
-Write-Host ("  {0,-25} {1}" -f "Ollama:",             "http://localhost:11434")
+Write-Info "Setup complete. Local URLs after 'docker compose up -d':"
+Write-Host ("  {0,-25} {1}" -f "EcoSeek UI:",          "http://localhost:$($env:ECOSEEK_UI_PORT)")
+Write-Host ("  {0,-25} {1}" -f "AgenticPlug gateway:", "http://localhost:$($env:AGENTICPLUG_PORT)")
+Write-Host ("  {0,-25} {1}" -f "EcoAgent tools:",      "http://localhost:$($env:ECOAGENT_PORT)/v1/tools")
+Write-Host ("  {0,-25} {1}" -f "Ollama API:",          "http://localhost:$($env:OLLAMA_PORT)")
+Write-Host ("  {0,-25} {1}" -f "Phoenix (optional):",  "http://localhost:6006  (--profile observability)")
 Write-Host ""
+Write-Info "Selected model: OLLAMA_MODEL=$($env:OLLAMA_MODEL)"
 if ($env:DEEPSEEK_API_KEY) {
-    Write-Info "DeepSeek API key: configured"
+    Write-Info "DeepSeek BYOK: configured (value hidden)"
 } else {
-    Write-Warn "DeepSeek API key: not set (AI features disabled)"
-    Write-Warn "Set it with: `$env:DEEPSEEK_API_KEY='sk-xxx'; docker compose up -d"
+    Write-Info "DeepSeek BYOK: not set - running in local-only mode"
+}
+if ($env:ECOSEEK_AAR_ENABLED -eq "true") {
+    Write-Info "AAR mode: ENABLED"
+} else {
+    Write-Info "AAR mode: disabled (set ECOSEEK_AAR_ENABLED=true to enable)"
 }
 Write-Host ""
-Write-Info "To stop:    docker compose down"
-Write-Info "To restart: docker compose up -d"
-Write-Info "Logs:       docker compose logs -f"
-Write-Info "Rebuild:    .\setup.ps1"
+Write-Info "Next steps:"
+Write-Info "  1. docker compose up -d"
+Write-Info "  2. Wait for services to become healthy (docker compose ps)"
+Write-Info "  3. Open http://localhost:$($env:ECOSEEK_UI_PORT)"
+Write-Info "  4. Smoke test:  docs/smoke-test.md"
 Write-Host ""
-Write-Info "Open http://localhost:3000 in your browser to start using EcoSeek."
+Write-Info "To stop:    docker compose down"
+Write-Info "Logs:       docker compose logs -f"
+Write-Info "Rebuild:    .\setup.ps1; docker compose up --build -d"
+
 Pop-Location
