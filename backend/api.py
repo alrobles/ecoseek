@@ -1,6 +1,6 @@
 """EcoSeek API Gateway — lightweight proxy with failover chain.
 
-Failover order: Hermes → AgenticPlug chat → Ollama local.
+Failover order: Hermes → AgenticPlug chat → local LLM.
 Every upstream call is subject to UPSTREAM_TIMEOUT_S.
 
 Security invariants:
@@ -10,12 +10,11 @@ Security invariants:
   - Fail-closed: if all upstreams fail, return 503 with the chain tried.
 """
 
-import os
-import re
-import time
 import logging
+import os
+import time
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import httpx
 from dotenv import load_dotenv
@@ -35,7 +34,11 @@ HERMES_API_KEY = os.getenv("HERMES_API_KEY", "")
 
 AGENTICPLUG_URL = os.getenv("AGENTICPLUG_URL", "http://agenticplug:8080").rstrip("/")
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434").rstrip("/")
+LOCAL_LLM_URL = (
+    os.getenv("LOCAL_LLM_URL")
+    or os.getenv("OLLAMA_URL")
+    or "http://ollama:11434"
+).rstrip("/")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "tinyllama")
 
 CORS_ORIGINS = [
@@ -55,7 +58,7 @@ logging.basicConfig(
 _upstream_status: Dict[str, Dict[str, Any]] = {
     "hermes": {"healthy": False, "last_check": 0, "latency_ms": 0},
     "agenticplug": {"healthy": False, "last_check": 0, "latency_ms": 0},
-    "ollama": {"healthy": False, "last_check": 0, "latency_ms": 0},
+    "local": {"healthy": False, "last_check": 0, "latency_ms": 0},
 }
 
 _http_client: Optional[httpx.AsyncClient] = None
@@ -86,13 +89,6 @@ app.add_middleware(
 )
 
 
-# ── Redaction ────────────────────────────────────────────────────────────
-
-_REDACT_RE = re.compile(
-    r"(https?://[^\s'\"]+|\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?)",
-)
-
-
 def _safe_exc(exc: BaseException) -> str:
     """Return exception class name only — never the message (may contain URLs/IPs)."""
     return type(exc).__name__
@@ -114,8 +110,9 @@ class QueryRequest(BaseModel):
     """
     text: Optional[str] = Field(None, description="Simple query string (sugar for a single user message).")
     messages: Optional[List[_Message]] = Field(None, description="OpenAI-compatible message array.")
-    mode: str = "auto"
+    mode: Literal["auto", "hermes", "agenticplug", "local"] = "auto"
     context: Optional[Dict[str, Any]] = None
+    stream: Optional[bool] = None
 
     @model_validator(mode="after")
     def _require_text_or_messages(self) -> "QueryRequest":
@@ -161,7 +158,7 @@ async def health_upstreams():
     for name, url, path in [
         ("hermes", HERMES_URL, "/health"),
         ("agenticplug", AGENTICPLUG_URL, "/healthz"),
-        ("ollama", OLLAMA_URL, "/api/tags"),
+        ("local", LOCAL_LLM_URL, "/v1/models"),
     ]:
         if not url:
             results[name] = {"status": "not_configured"}
@@ -247,9 +244,9 @@ async def _try_agenticplug_chat(query: str, messages: Optional[List[Dict[str, st
     return None
 
 
-async def _try_ollama(query: str, messages: Optional[List[Dict[str, str]]] = None) -> Optional[str]:
-    """Direct Ollama /api/chat."""
-    if not OLLAMA_URL:
+async def _try_local_llm(query: str, messages: Optional[List[Dict[str, str]]] = None) -> Optional[str]:
+    """Direct local OpenAI-compatible /v1/chat/completions."""
+    if not LOCAL_LLM_URL:
         return None
     client = _client()
     payload = {
@@ -258,44 +255,65 @@ async def _try_ollama(query: str, messages: Optional[List[Dict[str, str]]] = Non
         "stream": False,
     }
     try:
-        resp = await client.post(OLLAMA_URL + "/api/chat", json=payload)
+        resp = await client.post(LOCAL_LLM_URL + "/v1/chat/completions", json=payload)
         if resp.status_code == 200:
             data = resp.json()
+            choices = data.get("choices", [])
+            if choices:
+                return choices[0].get("message", {}).get("content", "")
             return data.get("message", {}).get("content", "")
     except Exception as exc:
-        logger.warning("ollama upstream error: %s", _safe_exc(exc))
+        logger.warning("local llm upstream error: %s", _safe_exc(exc))
     return None
+
+
+def _stream_requested(req: QueryRequest, request: Request) -> bool:
+    if req.stream is True:
+        return True
+    return request.query_params.get("stream", "").lower() == "true"
 
 
 # ── Query endpoint with failover ────────────────────────────────────────
 
 
 @app.post("/v1/query", response_model=QueryResponse)
-async def query(req: QueryRequest):
-    chain = []
+async def query(req: QueryRequest, request: Request):
+    if _stream_requested(req, request):
+        return JSONResponse(
+            status_code=501,
+            content={
+                "error": "Streaming is not supported for alpha",
+                "mode_used": "none",
+                "fallback_chain": [],
+            },
+        )
+
+    chain: List[str] = []
     answer = None
+    mode_plan: List[Literal["hermes", "agenticplug", "local"]]
+    if req.mode == "auto":
+        mode_plan = ["hermes", "agenticplug", "local"]
+    else:
+        mode_plan = [req.mode]
 
-    # 1. Hermes (via AgenticPlug orchestrate)
-    if HERMES_URL or HERMES_API_KEY:
-        chain.append("hermes")
-        logger.info("Trying Hermes via AgenticPlug /v1/orchestrate")
-        answer = await _try_hermes(req.query, req.context)
+    for mode in mode_plan:
+        if mode == "hermes":
+            chain.append("hermes")
+            if not (HERMES_URL or HERMES_API_KEY):
+                continue
+            logger.info("Trying Hermes via AgenticPlug /v1/orchestrate")
+            answer = await _try_hermes(req.query, req.context)
+        elif mode == "agenticplug":
+            chain.append("agenticplug")
+            logger.info("Trying AgenticPlug /v1/chat/completions")
+            answer = await _try_agenticplug_chat(req.query, req.chat_messages)
+        else:
+            chain.append("local")
+            logger.info("Trying local /v1/chat/completions")
+            answer = await _try_local_llm(req.query, req.chat_messages)
+
         if answer:
-            return QueryResponse(answer=answer, mode_used="hermes", fallback_chain=chain)
-
-    # 2. AgenticPlug chat (Ollama passthrough)
-    chain.append("agenticplug_chat")
-    logger.info("Trying AgenticPlug /v1/chat/completions")
-    answer = await _try_agenticplug_chat(req.query, req.chat_messages)
-    if answer:
-        return QueryResponse(answer=answer, mode_used="agenticplug_chat", fallback_chain=chain)
-
-    # 3. Direct Ollama
-    chain.append("ollama")
-    logger.info("Trying Ollama direct /api/chat")
-    answer = await _try_ollama(req.query, req.chat_messages)
-    if answer:
-        return QueryResponse(answer=answer, mode_used="ollama", fallback_chain=chain)
+            return QueryResponse(answer=answer, mode_used=mode, fallback_chain=chain)
 
     # All upstreams failed — fail-closed with generic error
     logger.warning("All upstreams failed for query (length=%d)", len(req.query))

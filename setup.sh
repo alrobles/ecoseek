@@ -10,8 +10,7 @@
 # What it does:
 #   1. Checks prerequisites (git, docker, docker compose v2)
 #   2. Generates / updates .env with all the variables docker-compose.yml expects
-#   3. Generates config.ini for the EcoSeek API / orchestrator
-#   4. Clones dependency repos into .repos/ (uses YOUR git auth)
+#   3. Clones dependency repos into .repos/ (uses YOUR git auth)
 #
 # After this script, start the stack with:
 #   docker compose up -d
@@ -20,7 +19,7 @@
 
 set -euo pipefail
 
-# Restrict file mode for everything we create (.env, config.ini, .repos/...).
+# Restrict file mode for everything we create (.env, .repos/...).
 umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -164,6 +163,8 @@ if [ "$OVERWRITE" -eq 1 ]; then
     echo ""
     echo "# Local model"
     echo "OLLAMA_MODEL=${OLLAMA_MODEL}"
+    echo "# Base URL only; ecoseek-api appends /v1/chat/completions"
+    echo "LOCAL_LLM_URL=${LOCAL_LLM_URL:-http://ollama:${OLLAMA_PORT}}"
     echo ""
     echo "# Adaptive Autonomous Retrieval"
     echo "ECOSEEK_AAR_ENABLED=${ECOSEEK_AAR_ENABLED}"
