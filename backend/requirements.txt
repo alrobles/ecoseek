@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+pydantic
+httpx
+redis
+python-dotenv
+colorama
+celery
+aiofiles

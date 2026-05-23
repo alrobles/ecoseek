@@ -10,8 +10,7 @@
 # What it does:
 #   1. Checks prerequisites (git, docker, docker compose v2)
 #   2. Generates / updates .env with all the variables docker-compose.yml expects
-#   3. Generates config.ini for the EcoSeek API / orchestrator
-#   4. Clones dependency repos into .repos/ (uses YOUR git auth)
+#   3. Clones dependency repos into .repos/ (uses YOUR git auth)
 #
 # After this script, start the stack with:
 #   docker compose up -d
@@ -128,6 +127,10 @@ PHOENIX_PROJECT_NAME="${PHOENIX_PROJECT_NAME:-ecoseek}"
 COMPOSE_PROFILES="${COMPOSE_PROFILES:-cpu}"
 # AgenticPlug session store: sqlite for alpha (persistent), memory for dev/test
 BROKER_SESSION_STORE="${BROKER_SESSION_STORE:-sqlite}"
+# Hermes remote orchestration service (optional; disabled by default).
+HERMES_ENABLED="${HERMES_ENABLED:-false}"
+HERMES_URL="${HERMES_URL:-}"
+HERMES_API_KEY="${HERMES_API_KEY:-}"
 
 OVERWRITE=1
 if [ -f .env ]; then
@@ -178,6 +181,13 @@ if [ "$OVERWRITE" -eq 1 ]; then
     echo "# SQLite sessions survive broker restarts via broker-data Docker volume"
     echo "BROKER_SESSION_STORE=${BROKER_SESSION_STORE}"
     echo ""
+    echo "# Hermes remote orchestration (optional; disabled by default)."
+    echo "# Set HERMES_ENABLED=true and supply HERMES_URL + HERMES_API_KEY"
+    echo "# to enable Hermes routing in the ecoseek-api gateway."
+    echo "HERMES_ENABLED=${HERMES_ENABLED}"
+    echo "HERMES_URL=${HERMES_URL}"
+    echo "HERMES_API_KEY=${HERMES_API_KEY}"
+    echo ""
     echo "# AgenticPlug GitHub allowlist for CLI session handshake. Comma-"
     echo "# separated GitHub logins. Empty = no sessions can be issued. Set"
     echo "# this to your own GitHub login if you want to exercise the"
@@ -201,53 +211,6 @@ else
   info "Keeping existing .env unchanged"
 fi
 
-# ── Generate config.ini ──────────────────────────────────────────────────
-# Compose bind-mounts ./config.ini into the API container. If that file
-# does not exist when `docker compose up` runs, Docker silently creates
-# an empty *directory* in its place, and the next setup run would fail
-# trying to write a regular file. Guard against that.
-if [ -d config.ini ]; then
-  warn "config.ini is a directory (Docker auto-created it). Removing it."
-  rmdir config.ini 2>/dev/null || rm -rf config.ini
-fi
-
-if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
-  PROVIDER_NAME="deepseek"
-  PROVIDER_MODEL="deepseek-chat"
-  PROVIDER_ADDRESS="https://api.deepseek.com"
-  IS_LOCAL="False"
-  info "LLM provider: DeepSeek API (cloud, BYOK)"
-else
-  PROVIDER_NAME="ollama"
-  PROVIDER_MODEL="${OLLAMA_MODEL}"
-  PROVIDER_ADDRESS="http://ollama:${OLLAMA_PORT}"
-  IS_LOCAL="True"
-  info "LLM provider: Ollama (local) — pull the model with:"
-  info "  docker compose exec ollama ollama pull ${OLLAMA_MODEL}"
-fi
-
-cat > config.ini <<EOF
-[MAIN]
-is_local = ${IS_LOCAL}
-provider_name = ${PROVIDER_NAME}
-provider_model = ${PROVIDER_MODEL}
-provider_server_address = ${PROVIDER_ADDRESS}
-agent_name = EcoSeek
-recover_last_session = False
-save_session = False
-speak = False
-listen = False
-jarvis_personality = False
-personality = ecoseek
-temperature = 0.3
-top_p = 0.9
-languages = en
-[BROWSER]
-headless_browser = True
-stealth_mode = False
-EOF
-info "Generated config.ini (provider: ${PROVIDER_NAME})"
-
 # ── Clone dependency repos ────────────────────────────────────────────────
 clone_repo() {
   local repo_url="$1"
@@ -263,7 +226,6 @@ clone_repo() {
 
 mkdir -p .repos
 clone_repo "https://github.com/alrobles/agenticplug.git" ".repos/agenticplug"
-clone_repo "https://github.com/alrobles/agenticSeek.git"  ".repos/agenticSeek"
 clone_repo "https://github.com/alrobles/ecoagent.git"     ".repos/ecoagent"
 
 # ── Summary ───────────────────────────────────────────────────────────────
@@ -290,6 +252,9 @@ if [ -n "${AGENTICPLUG_SESSION:-}" ]; then
 else
   printf "  %-25s %s\n" "AGENTICPLUG_SESSION:" "not set"
 fi
+print_var HERMES_ENABLED "${HERMES_ENABLED}"
+print_var HERMES_URL     "${HERMES_URL}"
+print_var HERMES_API_KEY "${HERMES_API_KEY:-}"
 print_var DEEPSEEK_API_KEY   "${DEEPSEEK_API_KEY:-}"
 echo ""
 info "All host ports bind to 127.0.0.1 (loopback only). If you need LAN"
@@ -300,7 +265,8 @@ info "Next steps:"
 info "  1. docker compose up -d"
 info "  2. Wait for services to become healthy (docker compose ps)"
 info "  3. curl http://127.0.0.1:${AGENTICPLUG_PORT}/healthz"
-info "  4. Canonical Phase 2 smoke (one command):"
+info "  4. curl http://127.0.0.1:${ECOSEEK_API_PORT}/"
+info "  5. Canonical Phase 2 smoke (one command):"
 info "       bash scripts/smoke.sh"
 info "     Full walk-through: docs/smoke-test.md"
 echo ""

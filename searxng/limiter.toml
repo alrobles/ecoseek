@@ -1,0 +1,12 @@
+# SearxNG rate-limiter configuration for EcoSeek.
+# Reference: https://docs.searxng.org/admin/settings/settings_server.html#limiter
+
+[real_ip]
+# X-Forwarded-For header trusted depth. 0 = use REMOTE_ADDR directly.
+x_for = 1
+ipv4_prefix = 32
+ipv6_prefix = 48
+
+[botdetection.ip_limit]
+# Requests per second per IP. Generous for a local stack.
+link_token = true
