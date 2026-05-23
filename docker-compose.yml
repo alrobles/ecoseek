@@ -58,8 +58,8 @@ services:
       HERMES_API_KEY: "${HERMES_API_KEY:-}"
       # AgenticPlug (gateway: auth, policy, audit)
       AGENTICPLUG_URL: "http://agenticplug:${AGENTICPLUG_PORT:-8080}"
-      # Ollama (local model inference)
-      OLLAMA_URL: "http://ollama:${OLLAMA_PORT:-11434}"
+      # Local OpenAI-compatible model endpoint (base host only; gateway adds /v1/chat/completions)
+      LOCAL_LLM_URL: "${LOCAL_LLM_URL:-http://ollama:${OLLAMA_PORT:-11434}}"
       OLLAMA_MODEL: "${OLLAMA_MODEL:-tinyllama}"
       CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:3000}"
     depends_on:
