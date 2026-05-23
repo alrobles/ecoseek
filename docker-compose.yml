@@ -35,16 +35,14 @@
 # exclusive because they share the host port ${OLLAMA_PORT}.
 
 services:
-  # ── EcoSeek API (AgenticSeek FastAPI backend / orchestrator) ───────────
-  # This service builds the upstream `Dockerfile.backend` from agenticSeek:
-  # a FastAPI app exposing the orchestrator API. It is NOT the React UI
-  # — that lives in agenticSeek's `Dockerfile.frontend` and is not built
-  # by this compose file in Phase 1. End-to-end query verification in
-  # `docs/smoke-test.md` therefore exercises the API directly.
+  # ── EcoSeek API (lightweight gateway with failover chain) ──────────────
+  # Failover: Hermes (via AgenticPlug) → AgenticPlug chat → Ollama local.
+  # This replaces the heavy agenticSeek backend (torch/selenium/5GB) with
+  # a slim gateway (~60MB) that delegates intelligence to upstream services.
   ecoseek-api:
     build:
-      context: .repos/agenticSeek
-      dockerfile: Dockerfile.backend
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: ecoseek-api
     ports:
       # Loopback-only by design: the FastAPI backend has no authentication
@@ -53,32 +51,17 @@ services:
       - "127.0.0.1:${ECOSEEK_API_PORT:-3000}:${ECOSEEK_API_PORT:-3000}"
     volumes:
       - workspace:/opt/workspace
-      - screenshots:/app/.screenshots
-      - ./config.ini:/app/config.ini:ro
     environment:
-      # BACKEND_PORT is intentionally derived from ECOSEEK_API_PORT (and
-      # NOT read from a separate BACKEND_PORT env var) so the host-side
-      # publication and the in-container listener can never drift. To
-      # change the port, set ECOSEEK_API_PORT in .env — do not override
-      # BACKEND_PORT directly. BACKEND_HOST stays 0.0.0.0 so the FastAPI
-      # process binds inside the container's user-defined bridge network;
-      # the host-side bind above (127.0.0.1) is what actually gates
-      # external exposure.
-      BACKEND_PORT: "${ECOSEEK_API_PORT:-3000}"
-      BACKEND_HOST: "0.0.0.0"
-      WORK_DIR: "/opt/workspace"
-      SEARXNG_BASE_URL: "${SEARXNG_BASE_URL:-http://searxng:8080}"
-      REDIS_URL: "${REDIS_URL:-redis://redis:6379/0}"
-      DOCKER_INTERNAL_URL: "${DOCKER_INTERNAL_URL:-http://host.docker.internal}"
+      UPSTREAM_TIMEOUT_S: "${UPSTREAM_TIMEOUT_S:-30}"
+      # Hermes (remote scientific orchestrator via Tailscale/Cloudflare)
+      HERMES_URL: "${HERMES_URL:-}"
+      HERMES_API_KEY: "${HERMES_API_KEY:-}"
+      # AgenticPlug (gateway: auth, policy, audit)
       AGENTICPLUG_URL: "http://agenticplug:${AGENTICPLUG_PORT:-8080}"
-      ECOAGENT_URL: "http://ecoagent:${ECOAGENT_PORT:-8000}"
+      # Ollama (local model inference)
       OLLAMA_URL: "http://ollama:${OLLAMA_PORT:-11434}"
       OLLAMA_MODEL: "${OLLAMA_MODEL:-tinyllama}"
-      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
-      ECOSEEK_AAR_ENABLED: "${ECOSEEK_AAR_ENABLED:-false}"
-      ECOSEEK_JUDGE_MODEL: "${ECOSEEK_JUDGE_MODEL:-auto}"
-      PHOENIX_ENDPOINT: "${PHOENIX_ENDPOINT:-}"
-      PHOENIX_PROJECT_NAME: "${PHOENIX_PROJECT_NAME:-ecoseek}"
+      CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:3000}"
     depends_on:
       agenticplug:
         condition: service_healthy
@@ -89,18 +72,19 @@ services:
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    command: ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "${ECOSEEK_API_PORT:-3000}"]
     healthcheck:
       test:
         - CMD-SHELL
         - >-
           python -c "import urllib.request,os,sys;
           sys.exit(0 if urllib.request.urlopen(
-          'http://localhost:'+os.environ.get('BACKEND_PORT','3000')+'/'
+          'http://localhost:'+os.environ.get('ECOSEEK_API_PORT','3000')+'/'
           ).status < 500 else 1)"
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
     networks:
       - ecoseek-net
 
@@ -127,6 +111,10 @@ services:
       # upstream URL. Without this, every chat-completions request returns
       # 503 model_route_unconfigured (the route fails closed by design).
       OLLAMA_BASE_URL: "http://ollama:${OLLAMA_PORT:-11434}"
+      # Hermes remote (via Tailscale funnel / Cloudflare tunnel)
+      HERMES_URL: "${HERMES_URL:-}"
+      HERMES_API_KEY: "${HERMES_API_KEY:-}"
+      HERMES_ENABLED: "${HERMES_ENABLED:-false}"
       # Optional GitHub login allowlist for CLI session handshake. Comma-
       # separated GitHub logins. Empty = fail-closed (no sessions can be
       # issued). The smoke test reads AGENTICPLUG_SESSION from .env; set
@@ -247,7 +235,7 @@ services:
     image: docker.io/searxng/searxng:latest
     container_name: searxng
     volumes:
-      - .repos/agenticSeek/searxng:/etc/searxng:rw
+      - ./searxng:/etc/searxng:rw
     environment:
       SEARXNG_BASE_URL: "${SEARXNG_BASE_URL:-http://localhost:8080/}"
       UWSGI_WORKERS: "${UWSGI_WORKERS:-4}"
