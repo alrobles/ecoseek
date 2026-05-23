@@ -2,7 +2,7 @@
 
 EcoSeek is structured as a **three-layer architecture** with a clear trust boundary between layers. This document describes the layers, their responsibilities, and the supported product modes.
 
-**Last updated:** 2026-05-18, after P0 stabilization.
+**Last updated:** 2026-05-23, after Phoenix tracing instrumentation (Sprint 0).
 
 For the full canonical architecture with ADRs, see the [knowledgebase architecture doc](https://github.com/alrobles/knowledgebase/blob/main/plans/ecoSeek/architecture.md).
 
@@ -31,16 +31,21 @@ For the full canonical architecture with ADRs, see the [knowledgebase architectu
 |  Layer 1: Substrate                                            |
 |  Local models (Ollama), browser, filesystem, OS,               |
 |  DeepSeek BYOK (Fernet-encrypted keystore),                   |
-|  EcoCoder cluster (via AgenticPlug), HPC (via connector)       |
-|  Repo: alrobles/agenticSeek (client fork)                      |
+|  EcoCoder cluster (via AgenticPlug), HPC (via connector),      |
+|  Hermes remote orchestration (optional, via AgenticPlug)       |
+|  Client: alrobles/ecoseek-client                               |
 +---------------------------------------------------------------+
 ```
 
 ### Layer 1 — Substrate
 
-The substrate is everything EcoSeek talks to but does not own: local model runtimes (Ollama with EcoCoder models), a controlled browser surface, the local filesystem, and — only when the user opts in — cloud LLM providers such as DeepSeek (via Fernet-encrypted BYOK keystore) or remote HPC clusters (via AgenticPlug connectors).
+The substrate is everything EcoSeek talks to but does not own: local model runtimes (Ollama with EcoCoder models), a controlled browser surface, the local filesystem, and — only when the user opts in — cloud LLM providers such as DeepSeek (via Fernet-encrypted BYOK keystore), remote HPC clusters (via AgenticPlug connectors), or the optional Hermes remote orchestration service.
 
 Substrate components are assumed to be untrusted from EcoSeek's point of view. They are wrapped by the gateway, not exposed directly to the intelligence layer.
+
+The **EcoSeek API gateway** (`backend/`) lives at this layer: it is a lightweight FastAPI service that accepts queries and routes them through AgenticPlug to Hermes, AgenticPlug chat completions, or a local OpenAI-compatible LLM, with a configurable fallback chain. It holds no secrets and performs no auth — that lives in AgenticPlug.
+
+When `PHOENIX_ENABLED=true`, the gateway emits OpenTelemetry traces to Arize Phoenix (`--profile observability`). Every request produces a trace tree: `ecoseek.route` (routing decision + fallback chain) → `ecoseek.call.{backend}` (upstream HTTP calls with success/failure attributes). Phoenix is optional and disabled by default.
 
 ### Layer 2 — Gateway (AgenticPlug)
 
@@ -102,4 +107,4 @@ EcoSeek supports three deployment modes. The architecture is identical across mo
 - **Risky actions are gated, not hidden.** The gateway makes refusals explicit and auditable, rather than silently sandboxing.
 - **Fail closed.** If auth, policy, or approval state is ambiguous, the request is denied.
 - **Reproducibility hooks belong with the agent, not the model.** EcoCoder captures inputs, seeds, and tool versions; EcoAgent records what actually ran.
-- **Upstream compatibility.** AgenticSeek-derived code in Layer 1 is kept GPLv3-clean and identifiable, so upstream changes can be tracked.
+- **Upstream compatibility.** AgenticSeek-derived code in Layer 1 has been replaced by an independent lightweight gateway (`backend/`), eliminating the direct dependency on the agenticSeek fork.
