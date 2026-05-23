@@ -11,17 +11,18 @@ Security invariants:
 """
 
 import os
+import re
 import time
 import logging
 from contextlib import asynccontextmanager
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 load_dotenv()
 
@@ -85,13 +86,56 @@ app.add_middleware(
 )
 
 
+# ── Redaction ────────────────────────────────────────────────────────────
+
+_REDACT_RE = re.compile(
+    r"(https?://[^\s'\"]+|\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?)",
+)
+
+
+def _safe_exc(exc: BaseException) -> str:
+    """Return exception class name only — never the message (may contain URLs/IPs)."""
+    return type(exc).__name__
+
+
 # ── Models ───────────────────────────────────────────────────────────────
 
 
+class _Message(BaseModel):
+    role: str
+    content: str
+
+
 class QueryRequest(BaseModel):
-    query: str
+    """Accepts `text` (simple string) or `messages` (OpenAI-style array).
+
+    If both are provided, `messages` wins and `text` is ignored.
+    If neither is provided, validation fails.
+    """
+    text: Optional[str] = Field(None, description="Simple query string (sugar for a single user message).")
+    messages: Optional[List[_Message]] = Field(None, description="OpenAI-compatible message array.")
     mode: str = "auto"
     context: Optional[Dict[str, Any]] = None
+
+    @model_validator(mode="after")
+    def _require_text_or_messages(self) -> "QueryRequest":
+        if not self.messages and not self.text:
+            raise ValueError("Provide 'text' or 'messages' (or both).")
+        return self
+
+    @property
+    def query(self) -> str:
+        """Canonical query string. Prefers messages[-1].content."""
+        if self.messages:
+            return self.messages[-1].content
+        return self.text or ""
+
+    @property
+    def chat_messages(self) -> List[Dict[str, str]]:
+        """OpenAI-compatible messages array."""
+        if self.messages:
+            return [m.model_dump() for m in self.messages]
+        return [{"role": "user", "content": self.text or ""}]
 
 
 class QueryResponse(BaseModel):
@@ -174,19 +218,19 @@ async def _try_hermes(query: str, context: Optional[Dict[str, Any]]) -> Optional
             task_id = data.get("task_id")
             status = data.get("status", "accepted")
             return f"[Hermes] Task {task_id} {status}. Poll: /hermes/tasks/{task_id}"
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("hermes upstream error: %s", _safe_exc(exc))
     return None
 
 
-async def _try_agenticplug_chat(query: str) -> Optional[str]:
+async def _try_agenticplug_chat(query: str, messages: Optional[List[Dict[str, str]]] = None) -> Optional[str]:
     """AgenticPlug /v1/chat/completions (Ollama passthrough)."""
     if not AGENTICPLUG_URL:
         return None
     client = _client()
     payload = {
         "model": OLLAMA_MODEL,
-        "messages": [{"role": "user", "content": query}],
+        "messages": messages or [{"role": "user", "content": query}],
     }
     try:
         resp = await client.post(
@@ -198,19 +242,19 @@ async def _try_agenticplug_chat(query: str) -> Optional[str]:
             choices = data.get("choices", [])
             if choices:
                 return choices[0].get("message", {}).get("content", "")
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("agenticplug upstream error: %s", _safe_exc(exc))
     return None
 
 
-async def _try_ollama(query: str) -> Optional[str]:
+async def _try_ollama(query: str, messages: Optional[List[Dict[str, str]]] = None) -> Optional[str]:
     """Direct Ollama /api/chat."""
     if not OLLAMA_URL:
         return None
     client = _client()
     payload = {
         "model": OLLAMA_MODEL,
-        "messages": [{"role": "user", "content": query}],
+        "messages": messages or [{"role": "user", "content": query}],
         "stream": False,
     }
     try:
@@ -218,8 +262,8 @@ async def _try_ollama(query: str) -> Optional[str]:
         if resp.status_code == 200:
             data = resp.json()
             return data.get("message", {}).get("content", "")
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("ollama upstream error: %s", _safe_exc(exc))
     return None
 
 
@@ -242,14 +286,14 @@ async def query(req: QueryRequest):
     # 2. AgenticPlug chat (Ollama passthrough)
     chain.append("agenticplug_chat")
     logger.info("Trying AgenticPlug /v1/chat/completions")
-    answer = await _try_agenticplug_chat(req.query)
+    answer = await _try_agenticplug_chat(req.query, req.chat_messages)
     if answer:
         return QueryResponse(answer=answer, mode_used="agenticplug_chat", fallback_chain=chain)
 
     # 3. Direct Ollama
     chain.append("ollama")
     logger.info("Trying Ollama direct /api/chat")
-    answer = await _try_ollama(req.query)
+    answer = await _try_ollama(req.query, req.chat_messages)
     if answer:
         return QueryResponse(answer=answer, mode_used="ollama", fallback_chain=chain)
 
