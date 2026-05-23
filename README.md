@@ -61,6 +61,40 @@ First build takes 2-5 minutes (clones repos inside containers). See [docs/instal
 
 ---
 
+## Gateway API (`/v1/query`)
+
+The lightweight `backend/` FastAPI gateway exposes `POST /v1/query` with the alpha contract used by the Docker stack:
+
+- Request body accepts **either** `text` **or** `messages` (`[{role, content}]`).
+- If both are sent, **`messages` wins**.
+- If neither is sent, FastAPI/Pydantic returns **422**.
+- `mode` supports `auto`, `hermes`, `agenticplug`, and `local`.
+- `stream=true` is explicitly **not supported** in alpha and returns **501** in either the body or query string.
+- `mode=auto` falls back in this order: **Hermes (via AgenticPlug orchestrate) → AgenticPlug chat completions → local LLM**.
+
+### Example
+
+```bash
+curl -X POST http://127.0.0.1:3000/v1/query \
+  -H "Content-Type: application/json" \
+  -d '{
+    "mode": "auto",
+    "messages": [
+      {"role": "system", "content": "You are EcoSeek."},
+      {"role": "user", "content": "Summarize the current stack."}
+    ]
+  }'
+```
+
+Relevant environment variables:
+
+- `AGENTICPLUG_URL` — AgenticPlug base URL.
+- `HERMES_URL`, `HERMES_API_KEY`, `HERMES_ENABLED` — Hermes remote routing.
+- `LOCAL_LLM_URL` — **base host only** for the local OpenAI-compatible endpoint; the gateway appends `/v1/chat/completions`.
+- `UPSTREAM_TIMEOUT_S` — timeout applied to every upstream call.
+
+---
+
 ## Documentation
 
 - [Architecture](./docs/architecture.md) — three-layer design, product modes, cross-cutting principles
