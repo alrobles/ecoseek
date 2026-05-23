@@ -8,7 +8,8 @@
 
 - **Git** (any recent version)
 - **Docker** and **Docker Compose v2** (Docker Desktop on Windows/macOS, or docker-ce on Linux)
-- **DeepSeek API key** — get one at https://platform.deepseek.com/api_keys
+- **Optional:** `HERMES_URL` + `HERMES_API_KEY` for remote Hermes routing
+- **Optional:** DeepSeek API key — get one at https://platform.deepseek.com/api_keys
 
 No Node.js, Python, or npm required on the host. Everything runs inside containers.
 
@@ -23,10 +24,9 @@ DEEPSEEK_API_KEY=sk-your-key-here bash setup.sh
 ```
 
 The script will:
-1. Clone dependency repos (agenticplug, agenticSeek) using your git auth
-2. Build all Docker images (~5-10 min first time, cached after)
-3. Start the full stack (6 services)
-4. Open `http://localhost:3000` in your browser to start working
+1. Clone dependency repos (`agenticplug`, `ecoagent`) using your git auth
+2. Generate `.env` with the Docker stack defaults (including Hermes variables)
+3. Leave you ready to start the stack with `docker compose up -d`
 
 If you don't pass the API key, the script will prompt you interactively.
 
@@ -49,11 +49,10 @@ $env:DEEPSEEK_API_KEY="sk-your-key-here"
 
 | Service | URL | What it does |
 |---------|-----|-------------|
-| **AgenticSeek UI** | `http://localhost:3000` | Web interface — start here |
-| AgenticSeek API | `http://localhost:7777` | Agent backend (API + task execution) |
-| AgenticPlug broker | `http://localhost:3100` | Security gateway — auth, sessions, scopes |
-| SearxNG | `http://localhost:8080` | Private web search for agents |
-| Ollama | `http://localhost:11434` | Local model inference |
+| **EcoSeek API** | `http://127.0.0.1:3000` | Lightweight FastAPI gateway (`/`, `/health/upstreams`, `/v1/query`) |
+| AgenticPlug broker | `http://127.0.0.1:8080` | Security gateway — auth, sessions, scopes |
+| EcoAgent | `http://127.0.0.1:8000/v1/tools` | Ecological/scientific tool server |
+| Ollama | `http://127.0.0.1:11434` | Default local OpenAI-compatible model backend |
 | Redis | (internal) | Task queue |
 
 ### Stop / restart / logs
@@ -65,24 +64,25 @@ docker compose logs -f       # follow logs
 bash setup.sh                # rebuild after upstream changes
 ```
 
-### How LLM provider is configured
+### How LLM routing is configured
 
-`setup.sh` generates a `config.ini` file automatically:
+`setup.sh` writes `.env` variables that the Docker stack reads directly:
 
-- **With `DEEPSEEK_API_KEY`:** Uses the DeepSeek cloud API (`deepseek-chat` model)
-- **Without API key:** Uses local Ollama (`deepseek-r1:14b` — you need to pull the model first)
+- `HERMES_URL`, `HERMES_API_KEY`, `HERMES_ENABLED` — remote Hermes routing via AgenticPlug
+- `AGENTICPLUG_URL` — broker base URL inside the stack
+- `LOCAL_LLM_URL` — **base host only** for the local OpenAI-compatible endpoint; the gateway appends `/v1/chat/completions`
+- `UPSTREAM_TIMEOUT_S` — timeout applied to every upstream call
 
-The generated `config.ini` is mounted into the backend container at runtime. Docker networking hostnames are used automatically (e.g., `ollama:11434` instead of `127.0.0.1:11434`).
+`POST /v1/query` accepts `text` or `messages`; if both are present, **`messages` wins**. In alpha, `stream=true` returns `501`.
 
 ### Changing the API key
 
 ```bash
-# Option 1: re-run setup (regenerates config.ini + .env)
+# Option 1: re-run setup (regenerates .env)
 DEEPSEEK_API_KEY=sk-new-key bash setup.sh
 
-# Option 2: edit .env and config.ini manually, then restart
+# Option 2: edit .env manually, then restart
 echo "DEEPSEEK_API_KEY=sk-new-key" > .env
-# Edit config.ini: set provider_name = deepseek, provider_model = deepseek-chat
 docker compose up -d
 ```
 
