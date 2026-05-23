@@ -191,8 +191,18 @@ if [ "$OVERWRITE" -eq 1 ]; then
     echo "# print a clear hint instead of pretending it passed."
     echo "AGENTICPLUG_SESSION=${AGENTICPLUG_SESSION:-}"
     echo ""
+    echo "# Hermes remote (scientific orchestrator via Tailscale funnel)"
+    echo "# Set HERMES_URL and HERMES_API_KEY to connect to a remote Hermes."
+    echo "# HERMES_ENABLED=true enables the adapter in AgenticPlug."
+    echo "HERMES_URL=${HERMES_URL:-}"
+    echo "HERMES_API_KEY=${HERMES_API_KEY:-}"
+    echo "HERMES_ENABLED=${HERMES_ENABLED:-false}"
+    echo ""
     echo "# BYOK — empty by default; fill in to use DeepSeek cloud"
     echo "DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}"
+    echo ""
+    echo "# Upstream timeout (seconds) — applied to all gateway upstream calls"
+    echo "UPSTREAM_TIMEOUT_S=${UPSTREAM_TIMEOUT_S:-30}"
   } > "$TMP_ENV"
   mv "$TMP_ENV" .env
   chmod 600 .env || true
@@ -201,52 +211,15 @@ else
   info "Keeping existing .env unchanged"
 fi
 
-# ── Generate config.ini ──────────────────────────────────────────────────
-# Compose bind-mounts ./config.ini into the API container. If that file
-# does not exist when `docker compose up` runs, Docker silently creates
-# an empty *directory* in its place, and the next setup run would fail
-# trying to write a regular file. Guard against that.
-if [ -d config.ini ]; then
-  warn "config.ini is a directory (Docker auto-created it). Removing it."
-  rmdir config.ini 2>/dev/null || rm -rf config.ini
-fi
-
-if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
-  PROVIDER_NAME="deepseek"
-  PROVIDER_MODEL="deepseek-chat"
-  PROVIDER_ADDRESS="https://api.deepseek.com"
-  IS_LOCAL="False"
+# ── Provider detection (informational only — backend reads from env) ──────
+if [ -n "${HERMES_URL:-}" ] && [ -n "${HERMES_API_KEY:-}" ]; then
+  info "LLM provider: Hermes remote (${HERMES_URL})"
+elif [ -n "${DEEPSEEK_API_KEY:-}" ]; then
   info "LLM provider: DeepSeek API (cloud, BYOK)"
 else
-  PROVIDER_NAME="ollama"
-  PROVIDER_MODEL="${OLLAMA_MODEL}"
-  PROVIDER_ADDRESS="http://ollama:${OLLAMA_PORT}"
-  IS_LOCAL="True"
   info "LLM provider: Ollama (local) — pull the model with:"
   info "  docker compose exec ollama ollama pull ${OLLAMA_MODEL}"
 fi
-
-cat > config.ini <<EOF
-[MAIN]
-is_local = ${IS_LOCAL}
-provider_name = ${PROVIDER_NAME}
-provider_model = ${PROVIDER_MODEL}
-provider_server_address = ${PROVIDER_ADDRESS}
-agent_name = EcoSeek
-recover_last_session = False
-save_session = False
-speak = False
-listen = False
-jarvis_personality = False
-personality = ecoseek
-temperature = 0.3
-top_p = 0.9
-languages = en
-[BROWSER]
-headless_browser = True
-stealth_mode = False
-EOF
-info "Generated config.ini (provider: ${PROVIDER_NAME})"
 
 # ── Clone dependency repos ────────────────────────────────────────────────
 clone_repo() {
@@ -263,7 +236,6 @@ clone_repo() {
 
 mkdir -p .repos
 clone_repo "https://github.com/alrobles/agenticplug.git" ".repos/agenticplug"
-clone_repo "https://github.com/alrobles/agenticSeek.git"  ".repos/agenticSeek"
 clone_repo "https://github.com/alrobles/ecoagent.git"     ".repos/ecoagent"
 
 # ── Summary ───────────────────────────────────────────────────────────────
@@ -290,6 +262,9 @@ if [ -n "${AGENTICPLUG_SESSION:-}" ]; then
 else
   printf "  %-25s %s\n" "AGENTICPLUG_SESSION:" "not set"
 fi
+print_var HERMES_URL         "${HERMES_URL:-}"
+print_var HERMES_API_KEY     "${HERMES_API_KEY:-}"
+print_var HERMES_ENABLED     "${HERMES_ENABLED:-false}"
 print_var DEEPSEEK_API_KEY   "${DEEPSEEK_API_KEY:-}"
 echo ""
 info "All host ports bind to 127.0.0.1 (loopback only). If you need LAN"
