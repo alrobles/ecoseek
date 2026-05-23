@@ -1,327 +1,356 @@
-"""EcoSeek API Gateway — lightweight proxy with failover chain.
+"""
+EcoSeek API gateway.
 
-Failover order: Hermes → AgenticPlug chat → local LLM.
-Every upstream call is subject to UPSTREAM_TIMEOUT_S.
+Endpoints
+---------
+GET  /          Health check — always returns {"status": "ok"}.
+POST /v1/query  Primary query endpoint. Routes to Hermes / AgenticPlug /
+                local model with a configurable fallback chain.
 
-Security invariants:
-  - HERMES_API_KEY, Authorization headers, and full prompts are NEVER logged.
-  - Error responses to clients contain only a generic message + mode_used +
-    fallback_chain. No stack traces, no upstream details.
-  - Fail-closed: if all upstreams fail, return 503 with the chain tried.
+/v1/query — request (v1)
+    text        string   required  The user query.
+    mode        enum     optional  Routing preference:
+                                   auto | hermes | agenticplug | local
+                                   Default: auto
+    session_id  string   optional  Opaque session identifier forwarded to
+                                   upstream services.
+    metadata    object   optional  Arbitrary key-value pairs forwarded as
+                                   request context.
+
+/v1/query — response
+    success         bool           True when at least one upstream responded.
+    mode_used       string         Which backend ultimately answered.
+    result          object         Upstream response body.
+    error           string|null    Error message when success=false.
+    fallback_chain  list[string]   Backends tried in order.
+
+Streaming is NOT supported in alpha.  If the caller sends ?stream=true the
+endpoint returns 501 Not Implemented.
+
+OpenTelemetry
+-------------
+When PHOENIX_ENABLED=true, every /v1/query request emits a trace tree:
+  POST /v1/query   →  Auto-instrumented by FastAPIInstrumentor
+    ecoseek.route   →  Routing decision + fallback chain
+      ecoseek.call.{backend} → Upstream HTTP call (hermes / agenticplug / local)
+
+Spans carry attributes: ecoseek.mode, ecoseek.upstream, ecoseek.success,
+ecoseek.fallback_chain, ecoseek.session_id, http.url, http.status_code, error.
+
+curl examples
+-------------
+# Health
+curl http://localhost:3000/
+
+# Simple auto-routed query
+curl -s -X POST http://localhost:3000/v1/query \\
+  -H 'Content-Type: application/json' \\
+  -d '{"text": "List top 5 mammal species in Yucatan."}'
+
+# Force Hermes mode
+curl -s -X POST http://localhost:3000/v1/query \\
+  -H 'Content-Type: application/json' \\
+  -d '{"text": "Analyse host-parasite network.", "mode": "hermes"}'
+
+# Force local fallback
+curl -s -X POST http://localhost:3000/v1/query \\
+  -H 'Content-Type: application/json' \\
+  -d '{"text": "Hello?", "mode": "local"}'
 """
 
+from __future__ import annotations
+
 import logging
-import os
-import time
-from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Literal, Optional
+from enum import Enum
+from typing import Any, Dict, List, Optional
 
 import httpx
-from dotenv import load_dotenv
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
-load_dotenv()
+import config
+from phoenix_tracer import get_tracer, instrument_fastapi
 
-# ── Configuration ────────────────────────────────────────────────────────
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
+log = logging.getLogger("ecoseek.api")
 
-UPSTREAM_TIMEOUT_S = int(os.getenv("UPSTREAM_TIMEOUT_S", "30"))
+app = FastAPI(title="EcoSeek API", version="1.0.0-alpha")
 
-HERMES_URL = os.getenv("HERMES_URL", "").rstrip("/")
-HERMES_API_KEY = os.getenv("HERMES_API_KEY", "")
+# ── OpenTelemetry auto-instrumentation (no-op when PHOENIX_ENABLED=false) ──
+instrument_fastapi(app)
 
-AGENTICPLUG_URL = os.getenv("AGENTICPLUG_URL", "http://agenticplug:8080").rstrip("/")
-
-LOCAL_LLM_URL = (
-    os.getenv("LOCAL_LLM_URL")
-    or os.getenv("OLLAMA_URL")
-    or "http://ollama:11434"
-).rstrip("/")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "tinyllama")
-
-CORS_ORIGINS = [
-    o.strip()
-    for o in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
-    if o.strip()
-]
-
-logger = logging.getLogger("ecoseek.gateway")
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(name)s %(levelname)s %(message)s",
-)
-
-# ── Upstream health state ────────────────────────────────────────────────
-
-_upstream_status: Dict[str, Dict[str, Any]] = {
-    "hermes": {"healthy": False, "last_check": 0, "latency_ms": 0},
-    "agenticplug": {"healthy": False, "last_check": 0, "latency_ms": 0},
-    "local": {"healthy": False, "last_check": 0, "latency_ms": 0},
-}
-
-_http_client: Optional[httpx.AsyncClient] = None
+_tracer = get_tracer()
 
 
-def _client() -> httpx.AsyncClient:
-    global _http_client
-    if _http_client is None or _http_client.is_closed:
-        _http_client = httpx.AsyncClient(timeout=UPSTREAM_TIMEOUT_S)
-    return _http_client
+# ── Models ─────────────────────────────────────────────────────────────────
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global _http_client
-    _http_client = httpx.AsyncClient(timeout=UPSTREAM_TIMEOUT_S)
-    yield
-    await _http_client.aclose()
-
-
-app = FastAPI(title="EcoSeek Gateway", version="0.1.0", lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
-    allow_methods=["GET", "POST"],
-    allow_headers=["*"],
-)
-
-
-def _safe_exc(exc: BaseException) -> str:
-    """Return exception class name only — never the message (may contain URLs/IPs)."""
-    return type(exc).__name__
-
-
-# ── Models ───────────────────────────────────────────────────────────────
-
-
-class _Message(BaseModel):
-    role: str
-    content: str
+class Mode(str, Enum):
+    auto = "auto"
+    hermes = "hermes"
+    agenticplug = "agenticplug"
+    local = "local"
 
 
 class QueryRequest(BaseModel):
-    """Accepts `text` (simple string) or `messages` (OpenAI-style array).
-
-    If both are provided, `messages` wins and `text` is ignored.
-    If neither is provided, validation fails.
-    """
-    text: Optional[str] = Field(None, description="Simple query string (sugar for a single user message).")
-    messages: Optional[List[_Message]] = Field(None, description="OpenAI-compatible message array.")
-    mode: Literal["auto", "hermes", "agenticplug", "local"] = "auto"
-    context: Optional[Dict[str, Any]] = None
-    stream: Optional[bool] = None
-
-    @model_validator(mode="after")
-    def _require_text_or_messages(self) -> "QueryRequest":
-        if not self.messages and not self.text:
-            raise ValueError("Provide 'text' or 'messages' (or both).")
-        return self
-
-    @property
-    def query(self) -> str:
-        """Canonical query string. Prefers messages[-1].content."""
-        if self.messages:
-            return self.messages[-1].content
-        return self.text or ""
-
-    @property
-    def chat_messages(self) -> List[Dict[str, str]]:
-        """OpenAI-compatible messages array."""
-        if self.messages:
-            return [m.model_dump() for m in self.messages]
-        return [{"role": "user", "content": self.text or ""}]
+    text: str = Field(..., description="The user query text.")
+    mode: Mode = Field(Mode.auto, description="Routing preference.")
+    session_id: Optional[str] = Field(None, description="Opaque session identifier.")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Arbitrary context.")
 
 
 class QueryResponse(BaseModel):
-    answer: str
-    mode_used: str
-    fallback_chain: list
+    success: bool
+    mode_used: Optional[str]
+    result: Optional[Dict[str, Any]]
+    error: Optional[str]
+    fallback_chain: List[str]
 
 
-# ── Health endpoints ─────────────────────────────────────────────────────
+# ── Upstream helpers ────────────────────────────────────────────────────────
+
+def _hermes_headers() -> Dict[str, str]:
+    headers: Dict[str, str] = {"Content-Type": "application/json"}
+    if config.HERMES_API_KEY:
+        headers["Authorization"] = f"Bearer {config.HERMES_API_KEY}"
+    return headers
 
 
-@app.get("/")
-async def root():
-    return {"status": "ok", "service": "ecoseek-gateway"}
+def _local_headers() -> Dict[str, str]:
+    headers: Dict[str, str] = {"Content-Type": "application/json"}
+    if config.LOCAL_LLM_API_KEY:
+        headers["Authorization"] = f"Bearer {config.LOCAL_LLM_API_KEY}"
+    return headers
 
 
-@app.get("/health/upstreams")
-async def health_upstreams():
-    """Non-sensitive upstream health summary."""
-    results = {}
-    client = _client()
+async def _call_hermes(req: QueryRequest) -> Dict[str, Any]:
+    """POST to Hermes orchestrate endpoint via AgenticPlug."""
+    url = f"{config.AGENTICPLUG_URL}/v1/orchestrate"
+    payload: Dict[str, Any] = {"text": req.text}
+    if req.session_id:
+        payload["session_id"] = req.session_id
+    if req.metadata:
+        payload["metadata"] = req.metadata
 
-    for name, url, path in [
-        ("hermes", HERMES_URL, "/health"),
-        ("agenticplug", AGENTICPLUG_URL, "/healthz"),
-        ("local", LOCAL_LLM_URL, "/v1/models"),
-    ]:
-        if not url:
-            results[name] = {"status": "not_configured"}
-            continue
-        t0 = time.monotonic()
+    with _tracer.start_as_current_span("ecoseek.call.hermes") as span:
+        span.set_attribute("ecoseek.upstream", "hermes")
+        span.set_attribute("http.url", url)
+        span.set_attribute("http.method", "POST")
+        if req.session_id:
+            span.set_attribute("ecoseek.session_id", req.session_id)
         try:
-            resp = await client.get(url + path)
-            latency = round((time.monotonic() - t0) * 1000, 1)
-            healthy = 200 <= resp.status_code < 300
-            results[name] = {
-                "status": "healthy" if healthy else "unhealthy",
-                "latency_ms": latency,
-            }
-            _upstream_status[name] = {
-                "healthy": healthy,
-                "last_check": time.time(),
-                "latency_ms": latency,
-            }
-        except Exception:
-            latency = round((time.monotonic() - t0) * 1000, 1)
-            results[name] = {"status": "unreachable", "latency_ms": latency}
-            _upstream_status[name] = {
-                "healthy": False,
-                "last_check": time.time(),
-                "latency_ms": latency,
-            }
-
-    return results
+            async with httpx.AsyncClient(timeout=config.UPSTREAM_TIMEOUT_S) as client:
+                r = await client.post(url, json=payload, headers=_hermes_headers())
+                span.set_attribute("http.status_code", r.status_code)
+                r.raise_for_status()
+                span.set_attribute("ecoseek.success", True)
+                return r.json()
+        except Exception as exc:  # noqa: BLE001
+            span.set_attribute("ecoseek.success", False)
+            span.set_attribute("error", True)
+            span.record_exception(exc)
+            raise
 
 
-# ── Failover chain helpers ───────────────────────────────────────────────
-
-
-async def _try_hermes(query: str, context: Optional[Dict[str, Any]]) -> Optional[str]:
-    """Hermes via AgenticPlug /v1/orchestrate."""
-    if not HERMES_URL and not AGENTICPLUG_URL:
-        return None
-    client = _client()
-    target = AGENTICPLUG_URL + "/v1/orchestrate"
-    headers: Dict[str, str] = {}
-    if HERMES_API_KEY:
-        headers["Authorization"] = f"Bearer {HERMES_API_KEY}"
-    payload = {
-        "task": query,
-        "mode": "ecoSeek",
-        "source": "ecoseek-gateway",
-    }
-    if context:
-        payload["context"] = context
-    try:
-        resp = await client.post(target, json=payload, headers=headers)
-        if resp.status_code in (200, 201, 202):
-            data = resp.json()
-            task_id = data.get("task_id")
-            status = data.get("status", "accepted")
-            return f"[Hermes] Task {task_id} {status}. Poll: /hermes/tasks/{task_id}"
-    except Exception as exc:
-        logger.warning("hermes upstream error: %s", _safe_exc(exc))
-    return None
-
-
-async def _try_agenticplug_chat(query: str, messages: Optional[List[Dict[str, str]]] = None) -> Optional[str]:
-    """AgenticPlug /v1/chat/completions (Ollama passthrough)."""
-    if not AGENTICPLUG_URL:
-        return None
-    client = _client()
-    payload = {
-        "model": OLLAMA_MODEL,
-        "messages": messages or [{"role": "user", "content": query}],
-    }
-    try:
-        resp = await client.post(
-            AGENTICPLUG_URL + "/v1/chat/completions",
-            json=payload,
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            choices = data.get("choices", [])
-            if choices:
-                return choices[0].get("message", {}).get("content", "")
-    except Exception as exc:
-        logger.warning("agenticplug upstream error: %s", _safe_exc(exc))
-    return None
-
-
-async def _try_local_llm(query: str, messages: Optional[List[Dict[str, str]]] = None) -> Optional[str]:
-    """Direct local OpenAI-compatible /v1/chat/completions."""
-    if not LOCAL_LLM_URL:
-        return None
-    client = _client()
-    payload = {
-        "model": OLLAMA_MODEL,
-        "messages": messages or [{"role": "user", "content": query}],
+async def _call_agenticplug(req: QueryRequest) -> Dict[str, Any]:
+    """POST to AgenticPlug chat completions (OpenAI-compatible)."""
+    url = f"{config.AGENTICPLUG_URL}/v1/chat/completions"
+    payload: Dict[str, Any] = {
+        "messages": [{"role": "user", "content": req.text}],
         "stream": False,
     }
-    try:
-        resp = await client.post(LOCAL_LLM_URL + "/v1/chat/completions", json=payload)
-        if resp.status_code == 200:
-            data = resp.json()
-            choices = data.get("choices", [])
-            if choices:
-                return choices[0].get("message", {}).get("content", "")
-            return data.get("message", {}).get("content", "")
-    except Exception as exc:
-        logger.warning("local llm upstream error: %s", _safe_exc(exc))
-    return None
+    if req.session_id:
+        payload["session_id"] = req.session_id
+
+    with _tracer.start_as_current_span("ecoseek.call.agenticplug") as span:
+        span.set_attribute("ecoseek.upstream", "agenticplug")
+        span.set_attribute("http.url", url)
+        span.set_attribute("http.method", "POST")
+        if req.session_id:
+            span.set_attribute("ecoseek.session_id", req.session_id)
+        try:
+            async with httpx.AsyncClient(timeout=config.UPSTREAM_TIMEOUT_S) as client:
+                r = await client.post(url, json=payload)
+                span.set_attribute("http.status_code", r.status_code)
+                r.raise_for_status()
+                span.set_attribute("ecoseek.success", True)
+                return r.json()
+        except Exception as exc:  # noqa: BLE001
+            span.set_attribute("ecoseek.success", False)
+            span.set_attribute("error", True)
+            span.record_exception(exc)
+            raise
 
 
-def _stream_requested(req: QueryRequest, request: Request) -> bool:
-    if req.stream is True:
-        return True
-    return request.query_params.get("stream", "").lower() == "true"
+async def _call_local(req: QueryRequest) -> Dict[str, Any]:
+    """POST to the local OpenAI-compatible LLM endpoint (e.g. Ollama)."""
+    if not config.LOCAL_LLM_URL:
+        raise RuntimeError("LOCAL_LLM_URL is not configured")
+    url = f"{config.LOCAL_LLM_URL}/v1/chat/completions"
+    payload: Dict[str, Any] = {
+        "messages": [{"role": "user", "content": req.text}],
+        "stream": False,
+    }
+
+    with _tracer.start_as_current_span("ecoseek.call.local") as span:
+        span.set_attribute("ecoseek.upstream", "local")
+        span.set_attribute("http.url", url)
+        span.set_attribute("http.method", "POST")
+        if req.session_id:
+            span.set_attribute("ecoseek.session_id", req.session_id)
+        try:
+            async with httpx.AsyncClient(timeout=config.UPSTREAM_TIMEOUT_S) as client:
+                r = await client.post(url, json=payload, headers=_local_headers())
+                span.set_attribute("http.status_code", r.status_code)
+                r.raise_for_status()
+                span.set_attribute("ecoseek.success", True)
+                return r.json()
+        except Exception as exc:  # noqa: BLE001
+            span.set_attribute("ecoseek.success", False)
+            span.set_attribute("error", True)
+            span.record_exception(exc)
+            raise
 
 
-# ── Query endpoint with failover ────────────────────────────────────────
+# ── Routing logic ───────────────────────────────────────────────────────────
 
+async def _route(req: QueryRequest) -> QueryResponse:
+    """
+    Routing / fallback chain:
 
-@app.post("/v1/query", response_model=QueryResponse)
-async def query(req: QueryRequest, request: Request):
-    if _stream_requested(req, request):
-        return JSONResponse(
-            status_code=501,
-            content={
-                "error": "Streaming is not supported for alpha",
-                "mode_used": "none",
-                "fallback_chain": [],
-            },
+    mode=hermes     → Hermes (via AgenticPlug /v1/orchestrate); hard-fail if down.
+    mode=agenticplug → AgenticPlug only; fail if down.
+    mode=local       → Local LLM only; fail if not configured or down.
+    mode=auto        → Hermes (if enabled) → AgenticPlug → local; each step
+                       is tried only when the previous one fails.
+    """
+    with _tracer.start_as_current_span("ecoseek.route") as span:
+        span.set_attribute("ecoseek.mode", req.mode.value)
+        if req.session_id:
+            span.set_attribute("ecoseek.session_id", req.session_id)
+
+        chain: List[str] = []
+
+        async def _try(name: str, coro) -> Optional[Dict[str, Any]]:
+            chain.append(name)
+            try:
+                result = await coro
+                log.info("upstream %s succeeded", name)
+                return result
+            except Exception as exc:  # noqa: BLE001
+                log.warning("upstream %s failed: %s", name, exc)
+                return None
+
+        if req.mode == Mode.hermes:
+            result = await _try("hermes", _call_hermes(req))
+            span.set_attribute("ecoseek.fallback_chain", ",".join(chain))
+            if result is None:
+                span.set_attribute("ecoseek.success", False)
+                span.set_attribute("ecoseek.mode_used", "")
+                return QueryResponse(
+                    success=False,
+                    mode_used=None,
+                    result=None,
+                    error="Hermes backend unavailable and no fallback allowed for mode=hermes.",
+                    fallback_chain=chain,
+                )
+            span.set_attribute("ecoseek.success", True)
+            span.set_attribute("ecoseek.mode_used", "hermes")
+            return QueryResponse(success=True, mode_used="hermes", result=result, error=None, fallback_chain=chain)
+
+        if req.mode == Mode.agenticplug:
+            result = await _try("agenticplug", _call_agenticplug(req))
+            span.set_attribute("ecoseek.fallback_chain", ",".join(chain))
+            if result is None:
+                span.set_attribute("ecoseek.success", False)
+                span.set_attribute("ecoseek.mode_used", "")
+                return QueryResponse(
+                    success=False,
+                    mode_used=None,
+                    result=None,
+                    error="AgenticPlug backend unavailable.",
+                    fallback_chain=chain,
+                )
+            span.set_attribute("ecoseek.success", True)
+            span.set_attribute("ecoseek.mode_used", "agenticplug")
+            return QueryResponse(success=True, mode_used="agenticplug", result=result, error=None, fallback_chain=chain)
+
+        if req.mode == Mode.local:
+            result = await _try("local", _call_local(req))
+            span.set_attribute("ecoseek.fallback_chain", ",".join(chain))
+            if result is None:
+                span.set_attribute("ecoseek.success", False)
+                span.set_attribute("ecoseek.mode_used", "")
+                return QueryResponse(
+                    success=False,
+                    mode_used=None,
+                    result=None,
+                    error="Local LLM unavailable or LOCAL_LLM_URL not configured.",
+                    fallback_chain=chain,
+                )
+            span.set_attribute("ecoseek.success", True)
+            span.set_attribute("ecoseek.mode_used", "local")
+            return QueryResponse(success=True, mode_used="local", result=result, error=None, fallback_chain=chain)
+
+        # mode=auto: try Hermes first (if enabled), then AgenticPlug, then local.
+        if config.HERMES_ENABLED and config.HERMES_URL:
+            result = await _try("hermes", _call_hermes(req))
+            if result is not None:
+                span.set_attribute("ecoseek.fallback_chain", ",".join(chain))
+                span.set_attribute("ecoseek.success", True)
+                span.set_attribute("ecoseek.mode_used", "hermes")
+                return QueryResponse(success=True, mode_used="hermes", result=result, error=None, fallback_chain=chain)
+
+        result = await _try("agenticplug", _call_agenticplug(req))
+        if result is not None:
+            span.set_attribute("ecoseek.fallback_chain", ",".join(chain))
+            span.set_attribute("ecoseek.success", True)
+            span.set_attribute("ecoseek.mode_used", "agenticplug")
+            return QueryResponse(success=True, mode_used="agenticplug", result=result, error=None, fallback_chain=chain)
+
+        if config.LOCAL_LLM_URL:
+            result = await _try("local", _call_local(req))
+            if result is not None:
+                span.set_attribute("ecoseek.fallback_chain", ",".join(chain))
+                span.set_attribute("ecoseek.success", True)
+                span.set_attribute("ecoseek.mode_used", "local")
+                return QueryResponse(success=True, mode_used="local", result=result, error=None, fallback_chain=chain)
+
+        span.set_attribute("ecoseek.fallback_chain", ",".join(chain))
+        span.set_attribute("ecoseek.success", False)
+        span.set_attribute("ecoseek.mode_used", "")
+        return QueryResponse(
+            success=False,
+            mode_used=None,
+            result=None,
+            error="All backends in the fallback chain failed.",
+            fallback_chain=chain,
         )
 
-    chain: List[str] = []
-    answer = None
-    mode_plan: List[Literal["hermes", "agenticplug", "local"]]
-    if req.mode == "auto":
-        mode_plan = ["hermes", "agenticplug", "local"]
-    else:
-        mode_plan = [req.mode]
 
-    for mode in mode_plan:
-        if mode == "hermes":
-            chain.append("hermes")
-            if not (HERMES_URL or HERMES_API_KEY):
-                continue
-            logger.info("Trying Hermes via AgenticPlug /v1/orchestrate")
-            answer = await _try_hermes(req.query, req.context)
-        elif mode == "agenticplug":
-            chain.append("agenticplug")
-            logger.info("Trying AgenticPlug /v1/chat/completions")
-            answer = await _try_agenticplug_chat(req.query, req.chat_messages)
-        else:
-            chain.append("local")
-            logger.info("Trying local /v1/chat/completions")
-            answer = await _try_local_llm(req.query, req.chat_messages)
+# ── Endpoints ───────────────────────────────────────────────────────────────
 
-        if answer:
-            return QueryResponse(answer=answer, mode_used=mode, fallback_chain=chain)
+@app.get("/", summary="Health check")
+async def health() -> Dict[str, str]:
+    """Returns immediately with status=ok. Used by docker healthcheck."""
+    return {"status": "ok"}
 
-    # All upstreams failed — fail-closed with generic error
-    logger.warning("All upstreams failed for query (length=%d)", len(req.query))
-    return JSONResponse(
-        status_code=503,
-        content={
-            "error": "All upstreams unavailable",
-            "mode_used": "none",
-            "fallback_chain": chain,
-        },
-    )
+
+@app.post("/v1/query", response_model=QueryResponse, summary="Primary query endpoint")
+async def query(
+    req: QueryRequest,
+    stream: Optional[bool] = Query(default=None, description="Streaming — not supported in alpha."),
+) -> QueryResponse:
+    """
+    Route a natural-language query to the appropriate backend.
+
+    Streaming is **not** supported in alpha.  Pass ``?stream=true`` to get a
+    501 response rather than unexpected behaviour.
+    """
+    if stream:
+        return JSONResponse(
+            status_code=501,
+            content={"detail": "Streaming is not supported in alpha. Omit ?stream=true."},
+        )
+
+    return await _route(req)
