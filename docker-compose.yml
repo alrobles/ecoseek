@@ -20,6 +20,9 @@
 #                       docker compose --profile observability up
 #                       Publishes Phoenix on 127.0.0.1:${PHOENIX_PORT:-6006}
 #                       (the container always listens on 6006 internally).
+#   - frontend        — EcoSeek React web UI (thin SPA, talks to broker)
+#                       docker compose --profile frontend up
+#                       Publishes frontend on 127.0.0.1:${FRONTEND_PORT:-4000}
 #
 # All host port publications are bound to 127.0.0.1 so the stack is reachable
 # only from the local machine. If you need LAN/remote access, edit the
@@ -358,6 +361,33 @@ services:
       timeout: 5s
       retries: 10
       start_period: 15s
+    networks:
+      - ecoseek-net
+
+  # ── EcoSeek Frontend (React SPA) ────────────────────────────────────
+  # Standalone web UI that talks directly to the AgenticPlug broker.
+  # Auth via GitHub OAuth redirect, chat via /v1/chat/completions.
+  #
+  #   docker compose --profile frontend up
+  #
+  # Or for development:
+  #   cd frontend && npm install && npm start
+  ecoseek-frontend:
+    build:
+      context: ./frontend
+      args:
+        REACT_APP_BROKER_URL: "${REACT_APP_BROKER_URL:-https://broker.ecoseek.org}"
+    container_name: ecoseek-frontend
+    profiles: ["frontend"]
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-4000}:80"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     networks:
       - ecoseek-net
 
