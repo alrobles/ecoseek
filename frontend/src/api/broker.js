@@ -1,20 +1,27 @@
 /**
- * Broker API client — talks to AgenticPlug broker or Emily local agent.
+ * Broker API client — dual-mode support for EcoSeek.
  *
- * When REACT_APP_BROKER_URL points to a local Emily agent (e.g. http://localhost:8642),
- * auth is handled by the Emily API key instead of GitHub OAuth.
- * When pointing to broker.ecoseek.org, auth uses GitHub OAuth sessions.
+ * Auth always goes through the broker (GitHub OAuth).
+ * Chat goes to Emily local (if REACT_APP_EMILY_URL is set) or the broker.
+ *
+ * Modes:
+ *   - Local Emily:  Auth via broker, chat via Emily at localhost:8642
+ *   - Remote only:  Auth + chat both via broker → Hermes remote on reumanlab
  */
 
 const BROKER_URL =
   process.env.REACT_APP_BROKER_URL || "https://broker.ecoseek.org";
 
 /**
- * Detect whether we're talking to a local Emily agent vs the remote broker.
- * Local Emily doesn't need GitHub OAuth — it uses a simple API key.
+ * Emily local agent URL. When set, chat goes directly to Emily.
+ * Auth still goes through the broker for GitHub OAuth security.
  */
-const IS_LOCAL_EMILY =
-  BROKER_URL.includes("localhost") || BROKER_URL.includes("127.0.0.1");
+const EMILY_URL = process.env.REACT_APP_EMILY_URL || "";
+
+const IS_LOCAL_EMILY = Boolean(EMILY_URL);
+
+/** The endpoint to send chat completions to. */
+const CHAT_URL = IS_LOCAL_EMILY ? EMILY_URL : BROKER_URL;
 
 // ── Session helpers ────────────────────────────────────────────────────
 
@@ -44,21 +51,12 @@ export function getSessionId() {
   return getSession()?.session_id || null;
 }
 
-// ── Auth ───────────────────────────────────────────────────────────────
-
-const LOCAL_EMILY_KEY = process.env.REACT_APP_EMILY_KEY || "emily-local-key";
+// ── Auth (always via broker — GitHub OAuth) ────────────────────────────
 
 /**
- * Start GitHub OAuth — redirect the browser to the broker's OAuth endpoint.
- * For local Emily, skip OAuth and create a local session directly.
+ * Start GitHub OAuth via the broker. Works the same in both modes.
  */
 export function startLogin(returnTo) {
-  if (IS_LOCAL_EMILY) {
-    saveSession(LOCAL_EMILY_KEY, { login: "local", name: "Local User" });
-    // Skip OAuth — go straight to the app root (not /callback)
-    window.location.href = window.location.origin + "/";
-    return;
-  }
   const url = `${BROKER_URL}/auth/github/start?return_to=${encodeURIComponent(
     returnTo || window.location.origin + "/callback"
   )}`;
@@ -66,16 +64,11 @@ export function startLogin(returnTo) {
 }
 
 /**
- * Fetch current user identity via GET /v1/me.
- * For local Emily, returns a local identity without network call.
+ * Fetch current user identity via broker GET /v1/me.
  */
 export async function fetchMe() {
   const sid = getSessionId();
   if (!sid) return null;
-  if (IS_LOCAL_EMILY) {
-    // Return shape expected by AuthContext: { user: { login, name, ... } }
-    return { user: { login: "local", name: "Local User", mode: "emily-local" } };
-  }
   try {
     const res = await fetch(`${BROKER_URL}/v1/me`, {
       headers: { Authorization: `Bearer ${sid}` },
@@ -91,10 +84,12 @@ export async function fetchMe() {
 
 export async function checkHealth() {
   try {
-    const endpoint = IS_LOCAL_EMILY
-      ? `${BROKER_URL}/health`
-      : `${BROKER_URL}/healthz`;
-    const res = await fetch(endpoint);
+    // Check Emily local health if configured, otherwise check broker
+    if (IS_LOCAL_EMILY) {
+      const res = await fetch(`${EMILY_URL}/health`);
+      return res.ok;
+    }
+    const res = await fetch(`${BROKER_URL}/healthz`);
     return res.ok;
   } catch {
     return false;
@@ -129,8 +124,11 @@ Always introduce yourself as Emily on the first interaction. Keep responses focu
 /**
  * Send a chat completion request.
  *
- * - Local Emily: talks directly to Hermes gateway (personality is in config.yaml)
- * - Remote broker: prepends Emily system prompt (broker forwards to remote Hermes)
+ * - Local Emily: talks to Emily at EMILY_URL (personality in Hermes config)
+ * - Remote: talks to broker (prepends Emily system prompt)
+ *
+ * Auth token (session_id from GitHub OAuth) is sent to both.
+ * Emily local validates via API_SERVER_KEY; broker validates via session store.
  *
  * @param {Array} messages  OpenAI-style messages array
  * @param {string} model    Model name (default: openclaw/main)
@@ -140,13 +138,13 @@ export async function chatCompletion(messages, model = "openclaw/main") {
   const sid = getSessionId();
   if (!sid) throw new Error("Not logged in");
 
-  // Local Emily has personality baked into Hermes config — no need for system prompt.
+  // Local Emily has personality baked into Hermes config — no system prompt needed.
   // Remote broker needs the system prompt injected by the frontend.
   const fullMessages = IS_LOCAL_EMILY
     ? messages
     : [{ role: "system", content: EMILY_SYSTEM_PROMPT }, ...messages];
 
-  const res = await fetch(`${BROKER_URL}/v1/chat/completions`, {
+  const res = await fetch(`${CHAT_URL}/v1/chat/completions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${sid}`,
@@ -163,4 +161,4 @@ export async function chatCompletion(messages, model = "openclaw/main") {
   return body;
 }
 
-export { BROKER_URL, IS_LOCAL_EMILY };
+export { BROKER_URL, EMILY_URL, CHAT_URL, IS_LOCAL_EMILY };
