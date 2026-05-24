@@ -1,6 +1,6 @@
 ---
 name: testing-emily-frontend
-description: Test the Emily frontend end-to-end — health check, status indicator, favicon, login screen, avatar, info panel, remote health, and CORS. Use when verifying Emily Docker networking, API server, frontend branding, or UI changes.
+description: Test the Emily frontend end-to-end — health check, login, avatar, math rendering, code blocks, auxiliary panel (Preview/Terminal/Files/DiDAL/Info), theme toggle, and CORS. Use when verifying Emily Docker networking, API server, frontend branding, rich content rendering, or UI changes.
 ---
 
 # Testing Emily Frontend
@@ -26,7 +26,14 @@ cd /home/ubuntu/repos/ecoseek
 DEEPSEEK_API_KEY=sk-your-key bash emily-start.sh
 ```
 
-This builds both Docker images, generates a shared API key, and starts both containers.
+This builds both Docker images, generates a shared API key, and starts emily-local + ecoseek-frontend + ecoseek-terminal containers.
+
+**Known issue:** The ttyd terminal container may crash if `emily-start.sh` passes `bash` instead of `ttyd -W bash` as the entrypoint. If `docker ps` shows `ecoseek-terminal` in `Restarting` state, fix manually:
+```bash
+docker stop ecoseek-terminal && docker rm ecoseek-terminal
+docker run -d --name ecoseek-terminal -p 127.0.0.1:8000:7681 \
+  -v "$(pwd)/workspace:/workspace" tsl0922/ttyd:latest ttyd -W bash
+```
 
 ### 2. Manual Build (Alternative)
 
@@ -115,6 +122,22 @@ asyncio.run(main())
 
 **Key insight:** Playwright route interception (`page.route()`) does NOT persist after the script exits. Use `window.fetch` override via `page.evaluate()` instead — it persists in the page's JS context.
 
+**Better approach for reliable auth bypass:** Use `page.route()` for `/v1/me` interception, then `page.add_init_script()` to inject the fetch override before React loads. This way the override survives page reloads:
+
+```python
+# Intercept /v1/me via page.route (works during script lifetime)
+await page.route("**/v1/me", lambda route: route.fulfill(
+    status=200, content_type="application/json",
+    body='{"user":{"login":"test-user","avatarUrl":""}}'
+))
+
+# Inject persistent fetch override via addInitScript
+await page.add_init_script("""...(your mock JSON)...""")
+await page.reload(wait_until="networkidle")
+```
+
+**For rich content testing:** Include LaTeX math (`$$...$$`, `$...$`) and fenced code blocks (` ```python `) in mock chat responses to exercise KaTeX rendering and CodeBlock component.
+
 ## Test Procedure
 
 ### Test 1: Health Check (Shell)
@@ -157,6 +180,45 @@ curl -s -w "\nHTTP_CODE:%{http_code}" http://localhost:8642/health
 - Click theme toggle button in header
 - Pass: UI switches between dark/light, avatar remains visible and clean on both
 
+### Test 9: KaTeX Math Rendering (Browser — auth + mock chat with LaTeX)
+- Send message intercepted by mock returning `$$S = k_B \ln \Omega$$` and inline `$\alpha$`
+- Pass: Display math renders as centered KaTeX equation (`.katex` elements in DOM), inline math shows Greek letters (not raw `$...$` text)
+
+### Test 10: Code Block + Copy Button (Browser — auth + mock chat with code)
+- Mock response includes ` ```python ` fenced code block
+- Pass: Code block has "PYTHON" language header, line numbers, syntax highlighting, "Copy" button that changes to "Copied!" with checkmark on click
+
+### Test 11: Preview Panel — Extracted Blocks (Browser — after Test 9/10)
+- Click "Preview" tab in right panel
+- Pass: Shows extracted Python code block + rendered KaTeX display equation from chat messages
+
+### Test 12: Terminal Tab — ttyd (Browser)
+- Click "Terminal" tab
+- Pass: iframe loads ttyd web terminal showing bash prompt (dark terminal UI). Fallback text shows `localhost:8000`
+
+### Test 13: Files Tab — Workspace Browser (Browser)
+- Place a test file in `./workspace/` before testing, then click "Files" tab
+- Pass: Shows file listing with name, size, date. Breadcrumb shows "workspace". Refresh button visible.
+- If workspace mount is broken, shows error message instead of file list
+
+### Test 14: DiDAL Tab — Status + Tools (Browser)
+- Click "DiDAL" tab
+- Pass: Alpha (Emily) shows "Online" green, Beta (Hermes) shows status, arrow connector, "DiDAL Phase 3" description, 4 remote tool chips (eco_analyze, ku_hpc, escalate_remote, dialectical_exchange)
+
+## Workspace Setup for Files Tab
+
+The Files tab reads from `./workspace/` via nginx JSON autoindex at `/workspace/`. Create the directory and add a test file before testing:
+```bash
+mkdir -p ./workspace
+echo "test content" > ./workspace/sample-data.csv
+```
+
+Verify the endpoint works:
+```bash
+curl -s http://localhost:4000/workspace/
+# Expected: JSON array with file objects [{"name":"sample-data.csv","type":"file",...}]
+```
+
 ## Common Gotchas
 
 1. **REACT_APP_* vars are build-time only:** Create React App bakes env vars at webpack compile time. Setting them at container runtime does nothing. Must pass as `--build-arg` when building the Docker image.
@@ -175,10 +237,18 @@ curl -s -w "\nHTTP_CODE:%{http_code}" http://localhost:8642/health
 
 8. **Frontend port:** When using Docker (nginx), frontend serves on port 4000 (mapped from 80). When using `npm start` dev server, it's port 3001 (hardcoded in package.json).
 
+9. **ttyd container entrypoint:** The `tsl0922/ttyd:latest` image needs `ttyd -W bash` as the command, not just `bash`. If the container keeps restarting (check `docker ps`), the entrypoint is wrong.
+
+10. **Code block theme in light mode:** The CodeBlock component reads `currentTheme` from `document.documentElement.getAttribute("data-theme")` at render time but may not re-render reactively when theme toggles. Code blocks might keep the dark (oneDark) syntax theme after switching to light mode. Low priority.
+
+11. **Math rendering pipeline:** Chat messages use `remarkMath` + `rehypeKatex` plugins in ReactMarkdown — KaTeX renders directly via the rehype plugin. The `MathBlock`/`MathInline` components (with copy buttons) are only used in the Preview panel's `MathPreview`, not in chat messages.
+
+12. **Health mock for Info/DiDAL panels:** The Info and DiDAL panels poll `/api/hermes-health` (nginx proxy) and local `/health`. If testing without real backends, mock both via `page.add_init_script()` to show "Connected" status.
+
 ## Cleanup
 
 ```bash
-docker stop emily-local ecoseek-frontend 2>/dev/null
-docker rm emily-local ecoseek-frontend 2>/dev/null
+docker stop emily-local ecoseek-frontend ecoseek-terminal 2>/dev/null
+docker rm emily-local ecoseek-frontend ecoseek-terminal 2>/dev/null
 docker rmi emily-local ecoseek-frontend 2>/dev/null
 ```
