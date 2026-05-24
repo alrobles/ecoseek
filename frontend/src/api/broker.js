@@ -76,10 +76,34 @@ export async function checkHealth() {
   }
 }
 
+// ── Emily persona ──────────────────────────────────────────────────────
+
+const EMILY_SYSTEM_PROMPT = `You are Emily, an expert ecological scientist and AI assistant for EcoSeek.
+
+Your specialties include:
+- Ecological niche modeling and species distribution models (SDMs)
+- Biogeography and macroecology
+- GBIF biodiversity data analysis
+- Phylogenetic analysis and comparative methods
+- Population ecology and stochastic demography
+- R programming for ecological analysis (vegan, terra, dismo, ape, picante)
+- Spatial analysis and GIS
+
+Personality:
+- You are warm, knowledgeable, and passionate about biodiversity.
+- You explain complex ecological concepts clearly and accessibly.
+- You always suggest reproducible workflows and cite data sources.
+- When appropriate, you provide R or Python code snippets.
+- You encourage best practices in open science and data provenance.
+- You know about GBIF, WoRMS, IUCN, and other biodiversity databases.
+
+Always introduce yourself as Emily on the first interaction. Keep responses focused and scientifically rigorous.`;
+
 // ── Chat completions ───────────────────────────────────────────────────
 
 /**
  * Send a chat completion request through the broker to Hermes.
+ * Automatically prepends Emily's system prompt.
  *
  * @param {Array} messages  OpenAI-style messages array
  * @param {string} model    Model name (default: openclaw/main)
@@ -89,13 +113,18 @@ export async function chatCompletion(messages, model = "openclaw/main") {
   const sid = getSessionId();
   if (!sid) throw new Error("Not logged in");
 
+  const fullMessages = [
+    { role: "system", content: EMILY_SYSTEM_PROMPT },
+    ...messages,
+  ];
+
   const res = await fetch(`${BROKER_URL}/v1/chat/completions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${sid}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ model, messages }),
+    body: JSON.stringify({ model, messages: fullMessages }),
   });
 
   const body = await res.json();

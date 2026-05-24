@@ -14,7 +14,7 @@ function LoginScreen({ onLogin }) {
         <EcoSeekLogo className="login-logo" />
         <h1>EcoSeek</h1>
         <p className="login-subtitle">
-          Scientific agentic assistant for ecological computing
+          Meet Emily — your AI ecological research assistant
         </p>
         <button className="login-button" onClick={onLogin}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
@@ -23,7 +23,7 @@ function LoginScreen({ onLogin }) {
           Sign in with GitHub
         </button>
         <p className="login-note">
-          Powered by AgenticPlug gateway &middot; Hermes backend
+          Powered by EcoSeek &middot; AgenticPlug &middot; Hermes
         </p>
       </div>
     </div>
@@ -192,16 +192,18 @@ function App() {
               {messages.length === 0 ? (
                 <div className="welcome-message">
                   <EcoSeekLogo className="welcome-logo" />
-                  <h3>Welcome to EcoSeek</h3>
+                  <h3>Hi, I'm Emily!</h3>
                   <p>
-                    Ask about ecological modeling, species distribution, GBIF
-                    data, phylogenetic analysis, or any scientific workflow.
+                    I'm your ecological research assistant. Ask me about
+                    species distribution models, GBIF data, phylogenetic
+                    analysis, niche modeling, or any ecological workflow.
                   </p>
                   <div className="quick-prompts">
                     {[
-                      "List mammal species in the Yucatan Peninsula",
-                      "What ecological modeling tools are available?",
-                      "Help me build a species distribution model",
+                      "Help me build a species distribution model for jaguar",
+                      "Query GBIF for bird occurrences in Costa Rica",
+                      "What R packages do I need for niche modeling?",
+                      "Explain MaxEnt vs. GLM for presence-only data",
                     ].map((prompt) => (
                       <button
                         key={prompt}
@@ -229,7 +231,7 @@ function App() {
                   >
                     <div className="message-header">
                       {msg.type === "agent" && (
-                        <span className="agent-name">{msg.agentName}</span>
+                        <span className="agent-name">Emily</span>
                       )}
                       {msg.type === "agent" && msg.reasoning && (
                         <>
@@ -263,7 +265,7 @@ function App() {
             </div>
 
             {isLoading && (
-              <div className="loading-animation">Thinking...</div>
+              <div className="loading-animation">Emily is thinking...</div>
             )}
 
             <form onSubmit={handleSubmit} className="input-form">
@@ -271,7 +273,7 @@ function App() {
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Ask EcoSeek anything..."
+                placeholder="Ask Emily about ecology..."
                 disabled={isLoading}
               />
               <div className="action-buttons">
@@ -306,9 +308,9 @@ function App() {
                     <span className="info-value">{BROKER_URL}</span>
                   </div>
                   <div className="info-row">
-                    <span className="info-label">Backend</span>
+                    <span className="info-label">Agent</span>
                     <span className="info-value">
-                      Hermes (DeepSeek v4 Pro)
+                      Emily (Hermes / DeepSeek)
                     </span>
                   </div>
                   <div className="info-row">
@@ -351,12 +353,16 @@ function App() {
                 )}
 
                 <div className="info-section">
-                  <h3>About EcoSeek</h3>
+                  <h3>About Emily</h3>
                   <p className="info-text">
-                    EcoSeek is an independent downstream scientific adaptation
-                    built on a fork of AgenticSeek. We gratefully acknowledge
-                    the AgenticSeek project and contributors as the foundation
-                    for this work.
+                    Emily is an expert ecological AI assistant specializing in
+                    niche modeling, biogeography, species distribution, and
+                    biodiversity analysis. She helps researchers with
+                    reproducible scientific workflows.
+                  </p>
+                  <p className="info-text" style={{ marginTop: '8px', fontSize: '0.8em', opacity: 0.7 }}>
+                    EcoSeek is built on a fork of AgenticSeek. We gratefully
+                    acknowledge the AgenticSeek project and contributors.
                   </p>
                 </div>
               </div>
