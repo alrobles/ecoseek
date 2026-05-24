@@ -6,7 +6,7 @@ import { ResizableLayout } from "./components/ResizableLayout";
 import { ReactComponent as EcoSeekLogo } from "./ecoseek-logo.svg";
 import emilyAvatar from "./emily-avatar.png";
 import { useAuth } from "./contexts/AuthContext";
-import { chatCompletion, checkHealth, BROKER_URL, CHAT_URL, IS_LOCAL_EMILY } from "./api/broker";
+import { chatCompletion, checkHealth, checkRemoteHealth, BROKER_URL, CHAT_URL, IS_LOCAL_EMILY, HERMES_REMOTE_URL } from "./api/broker";
 
 function LoginScreen({ onLogin }) {
   return (
@@ -41,6 +41,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [isOnline, setIsOnline] = useState(false);
+  const [remoteStatus, setRemoteStatus] = useState(null);
   const [expandedReasoning, setExpandedReasoning] = useState(new Set());
   const messagesEndRef = useRef(null);
 
@@ -51,14 +52,16 @@ function App() {
     }
   }, [handleCallback]);
 
-  // Health polling
+  // Health polling (local + remote)
   useEffect(() => {
     const poll = async () => {
       const ok = await checkHealth();
       setIsOnline(ok);
+      const remote = await checkRemoteHealth();
+      setRemoteStatus(remote);
     };
     poll();
-    const id = setInterval(poll, 10000);
+    const id = setInterval(poll, 15000);
     return () => clearInterval(id);
   }, []);
 
@@ -316,20 +319,10 @@ function App() {
             <div className="content">
               <div className="info-panel">
                 <div className="info-section">
-                  <h3>Connection</h3>
+                  <h3>Emily Local</h3>
                   <div className="info-row">
-                    <span className="info-label">Auth</span>
-                    <span className="info-value">{BROKER_URL}</span>
-                  </div>
-                  <div className="info-row">
-                    <span className="info-label">Chat</span>
+                    <span className="info-label">Endpoint</span>
                     <span className="info-value">{CHAT_URL}</span>
-                  </div>
-                  <div className="info-row">
-                    <span className="info-label">Mode</span>
-                    <span className="info-value">
-                      {IS_LOCAL_EMILY ? "Emily Local + Hermes Remote" : "Emily Remote"}
-                    </span>
                   </div>
                   <div className="info-row">
                     <span className="info-label">Status</span>
@@ -339,6 +332,46 @@ function App() {
                       }`}
                     >
                       {isOnline ? "Connected" : "Disconnected"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="info-section">
+                  <h3>Hermes Remote (reumanlab)</h3>
+                  <div className="info-row">
+                    <span className="info-label">Endpoint</span>
+                    <span className="info-value">{HERMES_REMOTE_URL}</span>
+                  </div>
+                  <div className="info-row">
+                    <span className="info-label">Status</span>
+                    <span
+                      className={`info-value ${
+                        remoteStatus ? "text-success" : "text-error"
+                      }`}
+                    >
+                      {remoteStatus ? "Connected" : "Disconnected"}
+                    </span>
+                  </div>
+                  {remoteStatus && (
+                    <div className="info-row">
+                      <span className="info-label">Platform</span>
+                      <span className="info-value">
+                        {remoteStatus.platform || "hermes-agent"}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="info-section">
+                  <h3>Auth</h3>
+                  <div className="info-row">
+                    <span className="info-label">Broker</span>
+                    <span className="info-value">{BROKER_URL}</span>
+                  </div>
+                  <div className="info-row">
+                    <span className="info-label">Mode</span>
+                    <span className="info-value">
+                      {IS_LOCAL_EMILY ? "Emily Local + Hermes Remote" : "Emily Remote"}
                     </span>
                   </div>
                 </div>
