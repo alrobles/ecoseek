@@ -370,7 +370,7 @@ services:
   #
   #   docker compose --profile frontend up
   #
-  # Or for development:
+  # Or for development (runs on port 3001 to avoid OpenWebUI on 3000):
   #   cd frontend && npm install && npm start
   ecoseek-frontend:
     build:
