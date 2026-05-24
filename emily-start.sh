@@ -47,6 +47,10 @@ FRONTEND_PORT="${FRONTEND_PORT:-4000}"
 DEEPSEEK_KEY="${DEEPSEEK_API_KEY:-}"
 OLLAMA_URL="${OLLAMA_BASE_URL:-}"
 
+# Shared key for Emily <-> frontend auth.  Hermes requires API_SERVER_KEY
+# when the API server binds to 0.0.0.0 (needed inside Docker for port mapping).
+EMILY_KEY="${API_SERVER_KEY:-$(openssl rand -hex 16)}"
+
 echo ""
 emily "Hi! I'm Emily, your ecological AI assistant."
 emily "Setting up my workspace..."
@@ -69,6 +73,7 @@ docker build \
 
 EMILY_ENV=()
 EMILY_ENV+=(-e "ECOSEEK_BROKER_URL=$BROKER_URL")
+EMILY_ENV+=(-e "API_SERVER_KEY=$EMILY_KEY")
 EMILY_ENV+=(-e "API_SERVER_CORS_ORIGINS=http://localhost:${FRONTEND_PORT},http://127.0.0.1:${FRONTEND_PORT}")
 [ -n "$BROKER_KEY" ] && EMILY_ENV+=(-e "ECOSEEK_BROKER_KEY=$BROKER_KEY")
 [ -n "$DEEPSEEK_KEY" ] && EMILY_ENV+=(-e "DEEPSEEK_API_KEY=$DEEPSEEK_KEY")
@@ -100,6 +105,7 @@ fi
 docker build \
   --build-arg REACT_APP_BROKER_URL="${BROKER_URL}" \
   --build-arg REACT_APP_EMILY_URL="http://localhost:${EMILY_PORT}" \
+  --build-arg REACT_APP_EMILY_KEY="${EMILY_KEY}" \
   -t "$FRONTEND_IMAGE" \
   frontend/
 
