@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
-import { getSession, saveSession, clearSession, fetchMe, startLogin } from "../api/broker";
+import { getSession, saveSession, clearSession, fetchMe, startLogin, IS_LOCAL_EMILY } from "../api/broker";
 
 const AuthContext = createContext();
 
@@ -33,6 +33,13 @@ export const AuthProvider = ({ children }) => {
   };
 
   const handleCallback = () => {
+    // Local Emily: session is already saved by startLogin(), just redirect home
+    if (IS_LOCAL_EMILY) {
+      window.history.replaceState({}, "", "/");
+      checkAuth();
+      return;
+    }
+    // Remote broker: extract session_id from OAuth callback URL
     const params = new URLSearchParams(window.location.search);
     const sid = params.get("session_id");
     if (sid) {
