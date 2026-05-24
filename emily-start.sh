@@ -2,8 +2,11 @@
 # EcoSeek Emily — one-command start via Docker.
 # Launches both the Emily local agent and the frontend.
 #
+# Auth goes through broker.ecoseek.org (GitHub OAuth).
+# Chat goes to Emily local at :8642.
+#
 # Usage:
-#   bash emily-start.sh                                    # default: uses broker.ecoseek.org for remote
+#   bash emily-start.sh                                    # default: uses broker.ecoseek.org for auth
 #   DEEPSEEK_API_KEY=sk-... bash emily-start.sh            # use DeepSeek as local LLM
 #   OLLAMA_BASE_URL=http://host:11434 bash emily-start.sh  # use local Ollama
 #
@@ -66,6 +69,7 @@ docker build \
 
 EMILY_ENV=()
 EMILY_ENV+=(-e "ECOSEEK_BROKER_URL=$BROKER_URL")
+EMILY_ENV+=(-e "API_SERVER_CORS_ORIGINS=http://localhost:${FRONTEND_PORT},http://127.0.0.1:${FRONTEND_PORT}")
 [ -n "$BROKER_KEY" ] && EMILY_ENV+=(-e "ECOSEEK_BROKER_KEY=$BROKER_KEY")
 [ -n "$DEEPSEEK_KEY" ] && EMILY_ENV+=(-e "DEEPSEEK_API_KEY=$DEEPSEEK_KEY")
 [ -n "$OLLAMA_URL" ] && EMILY_ENV+=(-e "OLLAMA_BASE_URL=$OLLAMA_URL")
@@ -73,6 +77,7 @@ EMILY_ENV+=(-e "ECOSEEK_BROKER_URL=$BROKER_URL")
 docker run -d \
   --name "$EMILY_CONTAINER" \
   -p "127.0.0.1:${EMILY_PORT}:8642" \
+  --add-host=host.docker.internal:host-gateway \
   "${EMILY_ENV[@]}" \
   --restart unless-stopped \
   "$EMILY_IMAGE"
@@ -90,9 +95,11 @@ if docker ps -a --format '{{.Names}}' | grep -q "^${FRONTEND_CONTAINER}$"; then
   docker rm -f "$FRONTEND_CONTAINER" >/dev/null 2>&1 || true
 fi
 
-# Frontend talks to Emily local instead of the remote broker
+# Auth goes through the broker (GitHub OAuth).
+# Chat goes to Emily local at :8642.
 docker build \
-  --build-arg REACT_APP_BROKER_URL="http://localhost:${EMILY_PORT}" \
+  --build-arg REACT_APP_BROKER_URL="${BROKER_URL}" \
+  --build-arg REACT_APP_EMILY_URL="http://localhost:${EMILY_PORT}" \
   -t "$FRONTEND_IMAGE" \
   frontend/
 
@@ -105,7 +112,8 @@ docker run -d \
 echo ""
 emily "I'm ready! Here's what's running:"
 echo ""
-info "  Emily agent:  http://localhost:${EMILY_PORT}"
+info "  Emily agent:  http://localhost:${EMILY_PORT}  (chat)"
+info "  Broker:       ${BROKER_URL}  (auth)"
 info "  Frontend:     http://localhost:${FRONTEND_PORT}"
 echo ""
 info "  Open http://localhost:${FRONTEND_PORT} in your browser."
