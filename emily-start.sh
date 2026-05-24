@@ -139,9 +139,10 @@ docker run -d \
   --name "$TERMINAL_CONTAINER" \
   -p "127.0.0.1:${TERMINAL_PORT}:7681" \
   -v "${WORKSPACE_DIR}:/workspace" \
+  -w /workspace \
   --restart unless-stopped \
   tsl0922/ttyd:latest \
-  bash
+  ttyd -W bash
 
 info "Terminal started on port $TERMINAL_PORT"
 
