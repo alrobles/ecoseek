@@ -1,0 +1,576 @@
+.agenticplug-task-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.agenticplug-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-shrink: 0;
+}
+
+.agenticplug-header h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.mock-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.scenario-select {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--foreground);
+  font-size: 0.8rem;
+  font-family: inherit;
+}
+
+.generate-button {
+  padding: 6px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-foreground);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.generate-button:hover:not(:disabled) {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.generate-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ap-error {
+  color: var(--destructive-foreground);
+  font-size: 0.85rem;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: 6px;
+  border-left: 3px solid var(--destructive);
+  flex-shrink: 0;
+}
+
+.agenticplug-content {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ap-task-list {
+  width: 280px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: 12px;
+  background: var(--muted);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.ap-task-list h3 {
+  margin: 0 0 10px 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ap-empty {
+  text-align: center;
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+  padding: 16px 0;
+}
+
+.ap-task-detail {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ap-no-selection {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--muted-foreground);
+  font-size: 0.9rem;
+}
+
+/* Task Card */
+.ap-task-card {
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ap-task-card:hover {
+  border-color: var(--accent);
+  transform: translateX(2px);
+}
+
+.ap-task-card.ap-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.ap-task-card.ap-needs-approval {
+  border-left: 3px solid #f59e0b;
+  background: rgba(245, 158, 11, 0.05);
+}
+
+.ap-task-card.ap-failed {
+  border-left: 3px solid var(--destructive);
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.ap-task-card.ap-denied {
+  border-left: 3px solid var(--muted-foreground);
+  opacity: 0.7;
+}
+
+.ap-task-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.ap-state-icon {
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--muted-foreground);
+}
+
+.ap-state-icon.ap-active {
+  color: var(--accent);
+  animation: ap-pulse 1.5s infinite;
+}
+
+@keyframes ap-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.ap-task-title {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ap-task-card-body {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.ap-state-badge {
+  font-size: 0.65rem;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.ap-badge-task_created,
+.ap-badge-task_running {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+}
+
+.ap-badge-approval_required {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+}
+
+.ap-badge-approval_denied {
+  background: rgba(155, 155, 155, 0.15);
+  color: #a3a3a3;
+}
+
+.ap-badge-approval_granted,
+.ap-badge-job_submitted {
+  background: rgba(59, 130, 246, 0.12);
+  color: #93c5fd;
+}
+
+.ap-badge-job_queued,
+.ap-badge-job_running {
+  background: rgba(139, 92, 246, 0.15);
+  color: #c4b5fd;
+}
+
+.ap-badge-job_completed,
+.ap-badge-artifact_available,
+.ap-badge-github_handoff {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+}
+
+.ap-badge-job_failed {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+
+.ap-exit-badge {
+  font-size: 0.6rem;
+  padding: 1px 5px;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.ap-exit-ok {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+}
+
+.ap-exit-err {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+
+.ap-task-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ap-task-id {
+  font-size: 0.6rem;
+  color: var(--muted-foreground);
+  font-family: monospace;
+}
+
+.ap-task-time {
+  font-size: 0.6rem;
+  color: var(--muted-foreground);
+}
+
+/* Approval Card */
+.ap-approval-card {
+  background: var(--card);
+  border: 1px solid #f59e0b;
+  border-radius: 10px;
+  padding: 16px;
+  flex-shrink: 0;
+}
+
+.ap-approval-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.ap-approval-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: #fbbf24;
+  flex: 1;
+}
+
+.ap-approval-icon {
+  font-size: 1.3rem;
+}
+
+.ap-risk-badge {
+  font-size: 0.7rem;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ap-risk-low {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.ap-risk-medium {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.ap-risk-high {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.ap-risk-critical {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  animation: ap-risk-pulse 1.5s infinite;
+}
+
+@keyframes ap-risk-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.ap-approval-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ap-approval-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ap-field-label {
+  font-size: 0.7rem;
+  color: var(--muted-foreground);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ap-field-value {
+  font-size: 0.8rem;
+  padding: 6px 10px;
+  background: var(--muted);
+  border-radius: 4px;
+  color: var(--foreground);
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.ap-command-preview {
+  font-size: 0.8rem;
+  padding: 8px 10px;
+  background: var(--muted);
+  border-radius: 4px;
+  color: var(--foreground);
+  font-family: monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  border-left: 3px solid var(--accent);
+  margin: 0;
+}
+
+.ap-path-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ap-path-item {
+  font-size: 0.75rem;
+  padding: 3px 8px;
+  background: var(--muted);
+  border-radius: 3px;
+  color: var(--foreground);
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.ap-approval-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.ap-approve-button {
+  flex: 1;
+  padding: 10px;
+  background: #22c55e;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.ap-approve-button:hover {
+  background: #16a34a;
+  transform: translateY(-1px);
+}
+
+.ap-deny-button {
+  flex: 1;
+  padding: 10px;
+  background: var(--destructive);
+  color: var(--destructive-foreground);
+  border: none;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.ap-deny-button:hover {
+  background: #dc2626;
+  transform: translateY(-1px);
+}
+
+/* Event Log */
+.ap-event-log,
+.ap-logs,
+.ap-artifacts {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  flex-shrink: 0;
+}
+
+.ap-event-log h3,
+.ap-logs h3,
+.ap-artifacts h3 {
+  margin: 0 0 8px 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ap-log-container {
+  max-height: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ap-event {
+  display: flex;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  align-items: baseline;
+  background: var(--muted);
+}
+
+.ap-event-time {
+  font-size: 0.65rem;
+  color: var(--muted-foreground);
+  font-family: monospace;
+  white-space: nowrap;
+  min-width: 70px;
+}
+
+.ap-event-state {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  min-width: 110px;
+  color: var(--accent);
+}
+
+.ap-event-message {
+  color: var(--foreground);
+  flex: 1;
+}
+
+.ap-log-output {
+  background: #0f172a;
+  border-radius: 4px;
+  padding: 8px;
+  max-height: 300px;
+}
+
+.ap-log-line {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 0.72rem;
+  color: #94a3b8;
+  padding: 1px 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Artifacts */
+.ap-artifact-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  margin-bottom: 6px;
+  background: var(--muted);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: var(--foreground);
+}
+
+.ap-link-icon {
+  font-size: 1rem;
+}
+
+.ap-artifact-link code {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  background: var(--card);
+  border-radius: 3px;
+  color: var(--accent);
+  word-break: break-all;
+}
+
+/* Exit Code */
+.ap-exit-code {
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-family: monospace;
+}
+
+.ap-exit-success {
+  background: rgba(34, 197, 94, 0.1);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.ap-exit-failure {
+  background: rgba(239, 68, 68, 0.1);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
