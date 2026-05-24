@@ -2,13 +2,13 @@
 # Runs the Hermes agent fork with the ecoseek plugin and Emily personality.
 #
 # Build:
-#   docker build -t emily .
+#   docker build -t emily-local .
 #
 # Run:
 #   docker run -d -p 8642:8642 \
+#     -e DEEPSEEK_API_KEY=sk-... \
 #     -e ECOSEEK_BROKER_URL=https://broker.ecoseek.org \
-#     -e ECOSEEK_BROKER_KEY=<key> \
-#     emily
+#     emily-local
 
 FROM python:3.11-slim
 
@@ -29,17 +29,18 @@ RUN pip install --no-cache-dir \
 # Create hermes home directory
 RUN mkdir -p /root/.hermes/plugins /root/.hermes/skills /root/.hermes/logs
 
-# Copy Emily configuration
+# Copy Emily configuration and entrypoint
 COPY config.yaml /root/.hermes/config.yaml
+COPY entrypoint.sh /app/entrypoint.sh
 COPY plugins/ /root/.hermes/plugins/
 COPY skills/ /root/.hermes/skills/
 
 # Emily gateway listens on 8642
 EXPOSE 8642
 
-# Health check
-HEALTHCHECK --interval=15s --timeout=5s --retries=3 --start-period=30s \
+# Health check — longer start period to allow pip install + gateway init
+HEALTHCHECK --interval=15s --timeout=5s --retries=5 --start-period=60s \
     CMD curl -sf http://localhost:8642/health || exit 1
 
-# Start the Hermes API gateway
-CMD ["hermes", "gateway", "run", "--api-only"]
+# Entrypoint writes .env from Docker env vars, then starts gateway
+ENTRYPOINT ["/app/entrypoint.sh"]
