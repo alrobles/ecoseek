@@ -8,6 +8,7 @@ import { ThemeToggle } from "./components/ThemeToggle";
 import { ResizableLayout } from "./components/ResizableLayout";
 import { CodeBlock } from "./components/CodeBlock";
 import { RenderPreview, DiDALPanel } from "./components/RenderPreview";
+import { FilesPanel } from "./components/FilesPanel";
 import { ReactComponent as EcoSeekLogo } from "./ecoseek-logo.svg";
 import emilyAvatar from "./emily-avatar.png";
 import { useAuth } from "./contexts/AuthContext";
@@ -348,6 +349,18 @@ function App() {
                 Preview
               </button>
               <button
+                className={`panel-tab ${rightPanelTab === "terminal" ? "active" : ""}`}
+                onClick={() => setRightPanelTab("terminal")}
+              >
+                Terminal
+              </button>
+              <button
+                className={`panel-tab ${rightPanelTab === "files" ? "active" : ""}`}
+                onClick={() => setRightPanelTab("files")}
+              >
+                Files
+              </button>
+              <button
                 className={`panel-tab ${rightPanelTab === "didal" ? "active" : ""}`}
                 onClick={() => setRightPanelTab("didal")}
               >
@@ -364,6 +377,24 @@ function App() {
             <div className="content">
               {rightPanelTab === "preview" && (
                 <RenderPreview messages={messages} />
+              )}
+              {rightPanelTab === "terminal" && (
+                <div className="terminal-panel">
+                  <iframe
+                    src="http://localhost:8000"
+                    title="Local Terminal"
+                    className="terminal-iframe"
+                    sandbox="allow-scripts allow-same-origin allow-forms"
+                  />
+                  <div className="terminal-fallback">
+                    <p>Terminal runs on <code>localhost:8000</code> via ttyd.</p>
+                    <p>Start with: <code>bash emily-start.sh</code> (includes terminal container).</p>
+                    <p>Or manually: <code>docker run -d --name ecoseek-terminal -p 8000:7681 tsl0922/ttyd:latest bash</code></p>
+                  </div>
+                </div>
+              )}
+              {rightPanelTab === "files" && (
+                <FilesPanel />
               )}
               {rightPanelTab === "didal" && (
                 <DiDALPanel

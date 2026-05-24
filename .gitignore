@@ -98,3 +98,6 @@ config.ini
 
 # Cloned dependency repos (created by setup.sh)
 .repos/
+
+# Workspace directory (shared volume for file transfers)
+workspace/

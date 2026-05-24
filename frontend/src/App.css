@@ -1558,3 +1558,187 @@ body {
   font-size: 0.72rem;
   color: var(--foreground);
 }
+
+/* ============================================================
+   Terminal Panel
+   ============================================================ */
+
+.terminal-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 400px;
+}
+
+.terminal-iframe {
+  flex: 1;
+  width: 100%;
+  min-height: 400px;
+  border: none;
+  border-radius: 0 0 8px 8px;
+  background: #1e1e1e;
+}
+
+.terminal-fallback {
+  padding: 0.75rem 1rem;
+  font-size: 0.78rem;
+  color: var(--muted-foreground);
+  border-top: 1px solid var(--border);
+  background: var(--card);
+}
+
+.terminal-fallback code {
+  background: var(--accent);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-size: 0.85em;
+}
+
+.terminal-fallback p {
+  margin: 4px 0;
+}
+
+/* ============================================================
+   Files Panel
+   ============================================================ */
+
+.files-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.files-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+}
+
+.files-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.8rem;
+  overflow-x: auto;
+}
+
+.files-crumb {
+  background: none;
+  border: none;
+  color: var(--primary);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 0.8rem;
+}
+
+.files-crumb:hover {
+  background: var(--accent);
+}
+
+.files-separator {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.files-refresh {
+  display: flex;
+  align-items: center;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px;
+  cursor: pointer;
+  color: var(--muted-foreground);
+}
+
+.files-refresh:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+.files-loading {
+  padding: 2rem;
+  text-align: center;
+  color: var(--muted-foreground);
+  font-size: 0.85rem;
+}
+
+.files-empty {
+  padding: 2rem 1.5rem;
+  text-align: center;
+}
+
+.files-empty p {
+  margin: 6px 0;
+  font-size: 0.85rem;
+  color: var(--muted-foreground);
+}
+
+.files-hint {
+  font-size: 0.78rem !important;
+  opacity: 0.7;
+}
+
+.files-hint code {
+  background: var(--accent);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-size: 0.88em;
+}
+
+.files-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.files-item {
+  display: grid;
+  grid-template-columns: 24px 1fr 70px 120px;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.1s;
+}
+
+.files-item:hover {
+  background: var(--accent);
+}
+
+.files-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted-foreground);
+}
+
+.files-dir .files-icon {
+  color: var(--primary);
+}
+
+.files-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files-size {
+  text-align: right;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+}
+
+.files-date {
+  text-align: right;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+}
