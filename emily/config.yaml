@@ -8,6 +8,10 @@
 # The entrypoint script (entrypoint.sh) writes ~/.hermes/.env with the
 # appropriate keys before starting the gateway.
 
+# Top-level model config — read by the gateway's _resolve_gateway_model()
+model:
+  default: deepseek-v4-flash
+
 agent:
   max_turns: 90
   gateway_timeout: 1800
