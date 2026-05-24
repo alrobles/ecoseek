@@ -8,6 +8,9 @@ ENV_FILE="/root/.hermes/.env"
 # Clear previous env file
 > "$ENV_FILE"
 
+# Always enable the API server (this is how the frontend talks to Emily)
+echo "API_SERVER_ENABLED=true" >> "$ENV_FILE"
+
 # DeepSeek API key
 if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
     echo "DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}" >> "$ENV_FILE"
@@ -33,6 +36,9 @@ if [ -n "${API_SERVER_KEY:-}" ]; then
     echo "API_SERVER_KEY=${API_SERVER_KEY}" >> "$ENV_FILE"
 fi
 
+# API server port — Hermes default is 8642 when API_SERVER_PORT is set
+echo "API_SERVER_PORT=${API_SERVER_PORT:-8642}" >> "$ENV_FILE"
+
 # CORS origins for the API server
 if [ -n "${API_SERVER_CORS_ORIGINS:-}" ]; then
     echo "API_SERVER_CORS_ORIGINS=${API_SERVER_CORS_ORIGINS}" >> "$ENV_FILE"
@@ -46,4 +52,4 @@ if [ -z "${DEEPSEEK_API_KEY:-}" ] && [ -z "${OLLAMA_BASE_URL:-}" ]; then
 fi
 
 echo "[emily] Starting Hermes gateway..."
-exec hermes gateway run --api-only
+exec hermes gateway run
