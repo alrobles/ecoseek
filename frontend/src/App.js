@@ -12,7 +12,8 @@ import { FilesPanel } from "./components/FilesPanel";
 import { ReactComponent as EcoSeekLogo } from "./ecoseek-logo.svg";
 import emilyAvatar from "./emily-avatar.png";
 import { useAuth } from "./contexts/AuthContext";
-import { chatCompletion, checkHealth, checkRemoteHealth, BROKER_URL, CHAT_URL, IS_LOCAL_EMILY, HERMES_REMOTE_URL } from "./api/broker";
+import { chatCompletionStream, checkHealth, checkRemoteHealth, BROKER_URL, CHAT_URL, IS_LOCAL_EMILY, HERMES_REMOTE_URL } from "./api/broker";
+import { ToolCallsContainer } from "./components/ToolCallCard";
 
 function LoginScreen({ onLogin }) {
   return (
@@ -50,7 +51,12 @@ function App() {
   const [remoteStatus, setRemoteStatus] = useState(null);
   const [expandedReasoning, setExpandedReasoning] = useState(new Set());
   const [rightPanelTab, setRightPanelTab] = useState("preview");
+  const [streamingContent, setStreamingContent] = useState("");
+  const [streamingReasoning, setStreamingReasoning] = useState("");
+  const [activeToolCalls, setActiveToolCalls] = useState([]);
+  const [didalExchanges, setDidalExchanges] = useState([]);
   const messagesEndRef = useRef(null);
+  const abortRef = useRef(null);
 
   const currentTheme = document.documentElement.getAttribute("data-theme") || "dark";
 
@@ -96,8 +102,10 @@ function App() {
       setIsLoading(true);
       setError(null);
       setQuery("");
+      setStreamingContent("");
+      setStreamingReasoning("");
+      setActiveToolCalls([]);
 
-      // Build conversation context (last 20 messages)
       const history = [...messages, userMsg]
         .filter((m) => m.type === "user" || m.type === "agent")
         .slice(-20)
@@ -106,33 +114,99 @@ function App() {
           content: m.content,
         }));
 
-      try {
-        const data = await chatCompletion(history);
-        const choice = data.choices?.[0];
-        const content = choice?.message?.content || "";
-        const reasoning = choice?.message?.reasoning_content || null;
+      const abortController = new AbortController();
+      abortRef.current = abortController;
 
-        setMessages((prev) => [
-          ...prev,
+      try {
+        await chatCompletionStream(
+          history,
           {
-            type: "agent",
-            content,
-            reasoning,
-            agentName: data.model || "Hermes",
-            finishReason: choice?.finish_reason,
+            onToken: (text) => {
+              setStreamingContent((prev) => prev + text);
+              scrollToBottom();
+            },
+            onReasoning: (text) => {
+              setStreamingReasoning((prev) => prev + text);
+            },
+            onToolCallStart: (tool) => {
+              setActiveToolCalls((prev) => [...prev, { ...tool, arguments: "" }]);
+              if (["escalate_remote", "dialectical_exchange"].includes(tool.name)) {
+                setDidalExchanges((prev) => [
+                  ...prev,
+                  {
+                    id: tool.id,
+                    tool: tool.name,
+                    status: "running",
+                    startedAt: new Date().toISOString(),
+                  },
+                ]);
+              }
+            },
+            onToolCallDelta: (id, argDelta) => {
+              setActiveToolCalls((prev) =>
+                prev.map((tc) =>
+                  tc.id === id
+                    ? { ...tc, arguments: tc.arguments + argDelta }
+                    : tc
+                )
+              );
+            },
+            onDone: (result) => {
+              setMessages((prev) => [
+                ...prev,
+                {
+                  type: "agent",
+                  content: result.content,
+                  reasoning: result.reasoning,
+                  agentName: result.model || "Emily",
+                  finishReason: result.finishReason,
+                  toolCalls: result.toolCalls,
+                  didalPhase: result.toolCalls?.some(
+                    (tc) => tc.name === "escalate_remote" || tc.name === "dialectical_exchange"
+                  ),
+                },
+              ]);
+              setStreamingContent("");
+              setStreamingReasoning("");
+              setActiveToolCalls((prev) => prev.map((tc) => ({ ...tc, status: "done" })));
+              setDidalExchanges((prev) =>
+                prev.map((ex) => ({
+                  ...ex,
+                  status: "done",
+                  completedAt: new Date().toISOString(),
+                }))
+              );
+              setTimeout(() => setActiveToolCalls([]), 3000);
+              scrollToBottom();
+            },
+            onError: (err) => {
+              console.error("Stream error:", err);
+              setError(err.message);
+              setDidalExchanges((prev) =>
+                prev.map((ex) =>
+                  ex.status === "running" ? { ...ex, status: "error" } : ex
+                )
+              );
+            },
           },
-        ]);
-        scrollToBottom();
+          "hermes",
+          abortController.signal,
+        );
       } catch (err) {
-        console.error("Chat error:", err);
-        const errMsg = err.message || "Failed to get response";
-        setError(errMsg);
-        setMessages((prev) => [
-          ...prev,
-          { type: "error", content: `Error: ${errMsg}` },
-        ]);
+        if (err.name !== "AbortError") {
+          console.error("Chat error:", err);
+          const errMsg = err.message || "Failed to get response";
+          setError(errMsg);
+          setMessages((prev) => [
+            ...prev,
+            { type: "error", content: `Error: ${errMsg}` },
+          ]);
+        }
       } finally {
         setIsLoading(false);
+        setStreamingContent("");
+        setStreamingReasoning("");
+        abortRef.current = null;
       }
     },
     [query, messages, isLoading]
@@ -278,6 +352,9 @@ function App() {
                         </>
                       )}
                     </div>
+                    {msg.type === "agent" && msg.toolCalls && msg.toolCalls.length > 0 && (
+                      <ToolCallsContainer toolCalls={msg.toolCalls} status="done" />
+                    )}
                     <div className="message-content">
                       <ReactMarkdown
                         remarkPlugins={[remarkMath]}
@@ -301,10 +378,51 @@ function App() {
                   </div>
                 ))
               )}
+
+              {/* Streaming response — shown while tokens arrive */}
+              {isLoading && (streamingContent || streamingReasoning || activeToolCalls.length > 0) && (
+                <div className="message agent-message streaming-message">
+                  <div className="message-header">
+                    <img src={emilyAvatar} alt="Emily" className="emily-avatar" />
+                    <span className="agent-name">Emily</span>
+                    <span className="streaming-indicator">
+                      <span className="streaming-dot" />
+                      <span className="streaming-dot" />
+                      <span className="streaming-dot" />
+                    </span>
+                  </div>
+                  {activeToolCalls.length > 0 && (
+                    <ToolCallsContainer toolCalls={activeToolCalls} status="running" />
+                  )}
+                  {streamingContent && (
+                    <div className="message-content">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkMath]}
+                        rehypePlugins={[rehypeKatex]}
+                        components={{
+                          code({ node, inline, className, children, ...props }) {
+                            if (inline) {
+                              return <code className="inline-code" {...props}>{children}</code>;
+                            }
+                            return (
+                              <CodeBlock className={className} theme={currentTheme}>
+                                {children}
+                              </CodeBlock>
+                            );
+                          },
+                        }}
+                      >
+                        {streamingContent}
+                      </ReactMarkdown>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div ref={messagesEndRef} />
             </div>
 
-            {isLoading && (
+            {isLoading && !streamingContent && activeToolCalls.length === 0 && (
               <div className="loading-animation">
                 <img src={emilyAvatar} alt="Emily" className="emily-avatar" />
                 Emily is thinking...
@@ -401,6 +519,8 @@ function App() {
                   messages={messages}
                   remoteStatus={remoteStatus}
                   isOnline={isOnline}
+                  didalExchanges={didalExchanges}
+                  activeToolCalls={activeToolCalls}
                 />
               )}
               {rightPanelTab === "info" && (
@@ -450,7 +570,7 @@ function App() {
                   <div className="info-row">
                     <span className="info-label">DiDAL</span>
                     <span className={`info-value ${remoteStatus ? "text-success" : "text-muted"}`}>
-                      {remoteStatus ? "Phase 2 Active" : "Unavailable"}
+                      {remoteStatus ? "Phase 4 Active" : "Unavailable"}
                     </span>
                   </div>
                   {remoteStatus && (
