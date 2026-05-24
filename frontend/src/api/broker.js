@@ -55,7 +55,8 @@ const LOCAL_EMILY_KEY = process.env.REACT_APP_EMILY_KEY || "emily-local-key";
 export function startLogin(returnTo) {
   if (IS_LOCAL_EMILY) {
     saveSession(LOCAL_EMILY_KEY, { login: "local", name: "Local User" });
-    window.location.href = returnTo || window.location.origin;
+    // Skip OAuth — go straight to the app root (not /callback)
+    window.location.href = window.location.origin + "/";
     return;
   }
   const url = `${BROKER_URL}/auth/github/start?return_to=${encodeURIComponent(
@@ -72,7 +73,8 @@ export async function fetchMe() {
   const sid = getSessionId();
   if (!sid) return null;
   if (IS_LOCAL_EMILY) {
-    return { login: "local", name: "Local User", mode: "emily-local" };
+    // Return shape expected by AuthContext: { user: { login, name, ... } }
+    return { user: { login: "local", name: "Local User", mode: "emily-local" } };
   }
   try {
     const res = await fetch(`${BROKER_URL}/v1/me`, {
