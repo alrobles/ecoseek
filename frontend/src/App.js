@@ -1,8 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import "./App.css";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { ResizableLayout } from "./components/ResizableLayout";
+import { CodeBlock } from "./components/CodeBlock";
+import { RenderPreview, DiDALPanel } from "./components/RenderPreview";
+import { FilesPanel } from "./components/FilesPanel";
 import { ReactComponent as EcoSeekLogo } from "./ecoseek-logo.svg";
 import emilyAvatar from "./emily-avatar.png";
 import { useAuth } from "./contexts/AuthContext";
@@ -43,7 +49,10 @@ function App() {
   const [isOnline, setIsOnline] = useState(false);
   const [remoteStatus, setRemoteStatus] = useState(null);
   const [expandedReasoning, setExpandedReasoning] = useState(new Set());
+  const [rightPanelTab, setRightPanelTab] = useState("preview");
   const messagesEndRef = useRef(null);
+
+  const currentTheme = document.documentElement.getAttribute("data-theme") || "dark";
 
   // Handle OAuth callback
   useEffect(() => {
@@ -270,7 +279,24 @@ function App() {
                       )}
                     </div>
                     <div className="message-content">
-                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                      <ReactMarkdown
+                        remarkPlugins={[remarkMath]}
+                        rehypePlugins={[rehypeKatex]}
+                        components={{
+                          code({ node, inline, className, children, ...props }) {
+                            if (inline) {
+                              return <code className="inline-code" {...props}>{children}</code>;
+                            }
+                            return (
+                              <CodeBlock className={className} theme={currentTheme}>
+                                {children}
+                              </CodeBlock>
+                            );
+                          },
+                        }}
+                      >
+                        {msg.content}
+                      </ReactMarkdown>
                     </div>
                   </div>
                 ))
@@ -315,8 +341,69 @@ function App() {
           </div>
 
           <div className="computer-section">
-            <h2>Information</h2>
+            <div className="panel-tabs">
+              <button
+                className={`panel-tab ${rightPanelTab === "preview" ? "active" : ""}`}
+                onClick={() => setRightPanelTab("preview")}
+              >
+                Preview
+              </button>
+              <button
+                className={`panel-tab ${rightPanelTab === "terminal" ? "active" : ""}`}
+                onClick={() => setRightPanelTab("terminal")}
+              >
+                Terminal
+              </button>
+              <button
+                className={`panel-tab ${rightPanelTab === "files" ? "active" : ""}`}
+                onClick={() => setRightPanelTab("files")}
+              >
+                Files
+              </button>
+              <button
+                className={`panel-tab ${rightPanelTab === "didal" ? "active" : ""}`}
+                onClick={() => setRightPanelTab("didal")}
+              >
+                DiDAL
+                {remoteStatus && <span className="tab-dot connected" />}
+              </button>
+              <button
+                className={`panel-tab ${rightPanelTab === "info" ? "active" : ""}`}
+                onClick={() => setRightPanelTab("info")}
+              >
+                Info
+              </button>
+            </div>
             <div className="content">
+              {rightPanelTab === "preview" && (
+                <RenderPreview messages={messages} />
+              )}
+              {rightPanelTab === "terminal" && (
+                <div className="terminal-panel">
+                  <iframe
+                    src="http://localhost:8000"
+                    title="Local Terminal"
+                    className="terminal-iframe"
+                    sandbox="allow-scripts allow-same-origin allow-forms"
+                  />
+                  <div className="terminal-fallback">
+                    <p>Terminal runs on <code>localhost:8000</code> via ttyd.</p>
+                    <p>Start with: <code>bash emily-start.sh</code> (includes terminal container).</p>
+                    <p>Or manually: <code>docker run -d --name ecoseek-terminal -p 8000:7681 tsl0922/ttyd:latest bash</code></p>
+                  </div>
+                </div>
+              )}
+              {rightPanelTab === "files" && (
+                <FilesPanel />
+              )}
+              {rightPanelTab === "didal" && (
+                <DiDALPanel
+                  messages={messages}
+                  remoteStatus={remoteStatus}
+                  isOnline={isOnline}
+                />
+              )}
+              {rightPanelTab === "info" && (
               <div className="info-panel">
                 <div className="info-section">
                   <h3>Emily Local</h3>
@@ -431,6 +518,7 @@ function App() {
                   </p>
                 </div>
               </div>
+              )}
             </div>
           </div>
         </ResizableLayout>

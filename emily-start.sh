@@ -46,6 +46,7 @@ HERMES_KEY="${HERMES_ECOSEEK_API_KEY:-}"
 HERMES_URL="${HERMES_REMOTE_URL:-https://hermes.ecoseek.org}"
 EMILY_PORT="${EMILY_PORT:-8642}"
 FRONTEND_PORT="${FRONTEND_PORT:-4000}"
+TERMINAL_PORT="${TERMINAL_PORT:-8000}"
 DEEPSEEK_KEY="${DEEPSEEK_API_KEY:-}"
 DEEPSEEK_MODEL="${DEEPSEEK_MODEL:-deepseek-v4-flash}"
 OLLAMA_URL="${OLLAMA_BASE_URL:-}"
@@ -114,11 +115,35 @@ docker build \
   -t "$FRONTEND_IMAGE" \
   frontend/
 
+WORKSPACE_DIR="${ECOSEEK_WORKSPACE:-${SCRIPT_DIR}/workspace}"
+mkdir -p "$WORKSPACE_DIR"
+
 docker run -d \
   --name "$FRONTEND_CONTAINER" \
   -p "127.0.0.1:${FRONTEND_PORT}:80" \
+  -v "${WORKSPACE_DIR}:/workspace:ro" \
   --restart unless-stopped \
   "$FRONTEND_IMAGE"
+
+# ── Terminal (ttyd) ────────────────────────────────────────────────────
+TERMINAL_CONTAINER="ecoseek-terminal"
+
+info "Starting terminal (ttyd on port $TERMINAL_PORT)..."
+
+if docker ps -a --format '{{.Names}}' | grep -q "^${TERMINAL_CONTAINER}$"; then
+  info "Stopping previous terminal..."
+  docker rm -f "$TERMINAL_CONTAINER" >/dev/null 2>&1 || true
+fi
+
+docker run -d \
+  --name "$TERMINAL_CONTAINER" \
+  -p "127.0.0.1:${TERMINAL_PORT}:7681" \
+  -v "${WORKSPACE_DIR}:/workspace" \
+  --restart unless-stopped \
+  tsl0922/ttyd:latest \
+  bash
+
+info "Terminal started on port $TERMINAL_PORT"
 
 echo ""
 emily "I'm ready! Here's what's running:"
@@ -126,6 +151,7 @@ echo ""
 info "  Emily agent:  http://localhost:${EMILY_PORT}  (Alpha, local)"
 info "  Hermes Beta:  ${HERMES_URL}  (remote, reumanlab)"
 info "  Broker:       ${BROKER_URL}  (auth)"
+info "  Terminal:     http://localhost:${TERMINAL_PORT}  (ttyd)"
 info "  Frontend:     http://localhost:${FRONTEND_PORT}"
 if [ -n "$HERMES_KEY" ]; then
   info "  DiDAL:        Enabled (escalate_remote + dialectical_exchange)"
@@ -137,6 +163,6 @@ info "  Open http://localhost:${FRONTEND_PORT} in your browser."
 info "  Sign in with GitHub to start chatting with Emily."
 echo ""
 info "Commands:"
-info "  Stop:    docker stop ${EMILY_CONTAINER} ${FRONTEND_CONTAINER}"
+info "  Stop:    docker stop ${EMILY_CONTAINER} ${FRONTEND_CONTAINER} ${TERMINAL_CONTAINER}"
 info "  Logs:    docker logs -f ${EMILY_CONTAINER}"
 info "  Restart: bash emily-start.sh"
