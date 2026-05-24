@@ -4,6 +4,7 @@ import "./App.css";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { ResizableLayout } from "./components/ResizableLayout";
 import { ReactComponent as EcoSeekLogo } from "./ecoseek-logo.svg";
+import emilyAvatar from "./emily-avatar.png";
 import { useAuth } from "./contexts/AuthContext";
 import { chatCompletion, checkHealth, BROKER_URL, CHAT_URL, IS_LOCAL_EMILY } from "./api/broker";
 
@@ -13,6 +14,7 @@ function LoginScreen({ onLogin }) {
       <div className="login-card">
         <EcoSeekLogo className="login-logo" />
         <h1>EcoSeek</h1>
+        <img src={emilyAvatar} alt="Emily" className="login-emily-avatar" />
         <p className="login-subtitle">
           Meet Emily — your AI ecological research assistant
         </p>
@@ -237,7 +239,10 @@ function App() {
                   >
                     <div className="message-header">
                       {msg.type === "agent" && (
-                        <span className="agent-name">Emily</span>
+                        <>
+                          <img src={emilyAvatar} alt="Emily" className="emily-avatar" />
+                          <span className="agent-name">Emily</span>
+                        </>
                       )}
                       {msg.type === "agent" && msg.reasoning && (
                         <>
@@ -271,7 +276,10 @@ function App() {
             </div>
 
             {isLoading && (
-              <div className="loading-animation">Emily is thinking...</div>
+              <div className="loading-animation">
+                <img src={emilyAvatar} alt="Emily" className="emily-avatar" />
+                Emily is thinking...
+              </div>
             )}
 
             <form onSubmit={handleSubmit} className="input-form">
