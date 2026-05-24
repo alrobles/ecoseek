@@ -15,10 +15,14 @@ echo "API_SERVER_ENABLED=true" >> "$ENV_FILE"
 # Default 127.0.0.1 is the container's loopback — unreachable from the host.
 echo "API_SERVER_HOST=0.0.0.0" >> "$ENV_FILE"
 
-# DeepSeek API key
+# DeepSeek API key and model
 if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
     echo "DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}" >> "$ENV_FILE"
-    echo "[emily] DeepSeek API key configured"
+    # DeepSeek V4 API requires explicit model names: deepseek-v4-pro or deepseek-v4-flash.
+    # The old "deepseek-chat" name is no longer accepted.
+    DEEPSEEK_MODEL="${DEEPSEEK_MODEL:-deepseek-v4-flash}"
+    echo "DEEPSEEK_MODEL=${DEEPSEEK_MODEL}" >> "$ENV_FILE"
+    echo "[emily] DeepSeek configured: model=${DEEPSEEK_MODEL}"
 fi
 
 # Ollama base URL (override provider in config if set)
