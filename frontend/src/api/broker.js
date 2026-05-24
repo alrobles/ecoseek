@@ -103,6 +103,19 @@ export async function checkHealth() {
   }
 }
 
+const HERMES_REMOTE_URL =
+  process.env.REACT_APP_HERMES_REMOTE_URL || "https://hermes.ecoseek.org";
+
+export async function checkRemoteHealth() {
+  try {
+    const res = await fetch(`${HERMES_REMOTE_URL}/health`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
 // ── Emily persona ──────────────────────────────────────────────────────
 
 const EMILY_SYSTEM_PROMPT = `You are Emily, an expert ecological scientist and AI assistant for EcoSeek.
@@ -172,4 +185,4 @@ export async function chatCompletion(messages, model = "hermes") {
   return body;
 }
 
-export { BROKER_URL, EMILY_URL, CHAT_URL, IS_LOCAL_EMILY };
+export { BROKER_URL, EMILY_URL, CHAT_URL, IS_LOCAL_EMILY, HERMES_REMOTE_URL };
