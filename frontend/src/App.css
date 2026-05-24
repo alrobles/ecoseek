@@ -1148,3 +1148,413 @@ body {
   opacity: 0.8;
   word-break: break-word;
 }
+
+/* ============================================================
+   Code Blocks with Copy Button
+   ============================================================ */
+
+.code-block-wrapper {
+  margin: 0.75rem 0;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.code-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.75rem;
+}
+
+.code-block-language {
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+}
+
+.code-copy-button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  font-size: 0.72rem;
+  transition: all 0.15s;
+}
+
+.code-copy-button:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+.code-copy-button.copied {
+  color: #10b981;
+  border-color: #10b981;
+}
+
+.inline-code {
+  background: var(--accent);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-size: 0.88em;
+  color: var(--foreground);
+}
+
+/* ============================================================
+   Math (KaTeX) — Inline & Block
+   ============================================================ */
+
+.math-inline-wrapper {
+  position: relative;
+  display: inline;
+}
+
+.math-copy-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.65rem;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+
+.math-copy-button.inline {
+  background: var(--accent);
+  color: var(--muted-foreground);
+  padding: 1px 5px;
+  margin-left: 2px;
+  vertical-align: middle;
+}
+
+.math-copy-button.inline:hover {
+  background: var(--primary);
+  color: white;
+}
+
+.math-copy-button.inline.copied {
+  background: #10b981;
+  color: white;
+}
+
+.math-block-wrapper {
+  position: relative;
+  margin: 0.75rem 0;
+  padding: 1rem 1.2rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.math-block-wrapper:hover .math-copy-button.block {
+  opacity: 1;
+}
+
+.math-block-content {
+  text-align: center;
+}
+
+.math-copy-button.block {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  padding: 3px 8px;
+  color: var(--muted-foreground);
+  opacity: 0;
+  transition: opacity 0.2s, background 0.15s;
+}
+
+.math-copy-button.block:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+.math-copy-button.block.copied {
+  color: #10b981;
+  border-color: #10b981;
+  opacity: 1;
+}
+
+.math-fallback {
+  background: var(--card);
+  padding: 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+/* KaTeX overrides for theme compatibility */
+.katex {
+  font-size: 1.1em;
+}
+
+.katex .base {
+  color: var(--foreground);
+}
+
+/* ============================================================
+   Panel Tabs (Preview / DiDAL / Info)
+   ============================================================ */
+
+.panel-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+}
+
+.panel-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  padding: 10px 16px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: color 0.15s;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.panel-tab:hover {
+  color: var(--foreground);
+}
+
+.panel-tab.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+.tab-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+}
+
+.tab-dot.connected {
+  background: #10b981;
+  box-shadow: 0 0 4px #10b98180;
+}
+
+/* ============================================================
+   Render Preview Panel
+   ============================================================ */
+
+.render-preview {
+  padding: 0;
+}
+
+.preview-tabs {
+  display: none; /* tabs rendered by parent */
+}
+
+.preview-content {
+  padding: 1rem;
+}
+
+.preview-empty {
+  text-align: center;
+  padding: 2rem 1rem;
+  color: var(--muted-foreground);
+  font-size: 0.85rem;
+}
+
+.preview-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.preview-block {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.preview-math {
+  padding: 1rem;
+  text-align: center;
+  overflow-x: auto;
+}
+
+.preview-code {
+  font-size: 0.85rem;
+}
+
+.preview-code-header {
+  padding: 4px 10px;
+  background: var(--accent);
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  letter-spacing: 0.05em;
+}
+
+.preview-code pre {
+  margin: 0;
+  padding: 0.75rem;
+  overflow-x: auto;
+  font-size: 0.82rem;
+}
+
+.preview-fallback {
+  padding: 0.75rem;
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-size: 0.82rem;
+  overflow-x: auto;
+}
+
+/* ============================================================
+   DiDAL Panel
+   ============================================================ */
+
+.didal-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+}
+
+.didal-status-grid {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 0.5rem 0;
+}
+
+.didal-status-card {
+  text-align: center;
+  padding: 0.75rem 1rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 100px;
+}
+
+.didal-status-label {
+  font-size: 0.72rem;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+.didal-status-value {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.didal-status-value.active {
+  color: #10b981;
+}
+
+.didal-status-value.inactive {
+  color: var(--muted-foreground);
+  opacity: 0.6;
+}
+
+.didal-connection {
+  flex-shrink: 0;
+}
+
+.didal-info {
+  padding: 0.75rem 1rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.didal-info h4 {
+  font-size: 0.85rem;
+  margin: 0 0 6px 0;
+  color: var(--foreground);
+}
+
+.didal-info p {
+  font-size: 0.8rem;
+  color: var(--muted-foreground);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.didal-log {
+  padding: 0;
+}
+
+.didal-log h4 {
+  font-size: 0.8rem;
+  margin: 0 0 8px 0;
+  color: var(--foreground);
+}
+
+.didal-log-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.78rem;
+}
+
+.didal-log-entry:last-child {
+  border-bottom: none;
+}
+
+.didal-log-icon {
+  flex-shrink: 0;
+}
+
+.didal-log-text {
+  color: var(--muted-foreground);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.didal-tools {
+  padding: 0;
+}
+
+.didal-tools h4 {
+  font-size: 0.8rem;
+  margin: 0 0 8px 0;
+  color: var(--foreground);
+}
+
+.didal-tool-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.didal-tool-chip {
+  padding: 3px 10px;
+  background: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-size: 0.72rem;
+  color: var(--foreground);
+}
