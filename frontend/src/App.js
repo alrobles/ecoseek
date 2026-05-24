@@ -337,7 +337,7 @@ function App() {
                 </div>
 
                 <div className="info-section">
-                  <h3>Hermes Remote (reumanlab)</h3>
+                  <h3>Hermes Beta (reumanlab)</h3>
                   <div className="info-row">
                     <span className="info-label">Endpoint</span>
                     <span className="info-value">{HERMES_REMOTE_URL}</span>
@@ -357,6 +357,20 @@ function App() {
                       <span className="info-label">Platform</span>
                       <span className="info-value">
                         {remoteStatus.platform || "hermes-agent"}
+                      </span>
+                    </div>
+                  )}
+                  <div className="info-row">
+                    <span className="info-label">DiDAL</span>
+                    <span className={`info-value ${remoteStatus ? "text-success" : "text-muted"}`}>
+                      {remoteStatus ? "Phase 2 Active" : "Unavailable"}
+                    </span>
+                  </div>
+                  {remoteStatus && (
+                    <div className="info-row">
+                      <span className="info-label">Tools</span>
+                      <span className="info-value info-tools">
+                        eco_analyze, ku_hpc, escalate_remote, dialectical_exchange
                       </span>
                     </div>
                   )}
@@ -406,10 +420,10 @@ function App() {
                 <div className="info-section">
                   <h3>About Emily</h3>
                   <p className="info-text">
-                    Emily is an expert ecological AI assistant specializing in
-                    niche modeling, biogeography, species distribution, and
-                    biodiversity analysis. She helps researchers with
-                    reproducible scientific workflows.
+                    Emily is Alpha in the DiDAL (Dialectical Dual-Agent Loop)
+                    system. She plans and designs ecological analyses locally,
+                    then delegates heavy computation to Hermes Beta on reumanlab
+                    for execution on the KU HPC cluster (A100/MI210 GPUs).
                   </p>
                   <p className="info-text" style={{ marginTop: '8px', fontSize: '0.8em', opacity: 0.7 }}>
                     EcoSeek is built on a fork of AgenticSeek. We gratefully
