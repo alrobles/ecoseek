@@ -311,6 +311,56 @@ services:
     networks:
       - ecoseek-net
 
+  # ── EcoSeek API, remote-only variant (profile: remote) ───────────────
+  # Thin mode for the PoC: runs only the API gateway pointing at a remote
+  # AgenticPlug broker. No local EcoAgent, Ollama, SearxNG, or Redis.
+  #
+  #   cp .env.remote.example .env
+  #   # edit .env with your remote broker URL
+  #   docker compose --profile remote up
+  #
+  # Or without Docker:
+  #   pip install -e ecoseek-client
+  #   ecoseek login --broker https://your-agenticplug-url
+  #   ecoseek hermes orchestrate "List mammal species in Yucatan"
+  ecoseek-api-remote:
+    build:
+      context: ./backend
+    container_name: ecoseek-api-remote
+    profiles: ["remote"]
+    ports:
+      - "127.0.0.1:${ECOSEEK_API_PORT:-3000}:3000"
+    environment:
+      BACKEND_PORT: "3000"
+      # Point to the remote AgenticPlug broker (not local container)
+      AGENTICPLUG_URL: "${AGENTICPLUG_URL:?Set AGENTICPLUG_URL in .env to the remote broker}"
+      HERMES_ENABLED: "${HERMES_ENABLED:-true}"
+      HERMES_URL: "${HERMES_URL:-}"
+      HERMES_API_KEY: "${HERMES_API_KEY:-}"
+      UPSTREAM_TIMEOUT_S: "${UPSTREAM_TIMEOUT_S:-120}"
+      LOCAL_LLM_URL: "${LOCAL_LLM_URL:-}"
+      LOCAL_LLM_API_KEY: "${LOCAL_LLM_API_KEY:-}"
+      PHOENIX_ENABLED: "${PHOENIX_ENABLED:-false}"
+      PHOENIX_ENDPOINT: "${PHOENIX_ENDPOINT:-}"
+      PHOENIX_PROJECT_NAME: "${PHOENIX_PROJECT_NAME:-ecoseek}"
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import urllib.request,sys;
+          sys.exit(0 if urllib.request.urlopen(
+          'http://localhost:3000/'
+          ).status < 500 else 1)"
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks:
+      - ecoseek-net
+
 volumes:
   broker-data:
   ollama-data:
