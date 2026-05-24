@@ -6,8 +6,8 @@
 # Chat goes to Emily local at :8642.
 #
 # Usage:
-#   bash emily-start.sh                                    # default: uses broker.ecoseek.org for auth
-#   DEEPSEEK_API_KEY=sk-... bash emily-start.sh            # use DeepSeek as local LLM
+#   DEEPSEEK_API_KEY=sk-... HERMES_ECOSEEK_API_KEY=agenticplu-... bash emily-start.sh
+#   DEEPSEEK_API_KEY=sk-... bash emily-start.sh            # local only (no remote delegation)
 #   OLLAMA_BASE_URL=http://host:11434 bash emily-start.sh  # use local Ollama
 #
 # No Python, Node.js, or npm required — only Docker.
@@ -42,6 +42,8 @@ fi
 # ── Configuration ─────────────────────────────────────────────────────
 BROKER_URL="${ECOSEEK_BROKER_URL:-https://broker.ecoseek.org}"
 BROKER_KEY="${ECOSEEK_BROKER_KEY:-}"
+HERMES_KEY="${HERMES_ECOSEEK_API_KEY:-}"
+HERMES_URL="${HERMES_REMOTE_URL:-https://hermes.ecoseek.org}"
 EMILY_PORT="${EMILY_PORT:-8642}"
 FRONTEND_PORT="${FRONTEND_PORT:-4000}"
 DEEPSEEK_KEY="${DEEPSEEK_API_KEY:-}"
@@ -76,6 +78,8 @@ EMILY_ENV=()
 EMILY_ENV+=(-e "ECOSEEK_BROKER_URL=$BROKER_URL")
 EMILY_ENV+=(-e "API_SERVER_KEY=$EMILY_KEY")
 EMILY_ENV+=(-e "API_SERVER_CORS_ORIGINS=http://localhost:${FRONTEND_PORT},http://127.0.0.1:${FRONTEND_PORT}")
+EMILY_ENV+=(-e "HERMES_REMOTE_URL=$HERMES_URL")
+[ -n "$HERMES_KEY" ] && EMILY_ENV+=(-e "HERMES_ECOSEEK_API_KEY=$HERMES_KEY")
 [ -n "$BROKER_KEY" ] && EMILY_ENV+=(-e "ECOSEEK_BROKER_KEY=$BROKER_KEY")
 [ -n "$DEEPSEEK_KEY" ] && EMILY_ENV+=(-e "DEEPSEEK_API_KEY=$DEEPSEEK_KEY") && EMILY_ENV+=(-e "DEEPSEEK_MODEL=$DEEPSEEK_MODEL")
 [ -n "$OLLAMA_URL" ] && EMILY_ENV+=(-e "OLLAMA_BASE_URL=$OLLAMA_URL")
@@ -119,9 +123,15 @@ docker run -d \
 echo ""
 emily "I'm ready! Here's what's running:"
 echo ""
-info "  Emily agent:  http://localhost:${EMILY_PORT}  (chat)"
+info "  Emily agent:  http://localhost:${EMILY_PORT}  (Alpha, local)"
+info "  Hermes Beta:  ${HERMES_URL}  (remote, reumanlab)"
 info "  Broker:       ${BROKER_URL}  (auth)"
 info "  Frontend:     http://localhost:${FRONTEND_PORT}"
+if [ -n "$HERMES_KEY" ]; then
+  info "  DiDAL:        Enabled (escalate_remote + dialectical_exchange)"
+else
+  warn "  DiDAL:        Disabled (set HERMES_ECOSEEK_API_KEY to enable remote delegation)"
+fi
 echo ""
 info "  Open http://localhost:${FRONTEND_PORT} in your browser."
 info "  Sign in with GitHub to start chatting with Emily."

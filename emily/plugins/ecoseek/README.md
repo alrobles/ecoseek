@@ -1,51 +1,55 @@
-# EcoSeek Plugin for Hermes Agent
+# EcoSeek Plugin — DiDAL Phase 2
 
-Remote escalation plugin that lets a local Emily agent delegate heavy tasks to
-the remote Hermes instance on reumanlab.
+Emily (Alpha, local) ↔ Hermes (Beta, remote on reumanlab) via `hermes.ecoseek.org`.
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `hermes_status` | Check if Hermes Beta is available |
+| `escalate_remote` | One-shot delegation to Beta (simple tasks) |
+| `dialectical_exchange` | DiDAL structured debate (complex multi-step tasks) |
 
 ## Setup
 
 ```bash
-hermes plugins enable ecoseek
+# Pass your Hermes API key when starting Emily:
+HERMES_ECOSEEK_API_KEY=agenticplu... DEEPSEEK_API_KEY=sk-... bash emily-start.sh
 ```
-
-Add to `~/.hermes/.env`:
-```
-ECOSEEK_BROKER_URL=https://broker.ecoseek.org
-ECOSEEK_BROKER_KEY=<your-session-key>
-```
-
-## Tool: `escalate_remote`
-
-Sends a task to the remote Hermes agent via the AgenticPlug broker.
-
-**When to use:**
-- Heavy computation (HPC cluster, GPU jobs)
-- Access to reumanlab resources (ku-hpc, deployed services)
-- Advanced reasoning beyond your local model
-- Large dataset processing (GBIF downloads, spatial analysis)
-- Running ecological pipelines (SDMs, phylogenetics)
-
-**When NOT to use:**
-- Simple Q&A about ecology or species
-- Generating short code snippets (R/Python)
-- Explaining concepts or reviewing manuscripts
-- Quick calculations or unit conversions
 
 ## Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ECOSEEK_BROKER_URL` | `https://broker.ecoseek.org` | Broker endpoint URL |
-| `ECOSEEK_BROKER_KEY` | *(required)* | Session key for authentication |
-| `ECOSEEK_MODEL` | `openclaw/main` | Model name on the remote Hermes |
-| `ECOSEEK_TIMEOUT` | `300` | Request timeout in seconds |
+| `HERMES_REMOTE_URL` | `https://hermes.ecoseek.org` | Remote Hermes endpoint |
+| `HERMES_ECOSEEK_API_KEY` | *(required for escalation)* | API key for hermes.ecoseek.org |
+| `HERMES_REMOTE_MODEL` | `hermes` | Model name on the remote |
+| `HERMES_REMOTE_TIMEOUT` | `300` | Request timeout in seconds |
+| `DIDAL_MAX_TURNS` | `12` | Max dialectical dialogue turns |
+| `DIDAL_STUCK_THRESHOLD` | `3` | Repeated errors before stopping |
 
 ## Architecture
 
 ```
-Emily Local (Hermes) → escalate_remote tool
-  → POST broker.ecoseek.org/v1/chat/completions
-    → Hermes Remote (reumanlab, DeepSeek v4 Pro)
-      → ku-hpc → KU HPC cluster (A100/MI210)
+User → localhost:4000 (frontend)
+         → localhost:8642 (Emily/Alpha)
+              → hermes.ecoseek.org (Hermes/Beta on reumanlab)
+                   → eco_analyze (GBIF, SDM, diversity, taxonomy)
+                   → ku_hpc (Slurm → A100/MI210 GPUs)
+                   → shell, GitHub CLI, DeepSeek v4 Pro
 ```
+
+## When Emily escalates to Beta
+
+- Heavy computation (HPC cluster, GPU jobs, model training)
+- Ecological pipelines (SDMs, MaxEnt, phylogenetics, GBIF bulk downloads)
+- Large dataset processing (spatial analysis, raster operations)
+- Code execution on reumanlab infrastructure
+- Tasks requiring DeepSeek v4 Pro reasoning
+
+## When Emily handles locally
+
+- Simple Q&A about ecology, species, methods
+- Generating short code snippets (R/Python)
+- Explaining concepts, reviewing manuscripts
+- Quick calculations, literature guidance

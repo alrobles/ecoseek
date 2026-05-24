@@ -106,13 +106,27 @@ export async function checkHealth() {
 const HERMES_REMOTE_URL =
   process.env.REACT_APP_HERMES_REMOTE_URL || "https://hermes.ecoseek.org";
 
+/**
+ * Check Hermes remote health via nginx proxy (avoids CORS).
+ * In Docker, the frontend's nginx proxies /api/hermes-health → hermes.ecoseek.org/health.
+ * In dev mode, falls back to direct fetch (will fail on CORS but won't crash).
+ */
 export async function checkRemoteHealth() {
   try {
-    const res = await fetch(`${HERMES_REMOTE_URL}/health`);
+    // Use nginx proxy in production, direct URL in dev
+    const proxyUrl = "/api/hermes-health";
+    const res = await fetch(proxyUrl);
     if (!res.ok) return null;
     return await res.json();
   } catch {
-    return null;
+    // Fallback: try direct (works from curl, not browsers due to CORS)
+    try {
+      const res = await fetch(`${HERMES_REMOTE_URL}/health`);
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
   }
 }
 

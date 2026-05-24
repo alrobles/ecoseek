@@ -31,7 +31,20 @@ if [ -n "${OLLAMA_BASE_URL:-}" ]; then
     echo "[emily] Ollama configured at ${OLLAMA_BASE_URL}"
 fi
 
-# EcoSeek broker credentials (for escalate_remote tool)
+# Hermes remote credentials (for DiDAL escalation to hermes.ecoseek.org)
+if [ -n "${HERMES_ECOSEEK_API_KEY:-}" ]; then
+    echo "HERMES_ECOSEEK_API_KEY=${HERMES_ECOSEEK_API_KEY}" >> "$ENV_FILE"
+    echo "[emily] Hermes remote configured: key=***${HERMES_ECOSEEK_API_KEY: -4}"
+fi
+if [ -n "${HERMES_REMOTE_URL:-}" ]; then
+    echo "HERMES_REMOTE_URL=${HERMES_REMOTE_URL}" >> "$ENV_FILE"
+    echo "[emily] Hermes remote URL: ${HERMES_REMOTE_URL}"
+fi
+if [ -n "${HERMES_REMOTE_MODEL:-}" ]; then
+    echo "HERMES_REMOTE_MODEL=${HERMES_REMOTE_MODEL}" >> "$ENV_FILE"
+fi
+
+# Legacy broker credentials (kept for backward compatibility)
 if [ -n "${ECOSEEK_BROKER_URL:-}" ]; then
     echo "ECOSEEK_BROKER_URL=${ECOSEEK_BROKER_URL}" >> "$ENV_FILE"
 fi
