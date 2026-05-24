@@ -391,10 +391,49 @@ services:
     networks:
       - ecoseek-net
 
+  # ── Emily Local Agent (Hermes fork with ecoseek plugin) ──────────────
+  # Lightweight ecological AI assistant that runs locally and can escalate
+  # heavy tasks to the remote Hermes on reumanlab via the broker.
+  #
+  #   docker compose --profile emily up
+  #
+  # Requires at least one LLM backend:
+  #   - DEEPSEEK_API_KEY for DeepSeek API (BYOK)
+  #   - OLLAMA_BASE_URL for a local Ollama instance
+  #   - Or the remote Hermes via ECOSEEK_BROKER_URL (escalation only)
+  emily:
+    build:
+      context: ./emily
+    container_name: emily
+    profiles: ["emily"]
+    ports:
+      - "127.0.0.1:${EMILY_PORT:-8642}:8642"
+    environment:
+      ECOSEEK_BROKER_URL: "${ECOSEEK_BROKER_URL:-https://broker.ecoseek.org}"
+      ECOSEEK_BROKER_KEY: "${ECOSEEK_BROKER_KEY:-}"
+      ECOSEEK_MODEL: "${ECOSEEK_MODEL:-openclaw/main}"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+      OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-}"
+      API_SERVER_KEY: "${EMILY_API_KEY:-emily-local-key}"
+    volumes:
+      - emily-data:/root/.hermes
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8642/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - ecoseek-net
+
 volumes:
   broker-data:
   ollama-data:
   redis-data:
+  emily-data:
 
 networks:
   ecoseek-net:
