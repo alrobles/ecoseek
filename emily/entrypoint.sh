@@ -11,6 +11,10 @@ ENV_FILE="/root/.hermes/.env"
 # Always enable the API server (this is how the frontend talks to Emily)
 echo "API_SERVER_ENABLED=true" >> "$ENV_FILE"
 
+# Bind to all interfaces inside Docker so port mapping works.
+# Default 127.0.0.1 is the container's loopback — unreachable from the host.
+echo "API_SERVER_HOST=0.0.0.0" >> "$ENV_FILE"
+
 # DeepSeek API key
 if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
     echo "DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}" >> "$ENV_FILE"
@@ -31,10 +35,14 @@ if [ -n "${ECOSEEK_BROKER_KEY:-}" ]; then
     echo "ECOSEEK_BROKER_KEY=${ECOSEEK_BROKER_KEY}" >> "$ENV_FILE"
 fi
 
-# API server key (for authenticating frontend requests)
-if [ -n "${API_SERVER_KEY:-}" ]; then
-    echo "API_SERVER_KEY=${API_SERVER_KEY}" >> "$ENV_FILE"
+# API server key — required when binding to 0.0.0.0 (Hermes security check).
+# Auto-generate if not provided; emily-start.sh passes a shared key so the
+# frontend can authenticate.
+if [ -z "${API_SERVER_KEY:-}" ]; then
+    API_SERVER_KEY=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+    echo "[emily] Auto-generated API server key"
 fi
+echo "API_SERVER_KEY=${API_SERVER_KEY}" >> "$ENV_FILE"
 
 # API server port — Hermes default is 8642 when API_SERVER_PORT is set
 echo "API_SERVER_PORT=${API_SERVER_PORT:-8642}" >> "$ENV_FILE"
