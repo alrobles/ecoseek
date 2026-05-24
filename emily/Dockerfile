@@ -22,9 +22,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install hermes-agent from the EcoSeek fork
+# Install hermes-agent from the EcoSeek fork.
+# aiohttp is required by the gateway API server adapter but is an optional
+# dependency of hermes-agent (in the "messaging" extras group).
 RUN pip install --no-cache-dir \
-    "git+https://github.com/alrobles/hermes-agent.git@main#egg=hermes-agent"
+    "git+https://github.com/alrobles/hermes-agent.git@main#egg=hermes-agent" \
+    aiohttp
 
 # Create hermes home directory
 RUN mkdir -p /root/.hermes/plugins /root/.hermes/skills /root/.hermes/logs
