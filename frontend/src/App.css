@@ -1136,3 +1136,15 @@ body {
   color: #ef4444;
   word-break: break-word;
 }
+
+.text-muted {
+  color: var(--muted-foreground);
+  opacity: 0.6;
+}
+
+.info-tools {
+  font-size: 0.75rem;
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  opacity: 0.8;
+  word-break: break-word;
+}

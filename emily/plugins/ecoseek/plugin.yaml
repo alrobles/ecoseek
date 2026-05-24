@@ -1,9 +1,9 @@
 name: ecoseek
-version: "0.1.0"
+version: "0.5.0"
 description: >
-  EcoSeek ecological intelligence plugin — remote escalation to Hermes on
-  reumanlab for heavy computation, HPC jobs, and advanced ecological workflows.
-  Enable via `hermes plugins enable ecoseek`.
+  EcoSeek DiDAL Phase 2 — dialectical dual-agent loop between Emily (Alpha, local)
+  and Hermes (Beta, remote on reumanlab). Escalation, structured debate, and
+  remote status check via hermes.ecoseek.org.
 author: EcoSeek / alrobles
 requires_env: []
 hooks: []
