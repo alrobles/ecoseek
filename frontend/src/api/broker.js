@@ -138,10 +138,10 @@ Always introduce yourself as Emily on the first interaction. Keep responses focu
  * Emily local validates via API_SERVER_KEY; broker validates via session store.
  *
  * @param {Array} messages  OpenAI-style messages array
- * @param {string} model    Model name (default: openclaw/main)
+ * @param {string} model    Model name (local Emily uses Hermes config default)
  * @returns {Promise<object>} Parsed response body
  */
-export async function chatCompletion(messages, model = "openclaw/main") {
+export async function chatCompletion(messages, model = "hermes") {
   const sid = getSessionId();
   if (!sid) throw new Error("Not logged in");
 
