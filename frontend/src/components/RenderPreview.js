@@ -71,10 +71,21 @@ export function RenderPreview({ messages }) {
   );
 }
 
-export function DiDALPanel({ remoteStatus, isOnline, messages }) {
+const TOOL_LABELS = {
+  hermes_status: "Status Check",
+  escalate_remote: "Remote Delegation",
+  dialectical_exchange: "DiDAL Exchange",
+  eco_analyze: "Ecological Analysis",
+  ku_hpc: "HPC Job",
+};
+
+export function DiDALPanel({ remoteStatus, isOnline, messages, didalExchanges = [], activeToolCalls = [] }) {
   const didalMessages = messages.filter(
-    (m) => m.didalPhase || (m.content && m.content.includes("Hermes Beta"))
+    (m) => m.didalPhase || (m.toolCalls && m.toolCalls.length > 0) || (m.content && m.content.includes("Hermes Beta"))
   );
+
+  const runningExchanges = didalExchanges.filter((ex) => ex.status === "running");
+  const completedExchanges = didalExchanges.filter((ex) => ex.status !== "running");
 
   return (
     <div className="didal-panel">
@@ -104,18 +115,53 @@ export function DiDALPanel({ remoteStatus, isOnline, messages }) {
       </div>
 
       <div className="didal-info">
-        <h4>DiDAL Phase 3</h4>
+        <h4>DiDAL Phase 4 — Streaming</h4>
         <p>
           {remoteStatus
-            ? "Emily can delegate heavy tasks to Hermes Beta on reumanlab. Beta validates complex outputs using eco_analyze and ku_hpc tools."
+            ? "Real-time streaming with tool call visualization. Emily delegates heavy tasks to Hermes Beta on reumanlab."
             : "Hermes Beta is not connected. Emily will work locally without remote validation."}
         </p>
       </div>
 
-      {didalMessages.length > 0 && (
+      {/* Live activity */}
+      {(runningExchanges.length > 0 || activeToolCalls.length > 0) && (
+        <div className="didal-live">
+          <h4>
+            <span className="didal-live-dot" />
+            Live Activity
+          </h4>
+          {activeToolCalls.map((tc, i) => (
+            <div key={tc.id || i} className="didal-live-entry">
+              <span className="didal-live-icon">
+                {tc.name === "escalate_remote" ? "🚀" : tc.name === "dialectical_exchange" ? "⚡" : "🔧"}
+              </span>
+              <span className="didal-live-text">
+                {TOOL_LABELS[tc.name] || tc.name}
+              </span>
+              <span className="didal-live-spinner" />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Recent exchanges */}
+      {(completedExchanges.length > 0 || didalMessages.length > 0) && (
         <div className="didal-log">
-          <h4>Recent Delegations</h4>
-          {didalMessages.slice(-5).map((m, i) => (
+          <h4>Recent Exchanges</h4>
+          {completedExchanges.slice(-5).reverse().map((ex, i) => (
+            <div key={i} className={`didal-log-entry didal-log-${ex.status}`}>
+              <span className="didal-log-icon">
+                {ex.status === "done" ? "✓" : ex.status === "error" ? "✗" : "…"}
+              </span>
+              <span className="didal-log-tool">{TOOL_LABELS[ex.tool] || ex.tool}</span>
+              {ex.completedAt && (
+                <span className="didal-log-time">
+                  {new Date(ex.completedAt).toLocaleTimeString()}
+                </span>
+              )}
+            </div>
+          ))}
+          {completedExchanges.length === 0 && didalMessages.slice(-5).map((m, i) => (
             <div key={i} className="didal-log-entry">
               <span className="didal-log-text">
                 {m.content.substring(0, 100)}
