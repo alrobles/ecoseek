@@ -57,6 +57,7 @@ function App() {
   const [didalExchanges, setDidalExchanges] = useState([]);
   const [lastClassification, setLastClassification] = useState(null);
   const [lastProtocolStages, setLastProtocolStages] = useState(null);
+  const [lastTraceId, setLastTraceId] = useState(null);
   const messagesEndRef = useRef(null);
   const abortRef = useRef(null);
 
@@ -178,6 +179,21 @@ function App() {
                   completedAt: new Date().toISOString(),
                 }))
               );
+
+              // Extract classification and trace_id from didal_protocol results
+              if (result.toolCalls) {
+                for (const tc of result.toolCalls) {
+                  if (tc.name === "didal_protocol" || tc.name === "classify_prompt") {
+                    try {
+                      const parsed = typeof tc.result === "string" ? JSON.parse(tc.result) : tc.result;
+                      if (parsed?.classification) setLastClassification(parsed.classification);
+                      if (parsed?.stages) setLastProtocolStages(parsed.stages);
+                      if (parsed?.trace_id) setLastTraceId(parsed.trace_id);
+                    } catch (_) { /* ignore parse errors */ }
+                  }
+                }
+              }
+
               setTimeout(() => setActiveToolCalls([]), 3000);
               scrollToBottom();
             },
@@ -525,6 +541,7 @@ function App() {
                   activeToolCalls={activeToolCalls}
                   lastClassification={lastClassification}
                   lastProtocolStages={lastProtocolStages}
+                  lastTraceId={lastTraceId}
                 />
               )}
               {rightPanelTab === "info" && (
@@ -585,6 +602,12 @@ function App() {
                       </span>
                     </div>
                   )}
+                  <div className="info-row">
+                    <span className="info-label">Phoenix</span>
+                    <span className={`info-value ${lastTraceId ? "text-success" : "text-muted"}`}>
+                      {lastTraceId ? `Tracing (${lastTraceId.slice(0, 8)}…)` : "Not connected"}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="info-section">

@@ -457,45 +457,63 @@ def retrieve_literature(
         # Add most specific subquestions for broader coverage
         queries.extend(subquestions[:2])
 
+    # Import tracing (no-op when Phoenix is not configured)
+    from .tracing import trace_retrieval_source
+
+    # Build a minimal trace context for retrieval spans
+    _tctx: dict = {"protocol_id": "retrieval"}
+
     # --- Source 1: OpenAlex (always, primary) ---
     for q in queries[:2]:
-        try:
-            results = search_openalex(q, max_results=max_per_source)
-            all_evidence.extend(results)
-            provider_stats["openalex"] = provider_stats.get("openalex", 0) + len(results)
-        except Exception as exc:
-            errors.append(f"openalex: {exc}")
-            logger.warning("OpenAlex search failed: %s", exc)
+        with trace_retrieval_source("openalex", _tctx, q) as src_ctx:
+            try:
+                results = search_openalex(q, max_results=max_per_source)
+                all_evidence.extend(results)
+                provider_stats["openalex"] = provider_stats.get("openalex", 0) + len(results)
+                src_ctx["results_count"] = len(results)
+            except Exception as exc:
+                errors.append(f"openalex: {exc}")
+                src_ctx["error"] = str(exc)[:200]
+                logger.warning("OpenAlex search failed: %s", exc)
 
     # --- Source 2: Semantic Scholar (Tier B only) ---
     if tier == "B":
-        try:
-            results = search_semantic_scholar(query, max_results=max_per_source)
-            all_evidence.extend(results)
-            provider_stats["semantic_scholar"] = len(results)
-        except Exception as exc:
-            errors.append(f"semantic_scholar: {exc}")
-            logger.warning("Semantic Scholar search failed: %s", exc)
+        with trace_retrieval_source("semantic_scholar", _tctx, query) as src_ctx:
+            try:
+                results = search_semantic_scholar(query, max_results=max_per_source)
+                all_evidence.extend(results)
+                provider_stats["semantic_scholar"] = len(results)
+                src_ctx["results_count"] = len(results)
+            except Exception as exc:
+                errors.append(f"semantic_scholar: {exc}")
+                src_ctx["error"] = str(exc)[:200]
+                logger.warning("Semantic Scholar search failed: %s", exc)
 
     # --- Source 3: GBIF Literature (Tier B, ecology-specific) ---
     if tier == "B" and _GBIF_LIT_ENABLED:
-        try:
-            results = search_gbif_literature(query, max_results=max_per_source)
-            all_evidence.extend(results)
-            provider_stats["gbif"] = len(results)
-        except Exception as exc:
-            errors.append(f"gbif: {exc}")
-            logger.warning("GBIF Literature search failed: %s", exc)
+        with trace_retrieval_source("gbif", _tctx, query) as src_ctx:
+            try:
+                results = search_gbif_literature(query, max_results=max_per_source)
+                all_evidence.extend(results)
+                provider_stats["gbif"] = len(results)
+                src_ctx["results_count"] = len(results)
+            except Exception as exc:
+                errors.append(f"gbif: {exc}")
+                src_ctx["error"] = str(exc)[:200]
+                logger.warning("GBIF Literature search failed: %s", exc)
 
     # --- Source 4: Entrez/PubMed (Tier B, BYOK) ---
     if tier == "B" and _ENTREZ_API_KEY:
-        try:
-            results = search_entrez(query, max_results=max_per_source)
-            all_evidence.extend(results)
-            provider_stats["entrez"] = len(results)
-        except Exception as exc:
-            errors.append(f"entrez: {exc}")
-            logger.warning("Entrez search failed: %s", exc)
+        with trace_retrieval_source("entrez", _tctx, query) as src_ctx:
+            try:
+                results = search_entrez(query, max_results=max_per_source)
+                all_evidence.extend(results)
+                provider_stats["entrez"] = len(results)
+                src_ctx["results_count"] = len(results)
+            except Exception as exc:
+                errors.append(f"entrez: {exc}")
+                src_ctx["error"] = str(exc)[:200]
+                logger.warning("Entrez search failed: %s", exc)
 
     # --- Deduplicate by DOI ---
     seen_dois: set[str] = set()
