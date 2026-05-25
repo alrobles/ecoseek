@@ -159,6 +159,37 @@ Stats from `policy_signals` table can tune classifier thresholds, round limits, 
 | `DIDAL_JUDGE_ENABLED` | `true` | Enable/disable LLM judge |
 | `DIDAL_JUDGE_TIMEOUT` | `120` | Judge LLM call timeout (seconds) |
 
+## EcoCoder-7B Integration
+
+[EcoCoder-7B](https://huggingface.co/alrobles/EcoCoder-7B) is a domain-specialized ecological LLM (Qwen2.5-Coder-7B-Instruct + ecological LoRA, GGUF Q4_K_M).
+
+> ⚠️ **~4.5 GB download.** Compatible with LM Studio and Ollama.
+
+### Using with Emily
+
+```bash
+# Via LM Studio (load the model, start server on default port):
+ECOCODER_URL=http://localhost:1234/v1 \
+DEEPSEEK_API_KEY=sk-... bash emily-start.sh
+
+# Via Ollama:
+ollama run hf.co/alrobles/EcoCoder-7B
+ECOCODER_URL=http://localhost:11434/v1 \
+ECOCODER_MODEL=hf.co/alrobles/EcoCoder-7B bash emily-start.sh
+```
+
+### Benchmarking EcoCoder vs DeepSeek
+
+```bash
+# Compare both models on 8 ecological prompts:
+ECOCODER_URL=http://localhost:1234/v1 DEEPSEEK_API_KEY=sk-... \
+python3 benchmarks/ecocoder_vs_deepseek.py
+
+# Results saved to benchmarks/results/
+```
+
+See `benchmarks/README.md` for full usage.
+
 ## Benchmark Prompts
 
 ### Direct mode (should route to direct)

@@ -9,6 +9,7 @@
 #   DEEPSEEK_API_KEY=sk-... HERMES_ECOSEEK_API_KEY=agenticplu-... bash emily-start.sh
 #   DEEPSEEK_API_KEY=sk-... bash emily-start.sh            # local only (no remote delegation)
 #   OLLAMA_BASE_URL=http://host:11434 bash emily-start.sh  # use local Ollama
+#   ECOCODER_URL=http://localhost:1234/v1 bash emily-start.sh  # use EcoCoder-7B via LM Studio
 #
 # No Python, Node.js, or npm required — only Docker.
 
@@ -84,6 +85,7 @@ EMILY_ENV+=(-e "HERMES_REMOTE_URL=$HERMES_URL")
 [ -n "$BROKER_KEY" ] && EMILY_ENV+=(-e "ECOSEEK_BROKER_KEY=$BROKER_KEY")
 [ -n "$DEEPSEEK_KEY" ] && EMILY_ENV+=(-e "DEEPSEEK_API_KEY=$DEEPSEEK_KEY") && EMILY_ENV+=(-e "DEEPSEEK_MODEL=$DEEPSEEK_MODEL")
 [ -n "$OLLAMA_URL" ] && EMILY_ENV+=(-e "OLLAMA_BASE_URL=$OLLAMA_URL")
+[ -n "${ECOCODER_URL:-}" ] && EMILY_ENV+=(-e "ECOCODER_URL=$ECOCODER_URL")
 [ -n "${PHOENIX_COLLECTOR_ENDPOINT:-}" ] && EMILY_ENV+=(-e "PHOENIX_COLLECTOR_ENDPOINT=$PHOENIX_COLLECTOR_ENDPOINT")
 [ -n "${PHOENIX_PROJECT_NAME:-}" ] && EMILY_ENV+=(-e "PHOENIX_PROJECT_NAME=$PHOENIX_PROJECT_NAME")
 [ -n "${DIDAL_MEMORY_ENABLED:-}" ] && EMILY_ENV+=(-e "DIDAL_MEMORY_ENABLED=$DIDAL_MEMORY_ENABLED")
