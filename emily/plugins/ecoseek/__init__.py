@@ -5,8 +5,10 @@ Provides tools for the dual-agent architecture (Alpha↔Beta):
   ``didal_protocol``         — full dialectical research loop with complexity-aware routing
   ``classify_prompt``        — classify prompt complexity (direct/didal/didal_literature)
   ``escalate_remote``        — one-shot delegation to Hermes Beta on reumanlab
+  ``ecoagent_query``         — execute ecological analysis on EcoAgent (reumanlab) via Hermes
   ``dialectical_exchange``   — legacy DiDAL structured debate
   ``hermes_status``          — check Hermes remote availability and loaded tools
+  ``literature_search``      — search local literature cache (litdb)
 
 Emily (Alpha, local) uses these tools to delegate heavy computation to
 Hermes (Beta, remote) on reumanlab.  Communication goes directly to
@@ -64,19 +66,23 @@ def _hermes_request(
     timeout: int | None = None,
     method: str = "GET",
 ) -> dict:
-    """Send a request to hermes.ecoseek.org and return parsed JSON."""
+    """Send a request to hermes.ecoseek.org and return parsed JSON.
+
+    Uses the Cloudflare-safe HTTP client that falls back to curl when
+    Python's urllib is blocked by Cloudflare Bot Fight Mode (error 1010).
+    """
+    from .http_client import http_get_json, http_post_json
+
     url = f"{_REMOTE_URL}{path}"
-    data = json.dumps(payload).encode("utf-8") if payload else None
-    headers = {"Accept": "application/json"}
+    headers = {}
     if _API_KEY:
         headers["Authorization"] = f"Bearer {_API_KEY}"
-    if data:
-        headers["Content-Type"] = "application/json"
-        method = "POST"
 
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(req, timeout=timeout or _TIMEOUT) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    if payload:
+        return http_post_json(url, payload, headers, timeout=timeout or _TIMEOUT)
+    else:
+        result = http_get_json(url, headers, timeout=timeout or _TIMEOUT)
+        return result if isinstance(result, dict) else {}
 
 
 # ---------------------------------------------------------------------------
@@ -623,6 +629,104 @@ def literature_search_tool(
     }, ensure_ascii=False)
 
 
+# ---------------------------------------------------------------------------
+# Tool: ecoagent_query — call EcoAgent tools on reumanlab via Hermes
+# ---------------------------------------------------------------------------
+
+_ECOAGENT_ACTIONS = (
+    "query_species", "query_papers", "compute_diversity", "compute_clusters",
+    "search_literature", "query_pubtator", "fit_sdm", "fit_maxent",
+    "evaluate_niche", "resolve_taxonomy", "resolve_worms", "query_cofid",
+    "validate_cofid", "extract_triplets", "build_knowledge_graph",
+    "query_graph_hosts", "query_graph_parasites", "query_gbif_literature",
+    "query_gbif_parquet", "compute_bioclim", "compute_effort_bias",
+    "classify_abstract", "predict_susceptibility", "compute_ecological_distance",
+    "fit_geotax",
+)
+
+
+def ecoagent_query_tool(
+    action: str,
+    params: dict | None = None,
+    task_id: Optional[str] = None,
+) -> str:
+    """Execute an ecological analysis action on EcoAgent (reumanlab) via Hermes.
+
+    EcoAgent exposes 25 tools for ecological computation: GBIF queries,
+    SDM fitting, diversity metrics, taxonomy resolution, knowledge graphs,
+    cofid host-parasite interactions, and more.
+    """
+    if action not in _ECOAGENT_ACTIONS:
+        return json.dumps({
+            "success": False,
+            "error": "invalid_action",
+            "message": f"Unknown action: {action!r}. Available: {', '.join(_ECOAGENT_ACTIONS)}",
+        })
+
+    if not _is_configured():
+        return json.dumps({
+            "success": False,
+            "error": "hermes_not_configured",
+            "message": "EcoAgent requires HERMES_ECOSEEK_API_KEY to reach reumanlab.",
+        })
+
+    from .retrieval import _hermes_eco_analyze
+    result = _hermes_eco_analyze(action, {"args": params or {}})
+
+    if result is None:
+        return json.dumps({
+            "success": False,
+            "error": "ecoagent_unreachable",
+            "message": "EcoAgent tool_server on reumanlab did not respond via Hermes.",
+        })
+
+    return json.dumps({
+        "success": True,
+        "action": action,
+        "result": result,
+    }, ensure_ascii=False, default=str)
+
+
+ECOAGENT_QUERY_SCHEMA = {
+    "name": "ecoagent_query",
+    "description": (
+        "Execute ecological analysis on EcoAgent (reumanlab) via Hermes. "
+        "25 tools available: query_species (GBIF occurrences), "
+        "query_gbif_literature (GBIF literature search), "
+        "resolve_taxonomy (taxonomic name resolution via GBIF/WoRMS), "
+        "query_cofid (host-parasite interactions from CoFID), "
+        "fit_sdm/fit_maxent (species distribution models), "
+        "compute_diversity/compute_clusters (diversity indices), "
+        "compute_bioclim (bioclimatic variables), "
+        "extract_triplets/build_knowledge_graph (ecological knowledge extraction), "
+        "and more. Use this for structured ecological computation."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": list(_ECOAGENT_ACTIONS),
+                "description": "The EcoAgent tool to execute.",
+            },
+            "params": {
+                "type": "object",
+                "description": (
+                    "Parameters for the action. Examples:\n"
+                    "  query_species: {\"query\": \"Panthera tigris\", \"limit\": 10}\n"
+                    "  resolve_taxonomy: {\"name\": \"Quercus robur\"}\n"
+                    "  query_gbif_literature: {\"query\": \"species distribution modeling\", \"limit\": 5}\n"
+                    "  query_cofid: {\"query\": \"Mammalia\", \"limit\": 10}\n"
+                    "  fit_sdm: {\"species\": \"Panthera onca\", \"method\": \"maxent\"}\n"
+                    "  compute_diversity: {\"community_matrix\": [[1,2],[3,4]], \"index\": \"shannon\"}"
+                ),
+            },
+        },
+        "required": ["action"],
+    },
+}
+
+
 DIALECTICAL_EXCHANGE_SCHEMA = {
     "name": "dialectical_exchange",
     "description": (
@@ -730,9 +834,21 @@ def register(ctx) -> None:
         check_fn=lambda: True,
     )
 
-    n = 6 if _is_configured() else 3
+    ctx.register_tool(
+        name="ecoagent_query",
+        toolset="ecoseek",
+        schema=ECOAGENT_QUERY_SCHEMA,
+        handler=lambda args, **kw: ecoagent_query_tool(
+            action=args.get("action", ""),
+            params=args.get("params"),
+            task_id=kw.get("task_id"),
+        ),
+        check_fn=_is_configured,
+    )
+
+    n = 7 if _is_configured() else 3
     logger.info(
-        "ecoseek plugin registered: %d tools, remote=%s configured=%s didal=v2",
+        "ecoseek plugin registered: %d tools, remote=%s configured=%s didal=v2 ecoagent=true",
         n, _REMOTE_URL, _is_configured(),
     )
 
@@ -812,6 +928,18 @@ try:
             task_id=kw.get("task_id"),
         ),
         check_fn=lambda: True,
+        requires_env=[],
+    )
+    registry.register(
+        name="ecoagent_query",
+        toolset="ecoseek",
+        schema=ECOAGENT_QUERY_SCHEMA,
+        handler=lambda args, **kw: ecoagent_query_tool(
+            action=args.get("action", ""),
+            params=args.get("params"),
+            task_id=kw.get("task_id"),
+        ),
+        check_fn=_is_configured,
         requires_env=[],
     )
 except ImportError:
