@@ -151,6 +151,14 @@ Personality:
 - You encourage best practices in open science and data provenance.
 - You know about GBIF, WoRMS, IUCN, and other biodiversity databases.
 
+Output Formatting (IMPORTANT):
+- Always use Markdown: headers (#, ##, ###), bold, italic, lists, tables, blockquotes, code blocks.
+- For mathematical expressions, ALWAYS use LaTeX notation:
+  - Inline math: $E = mc^2$, $N_t = N_0 e^{rt}$
+  - Display math: $$\\frac{dN}{dt} = rN\\left(1 - \\frac{N}{K}\\right)$$
+  - Shannon diversity: $H' = -\\sum p_i \\ln p_i$
+- The frontend renders LaTeX with KaTeX. Use it for ANY equation, formula, or statistical notation.
+
 Always introduce yourself as Emily on the first interaction. Keep responses focused and scientifically rigorous.`;
 
 // ── Chat completions ───────────────────────────────────────────────────
@@ -255,6 +263,7 @@ export async function chatCompletionStream(
   let modelUsed = model;
   let finishReason = null;
   const toolCalls = new Map();
+  let doneEmitted = false;
 
   try {
     while (true) {
@@ -268,7 +277,8 @@ export async function chatCompletionStream(
       for (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed || trimmed === "data: [DONE]") {
-          if (trimmed === "data: [DONE]") {
+          if (trimmed === "data: [DONE]" && !doneEmitted) {
+            doneEmitted = true;
             callbacks.onDone?.({
               content: fullContent,
               reasoning: fullReasoning || null,
@@ -350,8 +360,8 @@ export async function chatCompletionStream(
     }
   }
 
-  // If we never got [DONE] (e.g. connection closed), still fire onDone
-  if (fullContent || fullReasoning) {
+  // If we never got [DONE] (e.g. connection closed early), still fire onDone
+  if (!doneEmitted && (fullContent || fullReasoning)) {
     callbacks.onDone?.({
       content: fullContent,
       reasoning: fullReasoning || null,

@@ -149,7 +149,7 @@ function ProtocolStages({ stages }) {
 export function DiDALPanel({
   remoteStatus, isOnline, messages, didalExchanges = [],
   activeToolCalls = [], lastClassification = null, lastProtocolStages = null,
-  lastTraceId = null,
+  lastTraceId = null, lastJudgeResult = null,
 }) {
   const didalMessages = messages.filter(
     (m) => m.didalPhase || (m.toolCalls && m.toolCalls.length > 0) || (m.content && m.content.includes("Hermes Beta"))
@@ -205,6 +205,32 @@ export function DiDALPanel({
         <div className="didal-trace-id">
           <span className="didal-trace-label">🔭 Phoenix Trace</span>
           <code className="didal-trace-code">{lastTraceId}</code>
+        </div>
+      )}
+
+      {/* Judge score */}
+      {lastJudgeResult && lastJudgeResult.overall_score > 0 && (
+        <div className="didal-judge">
+          <h4>Judge Score</h4>
+          <div className="didal-judge-overall">
+            <span className="didal-judge-score">{(lastJudgeResult.overall_score * 100).toFixed(0)}%</span>
+            <span className={`didal-judge-verdict verdict-${lastJudgeResult.verdict || "unknown"}`}>
+              {lastJudgeResult.verdict || "—"}
+            </span>
+          </div>
+          {lastJudgeResult.scores && (
+            <div className="didal-judge-breakdown">
+              {Object.entries(lastJudgeResult.scores).map(([key, val]) => (
+                <div key={key} className="didal-judge-criterion">
+                  <span className="didal-judge-criterion-label">{key.replace(/_/g, " ")}</span>
+                  <div className="didal-judge-bar">
+                    <div className="didal-judge-bar-fill" style={{ width: `${(val || 0) * 100}%` }} />
+                  </div>
+                  <span className="didal-judge-criterion-val">{((val || 0) * 100).toFixed(0)}%</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

@@ -115,6 +115,50 @@ Retrieval tiers:
 
 Inspired by `alrobles/gbifliterature` (GBIF API wrapper) and `alrobles/paper-qa` fork (Apache 2.0).
 
+## Phase 5: Memory + Judge + Policy Evolution
+
+### Memory (SQLite — persistent across sessions)
+
+| Class | Stores | Example |
+|-------|--------|---------|
+| **Episodic** | Previous sessions, user intent, mode used | "User asked about niche ecology → didal_literature, 2 rounds" |
+| **Semantic** | Stable concepts, theses, key points | "Fundamental niche = n-dimensional hypervolume (Hutchinson 1957)" |
+| **Procedural** | Strategies, round counts, source counts | "didal_literature averages 2 rounds, 4 sources" |
+
+**Writeback policy:** Only writes when judge score > threshold (default 0.6), user confirms, or new concept detected.
+
+Memory is stored at `~/.ecoseek/didal_memory/` on the host, mounted into Docker.
+
+### Judge
+
+Scores final answers on 6 criteria:
+- Scientific accuracy, Definition clarity, Evidence grounding
+- Perspective contrast, Depth, Report structure
+
+Uses LLM judge via Hermes Beta when available; falls back to heuristic scoring.
+Produces overall score (0-1), verdict (excellent/good/adequate/needs_improvement/poor), and per-criterion breakdown.
+
+### Policy Evolution
+
+Records fitness signals per protocol run:
+```
+fitness = 0.25(answer_quality) + 0.20(evidence_quality) + 0.15(report_structure)
+        + 0.15(clarification) + 0.10(memory_usefulness)
+        - 0.10(excessive_rounds) - 0.05(unused_retrieval)
+```
+
+Stats from `policy_signals` table can tune classifier thresholds, round limits, and retrieval policies.
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DIDAL_MEMORY_ENABLED` | `true` | Enable/disable memory |
+| `DIDAL_MEMORY_DIR` | `~/.hermes/didal_memory` | SQLite DB location |
+| `DIDAL_WRITEBACK_SCORE_THRESHOLD` | `0.6` | Min judge score to write memory |
+| `DIDAL_JUDGE_ENABLED` | `true` | Enable/disable LLM judge |
+| `DIDAL_JUDGE_TIMEOUT` | `120` | Judge LLM call timeout (seconds) |
+
 ## Benchmark Prompts
 
 ### Direct mode (should route to direct)
