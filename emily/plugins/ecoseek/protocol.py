@@ -29,6 +29,16 @@ from .prompts import (
     RETRIEVE_EVIDENCE_PROMPT,
     REVISION_PROMPT,
 )
+from .judge import judge_answer
+from .memory import (
+    extract_memories_from_protocol,
+    is_memory_enabled,
+    memory_read_stage,
+    memory_write_stage,
+    recall,
+    record_policy_signal,
+    should_write,
+)
 from .tracing import (
     record_llm_call,
     trace_protocol,
@@ -502,6 +512,18 @@ def run_didal_protocol(
 
         # --- DiDAL mode: full dialectical loop ---
 
+        # Memory read: recall relevant context before framing
+        memory_context = []
+        if is_memory_enabled():
+            with trace_stage("memory.read", tctx, agent_role="system") as sctx:
+                with memory_read_stage(prompt, classification) as mctx:
+                    memory_context = mctx.get("memories", [])
+                    sctx["recall_count"] = mctx.get("recall_count", 0)
+                    stages.append({
+                        "stage": "memory.read",
+                        "recall_count": mctx.get("recall_count", 0),
+                    })
+
         # Stage 1: Frame task
         with trace_stage("frontend.frame_task", tctx, agent_role="frontend_naive") as sctx:
             frame_result = _stage_frame_task(prompt, classification)
@@ -575,6 +597,59 @@ def run_didal_protocol(
                 prompt, classification, task_object, current_draft, evidence, rounds,
             )
 
+        # Stage 7: Judge — score the final answer
+        judge_result = {"overall_score": 0.0, "verdict": "unknown"}
+        with trace_stage("judge.score", tctx, agent_role="judge") as sctx:
+            try:
+                judge_result = judge_answer(
+                    prompt=prompt,
+                    answer=report,
+                    mode=mode,
+                    evidence=evidence,
+                    classification=classification,
+                )
+                sctx["overall_score"] = judge_result.get("overall_score", 0)
+                sctx["verdict"] = judge_result.get("verdict", "unknown")
+                stages.append({
+                    "stage": "judge.score",
+                    "overall_score": judge_result.get("overall_score", 0),
+                    "verdict": judge_result.get("verdict", "unknown"),
+                    "scores": judge_result.get("scores", {}),
+                    "reasons": judge_result.get("reasons", []),
+                })
+            except Exception as exc:
+                logger.warning("Judge scoring failed: %s", exc)
+                sctx["error"] = str(exc)[:200]
+
+        # Stage 8: Memory write — persist useful knowledge
+        if is_memory_enabled():
+            with trace_stage("memory.write", tctx, agent_role="system") as sctx:
+                elapsed_so_far = round(time.time() - start_time, 1)
+                write_result = {
+                    "success": True,
+                    "protocol_id": protocol_id,
+                    "mode": mode,
+                    "classification": classification,
+                    "content": report,
+                    "task_object": task_object,
+                    "final_draft": current_draft,
+                    "evidence": evidence,
+                    "critique_rounds": rounds,
+                    "elapsed_seconds": elapsed_so_far,
+                    "trace_id": tctx.get("trace_id", ""),
+                }
+                with memory_write_stage(
+                    write_result,
+                    judge_score=judge_result.get("overall_score", 0),
+                ) as mctx:
+                    sctx["written"] = mctx.get("written", 0)
+                    sctx["fitness"] = mctx.get("fitness")
+                    stages.append({
+                        "stage": "memory.write",
+                        "written": mctx.get("written", 0),
+                        "fitness": mctx.get("fitness"),
+                    })
+
         elapsed = round(time.time() - start_time, 1)
 
         result = {
@@ -587,6 +662,11 @@ def run_didal_protocol(
             "final_draft": current_draft,
             "evidence": evidence,
             "critique_rounds": rounds,
+            "judge": {
+                "overall_score": judge_result.get("overall_score", 0),
+                "verdict": judge_result.get("verdict", "unknown"),
+                "scores": judge_result.get("scores", {}),
+            },
             "stages": stages,
             "total_usage": total_usage,
             "elapsed_seconds": elapsed,

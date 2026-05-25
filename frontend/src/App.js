@@ -58,6 +58,7 @@ function App() {
   const [lastClassification, setLastClassification] = useState(null);
   const [lastProtocolStages, setLastProtocolStages] = useState(null);
   const [lastTraceId, setLastTraceId] = useState(null);
+  const [lastJudgeResult, setLastJudgeResult] = useState(null);
   const messagesEndRef = useRef(null);
   const abortRef = useRef(null);
 
@@ -189,6 +190,7 @@ function App() {
                       if (parsed?.classification) setLastClassification(parsed.classification);
                       if (parsed?.stages) setLastProtocolStages(parsed.stages);
                       if (parsed?.trace_id) setLastTraceId(parsed.trace_id);
+                      if (parsed?.judge) setLastJudgeResult(parsed.judge);
                     } catch (_) { /* ignore parse errors */ }
                   }
                 }
@@ -542,6 +544,7 @@ function App() {
                   lastClassification={lastClassification}
                   lastProtocolStages={lastProtocolStages}
                   lastTraceId={lastTraceId}
+                  lastJudgeResult={lastJudgeResult}
                 />
               )}
               {rightPanelTab === "info" && (

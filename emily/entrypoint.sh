@@ -60,6 +60,20 @@ if [ -n "${PHOENIX_PROJECT_NAME:-}" ]; then
     echo "PHOENIX_PROJECT_NAME=${PHOENIX_PROJECT_NAME}" >> "$ENV_FILE"
 fi
 
+# DiDAL Memory (persistent SQLite store for episodic/semantic/procedural memory)
+if [ -n "${DIDAL_MEMORY_ENABLED:-}" ]; then
+    echo "DIDAL_MEMORY_ENABLED=${DIDAL_MEMORY_ENABLED}" >> "$ENV_FILE"
+fi
+if [ -n "${DIDAL_MEMORY_DIR:-}" ]; then
+    echo "DIDAL_MEMORY_DIR=${DIDAL_MEMORY_DIR}" >> "$ENV_FILE"
+fi
+if [ -n "${DIDAL_WRITEBACK_SCORE_THRESHOLD:-}" ]; then
+    echo "DIDAL_WRITEBACK_SCORE_THRESHOLD=${DIDAL_WRITEBACK_SCORE_THRESHOLD}" >> "$ENV_FILE"
+fi
+if [ -n "${DIDAL_JUDGE_ENABLED:-}" ]; then
+    echo "DIDAL_JUDGE_ENABLED=${DIDAL_JUDGE_ENABLED}" >> "$ENV_FILE"
+fi
+
 # Literature retrieval configuration (BYOK)
 if [ -n "${OPENALEX_MAILTO:-}" ]; then
     echo "OPENALEX_MAILTO=${OPENALEX_MAILTO}" >> "$ENV_FILE"
