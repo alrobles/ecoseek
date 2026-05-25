@@ -55,6 +55,8 @@ function App() {
   const [streamingReasoning, setStreamingReasoning] = useState("");
   const [activeToolCalls, setActiveToolCalls] = useState([]);
   const [didalExchanges, setDidalExchanges] = useState([]);
+  const [lastClassification, setLastClassification] = useState(null);
+  const [lastProtocolStages, setLastProtocolStages] = useState(null);
   const messagesEndRef = useRef(null);
   const abortRef = useRef(null);
 
@@ -130,7 +132,7 @@ function App() {
             },
             onToolCallStart: (tool) => {
               setActiveToolCalls((prev) => [...prev, { ...tool, arguments: "" }]);
-              if (["escalate_remote", "dialectical_exchange"].includes(tool.name)) {
+              if (["escalate_remote", "dialectical_exchange", "didal_protocol", "classify_prompt"].includes(tool.name)) {
                 setDidalExchanges((prev) => [
                   ...prev,
                   {
@@ -521,6 +523,8 @@ function App() {
                   isOnline={isOnline}
                   didalExchanges={didalExchanges}
                   activeToolCalls={activeToolCalls}
+                  lastClassification={lastClassification}
+                  lastProtocolStages={lastProtocolStages}
                 />
               )}
               {rightPanelTab === "info" && (
@@ -570,14 +574,14 @@ function App() {
                   <div className="info-row">
                     <span className="info-label">DiDAL</span>
                     <span className={`info-value ${remoteStatus ? "text-success" : "text-muted"}`}>
-                      {remoteStatus ? "Phase 4 Active" : "Unavailable"}
+                      {remoteStatus ? "Protocol v2 Active" : "Unavailable"}
                     </span>
                   </div>
                   {remoteStatus && (
                     <div className="info-row">
                       <span className="info-label">Tools</span>
                       <span className="info-value info-tools">
-                        eco_analyze, ku_hpc, escalate_remote, dialectical_exchange
+                        didal_protocol, classify_prompt, escalate_remote, dialectical_exchange, eco_analyze, ku_hpc
                       </span>
                     </div>
                   )}
