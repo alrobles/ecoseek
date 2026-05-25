@@ -1,22 +1,26 @@
-"""ecoseek — Hermes plugin for EcoSeek DiDAL Phase 2.
+"""ecoseek — Hermes plugin for EcoSeek DiDAL Protocol v2.
 
 Provides tools for the dual-agent architecture (Alpha↔Beta):
 
-  ``escalate_remote``       — one-shot delegation to Hermes Beta on reumanlab
-  ``dialectical_exchange``  — DiDAL structured debate (plan → execute → critique → refine)
-  ``hermes_status``         — check Hermes remote availability and loaded tools
+  ``didal_protocol``         — full dialectical research loop with complexity-aware routing
+  ``classify_prompt``        — classify prompt complexity (direct/didal/didal_literature)
+  ``escalate_remote``        — one-shot delegation to Hermes Beta on reumanlab
+  ``dialectical_exchange``   — legacy DiDAL structured debate
+  ``hermes_status``          — check Hermes remote availability and loaded tools
 
 Emily (Alpha, local) uses these tools to delegate heavy computation to
 Hermes (Beta, remote) on reumanlab.  Communication goes directly to
 hermes.ecoseek.org — no broker required.
 
 Env vars (set in ~/.hermes/.env or passed via Docker):
-  HERMES_REMOTE_URL       - Remote Hermes endpoint (default: https://hermes.ecoseek.org)
-  HERMES_ECOSEEK_API_KEY  - API key for hermes.ecoseek.org
-  HERMES_REMOTE_MODEL     - Model name on remote (default: hermes)
-  HERMES_REMOTE_TIMEOUT   - Request timeout in seconds (default: 300)
-  DIDAL_MAX_TURNS         - Max dialogue turns (default: 12)
-  DIDAL_STUCK_THRESHOLD   - Repeated errors before stopping (default: 3)
+  HERMES_REMOTE_URL           - Remote Hermes endpoint (default: https://hermes.ecoseek.org)
+  HERMES_ECOSEEK_API_KEY      - API key for hermes.ecoseek.org
+  HERMES_REMOTE_MODEL         - Model name on remote (default: hermes)
+  HERMES_REMOTE_TIMEOUT       - Request timeout in seconds (default: 300)
+  DIDAL_ENABLED               - Enable DiDAL protocol (default: true)
+  DIDAL_MAX_CRITIQUE_ROUNDS   - Max critique-revise rounds (default: 2)
+  DIDAL_MAX_TURNS             - Max dialogue turns for legacy exchange (default: 12)
+  DIDAL_STUCK_THRESHOLD       - Repeated errors before stopping (default: 3)
 """
 from __future__ import annotations
 
@@ -97,6 +101,58 @@ def hermes_status(task_id: Optional[str] = None) -> str:
             "remote_url": _REMOTE_URL,
             "configured": _is_configured(),
         })
+
+
+# ---------------------------------------------------------------------------
+# Tool: classify_prompt — complexity classifier
+# ---------------------------------------------------------------------------
+
+def classify_prompt_tool(prompt: str, task_id: Optional[str] = None) -> str:
+    """Classify a prompt's complexity and recommend a response mode.
+
+    Returns the classification result with mode, score, and reasons.
+    """
+    from .classifier import classify_complexity
+    result = classify_complexity(prompt)
+    return json.dumps({
+        "success": True,
+        "mode": result.mode,
+        "complexity_score": result.complexity_score,
+        "reasons": result.reasons,
+        "needs_clarification": result.needs_clarification,
+        "expected_depth": result.expected_depth,
+    }, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# Tool: didal_protocol — full dialectical research loop
+# ---------------------------------------------------------------------------
+
+def didal_protocol_tool(
+    prompt: str,
+    mode: str = "",
+    max_rounds: int = 0,
+    task_id: Optional[str] = None,
+) -> str:
+    """Run the full DiDAL protocol: classify → frame → retrieve → draft → critique → revise → report.
+
+    Parameters
+    ----------
+    prompt : str
+        The user's question or research task.
+    mode : str, optional
+        Force a specific mode: "direct", "didal", or "didal_literature".
+        If empty, the classifier decides automatically.
+    max_rounds : int, optional
+        Max critique-revise rounds (default: DIDAL_MAX_CRITIQUE_ROUNDS env or 2).
+    """
+    from .protocol import run_didal_protocol
+    return run_didal_protocol(
+        prompt=prompt,
+        force_mode=mode or None,
+        max_rounds=max_rounds,
+        task_id=task_id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +259,7 @@ def escalate_remote(
 
 
 # ---------------------------------------------------------------------------
-# DiDAL protocol helpers
+# DiDAL protocol helpers (legacy exchange)
 # ---------------------------------------------------------------------------
 
 MESSAGE_TYPES = ("plan", "code", "execution_result", "critique", "final")
@@ -253,7 +309,7 @@ Respond with a JSON object: {"type": "execution_result|critique|final", "content
 
 
 # ---------------------------------------------------------------------------
-# Tool: dialectical_exchange — structured Alpha↔Beta debate
+# Tool: dialectical_exchange — structured Alpha↔Beta debate (legacy)
 # ---------------------------------------------------------------------------
 
 def dialectical_exchange(
@@ -390,6 +446,62 @@ HERMES_STATUS_SCHEMA = {
     "parameters": {"type": "object", "properties": {}},
 }
 
+CLASSIFY_PROMPT_SCHEMA = {
+    "name": "classify_prompt",
+    "description": (
+        "Classify a user prompt's scientific complexity to determine the best "
+        "response mode. Returns one of: 'direct' (simple/factual), 'didal' "
+        "(conceptual, needs dialectical loop), or 'didal_literature' (needs "
+        "evidence-backed synthesis with references). Use this before deciding "
+        "how to answer a question, or let didal_protocol handle it automatically."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "prompt": {
+                "type": "string",
+                "description": "The user's question or prompt to classify.",
+            },
+        },
+        "required": ["prompt"],
+    },
+}
+
+DIDAL_PROTOCOL_SCHEMA = {
+    "name": "didal_protocol",
+    "description": (
+        "Run the full DiDAL (Dialectical Dual-Agent Loop) protocol on a question. "
+        "Automatically classifies complexity and routes to the right mode:\n"
+        "- direct: simple factual answers (fast, single call)\n"
+        "- didal: conceptual questions → structured frame → expert draft → "
+        "naive critique → revision → mini-report\n"
+        "- didal_literature: complex scientific questions → adds evidence "
+        "retrieval + source grounding before synthesis\n\n"
+        "USE THIS for any ecological, scientific, or research question. "
+        "It produces structured mini-reports for complex questions and fast "
+        "answers for simple ones. The protocol handles routing automatically."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "prompt": {
+                "type": "string",
+                "description": "The user's question or research task.",
+            },
+            "mode": {
+                "type": "string",
+                "enum": ["", "direct", "didal", "didal_literature"],
+                "description": "Force a specific mode. Leave empty for automatic classification.",
+            },
+            "max_rounds": {
+                "type": "integer",
+                "description": "Max critique-revise rounds (default: 2).",
+            },
+        },
+        "required": ["prompt"],
+    },
+}
+
 ESCALATE_REMOTE_SCHEMA = {
     "name": "escalate_remote",
     "description": (
@@ -398,8 +510,9 @@ ESCALATE_REMOTE_SCHEMA = {
         "eco_analyze (GBIF, SDM, diversity, taxonomy), ku_hpc, GitHub CLI, and "
         "shell access. Use this for ANY task that involves: heavy computation, "
         "HPC jobs, large datasets, ecological pipelines, code execution on "
-        "reumanlab, or capabilities beyond your local model. Prefer delegating "
-        "to Beta over doing it yourself — Beta is more powerful."
+        "reumanlab, or capabilities beyond your local model. For scientific "
+        "QUESTIONS, prefer didal_protocol instead — it adds structured debate "
+        "and mini-report formatting."
     ),
     "parameters": {
         "type": "object",
@@ -425,11 +538,12 @@ ESCALATE_REMOTE_SCHEMA = {
 DIALECTICAL_EXCHANGE_SCHEMA = {
     "name": "dialectical_exchange",
     "description": (
-        "Start a DiDAL (Dialectical Dual-Agent Loop) exchange with Beta. "
-        "Unlike escalate_remote, this enables structured debate: you propose "
-        "a plan, Beta executes and critiques, you refine, loop until consensus. "
-        "Use for complex multi-step tasks that benefit from iterative refinement: "
-        "SDM pipelines, HPC workflows, code review, ecological analyses."
+        "Legacy DiDAL exchange: Alpha proposes, Beta executes + critiques, "
+        "loop until consensus. For scientific QUESTIONS, prefer didal_protocol "
+        "instead — it adds automatic complexity classification, structured "
+        "critique rounds, evidence retrieval, and mini-report formatting. "
+        "Use this only for multi-step EXECUTION tasks (pipelines, HPC workflows, "
+        "code review) where the back-and-forth is about running code, not synthesis."
     ),
     "parameters": {
         "type": "object",
@@ -457,13 +571,37 @@ DIALECTICAL_EXCHANGE_SCHEMA = {
 # ---------------------------------------------------------------------------
 
 def register(ctx) -> None:
-    """Register all EcoSeek DiDAL Phase 2 tools."""
+    """Register all EcoSeek DiDAL tools."""
     ctx.register_tool(
         name="hermes_status",
         toolset="ecoseek",
         schema=HERMES_STATUS_SCHEMA,
         handler=lambda args, **kw: hermes_status(task_id=kw.get("task_id")),
         check_fn=lambda: True,
+    )
+
+    ctx.register_tool(
+        name="classify_prompt",
+        toolset="ecoseek",
+        schema=CLASSIFY_PROMPT_SCHEMA,
+        handler=lambda args, **kw: classify_prompt_tool(
+            prompt=args.get("prompt", ""),
+            task_id=kw.get("task_id"),
+        ),
+        check_fn=lambda: True,
+    )
+
+    ctx.register_tool(
+        name="didal_protocol",
+        toolset="ecoseek",
+        schema=DIDAL_PROTOCOL_SCHEMA,
+        handler=lambda args, **kw: didal_protocol_tool(
+            prompt=args.get("prompt", ""),
+            mode=args.get("mode", ""),
+            max_rounds=args.get("max_rounds", 0),
+            task_id=kw.get("task_id"),
+        ),
+        check_fn=_is_configured,
     )
 
     ctx.register_tool(
@@ -492,13 +630,10 @@ def register(ctx) -> None:
         check_fn=_is_configured,
     )
 
-    n = 3 if _is_configured() else 1
+    n = 5 if _is_configured() else 2
     logger.info(
-        "ecoseek plugin registered: %d tools (hermes_status%s), remote=%s configured=%s",
-        n,
-        ", escalate_remote, dialectical_exchange" if _is_configured() else "",
-        _REMOTE_URL,
-        _is_configured(),
+        "ecoseek plugin registered: %d tools, remote=%s configured=%s didal=v2",
+        n, _REMOTE_URL, _is_configured(),
     )
 
 
@@ -515,6 +650,30 @@ try:
         schema=HERMES_STATUS_SCHEMA,
         handler=lambda args, **kw: hermes_status(task_id=kw.get("task_id")),
         check_fn=lambda: True,
+        requires_env=[],
+    )
+    registry.register(
+        name="classify_prompt",
+        toolset="ecoseek",
+        schema=CLASSIFY_PROMPT_SCHEMA,
+        handler=lambda args, **kw: classify_prompt_tool(
+            prompt=args.get("prompt", ""),
+            task_id=kw.get("task_id"),
+        ),
+        check_fn=lambda: True,
+        requires_env=[],
+    )
+    registry.register(
+        name="didal_protocol",
+        toolset="ecoseek",
+        schema=DIDAL_PROTOCOL_SCHEMA,
+        handler=lambda args, **kw: didal_protocol_tool(
+            prompt=args.get("prompt", ""),
+            mode=args.get("mode", ""),
+            max_rounds=args.get("max_rounds", 0),
+            task_id=kw.get("task_id"),
+        ),
+        check_fn=_is_configured,
         requires_env=[],
     )
     registry.register(
