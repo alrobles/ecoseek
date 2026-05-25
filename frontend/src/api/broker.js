@@ -230,11 +230,36 @@ export async function chatCompletionStream(
   const sid = getSessionId();
   if (!sid) throw new Error("Not logged in");
 
+  // Extract reasoning mode from callbacks (set by frontend toggle)
+  const reasoningMode = callbacks.reasoningMode || "auto";
+
   const fullMessages = IS_LOCAL_EMILY
     ? messages
     : [{ role: "system", content: EMILY_SYSTEM_PROMPT }, ...messages];
 
+  // Inject reasoning mode as metadata in the last user message
+  // so Emily's plugin can read it and route accordingly
+  if (reasoningMode !== "auto" && fullMessages.length > 0) {
+    const last = fullMessages[fullMessages.length - 1];
+    if (last.role === "user") {
+      fullMessages[fullMessages.length - 1] = {
+        ...last,
+        content: `[reasoning_mode:${reasoningMode}] ${last.content}`,
+      };
+    }
+  }
+
   const authToken = IS_LOCAL_EMILY && EMILY_KEY ? EMILY_KEY : sid;
+
+  // Build request body — pass thinking mode hints for DeepSeek V4
+  const body = { model, messages: fullMessages, stream: true };
+  if (reasoningMode === "fast") {
+    // Request non-thinking mode for faster, cheaper responses
+    body.reasoning_effort = "low";
+  } else if (reasoningMode === "deep") {
+    // Request full thinking mode for deep reasoning
+    body.reasoning_effort = "high";
+  }
 
   const res = await fetch(`${CHAT_URL}/v1/chat/completions`, {
     method: "POST",
@@ -242,7 +267,7 @@ export async function chatCompletionStream(
       Authorization: `Bearer ${authToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ model, messages: fullMessages, stream: true }),
+    body: JSON.stringify(body),
     signal,
   });
 

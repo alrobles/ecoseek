@@ -59,6 +59,7 @@ function App() {
   const [lastProtocolStages, setLastProtocolStages] = useState(null);
   const [lastTraceId, setLastTraceId] = useState(null);
   const [lastJudgeResult, setLastJudgeResult] = useState(null);
+  const [reasoningMode, setReasoningMode] = useState("auto"); // "fast" | "deep" | "auto"
   const messagesEndRef = useRef(null);
   const abortRef = useRef(null);
 
@@ -125,6 +126,7 @@ function App() {
         await chatCompletionStream(
           history,
           {
+            reasoningMode,
             onToken: (text) => {
               setStreamingContent((prev) => prev + text);
               scrollToBottom();
@@ -450,11 +452,34 @@ function App() {
             )}
 
             <form onSubmit={handleSubmit} className="input-form">
+              <div className="reasoning-toggle" title="Reasoning mode: Fast skips deep analysis, Deep forces full DiDAL, Auto lets the classifier decide">
+                {[
+                  { key: "fast", label: "Rapido", icon: "\u26A1" },
+                  { key: "auto", label: "Auto", icon: "\uD83D\uDD04" },
+                  { key: "deep", label: "Profundo", icon: "\uD83E\uDDE0" },
+                ].map(({ key, label, icon }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`reasoning-btn ${reasoningMode === key ? "active" : ""}`}
+                    onClick={() => setReasoningMode(key)}
+                    disabled={isLoading}
+                    aria-label={label}
+                  >
+                    <span className="reasoning-icon">{icon}</span>
+                    <span className="reasoning-label">{label}</span>
+                  </button>
+                ))}
+              </div>
               <input
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Ask Emily about ecology..."
+                placeholder={
+                  reasoningMode === "fast" ? "Quick question for Emily..."
+                    : reasoningMode === "deep" ? "Deep scientific question for Emily..."
+                    : "Ask Emily about ecology..."
+                }
                 disabled={isLoading}
               />
               <div className="action-buttons">
