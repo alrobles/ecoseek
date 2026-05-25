@@ -411,7 +411,7 @@ services:
     environment:
       ECOSEEK_BROKER_URL: "${ECOSEEK_BROKER_URL:-https://broker.ecoseek.org}"
       ECOSEEK_BROKER_KEY: "${ECOSEEK_BROKER_KEY:-}"
-      ECOSEEK_MODEL: "${ECOSEEK_MODEL:-openclaw/main}"
+      ECOSEEK_MODEL: "${ECOSEEK_MODEL:-hermes}"
       DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
       OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-}"
       API_SERVER_KEY: "${EMILY_API_KEY:-emily-local-key}"

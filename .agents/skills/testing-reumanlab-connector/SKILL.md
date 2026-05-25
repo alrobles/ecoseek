@@ -98,5 +98,5 @@ The SSH-based capabilities (`hpc.status`, `hpc.queue`, `hpc.logs.read`, `remote.
 ## Devin Secrets Needed
 
 None for local testing. For live reumanlab deployment testing:
-- `OPENCLAW_API_KEY` — to send commands to reumanlab via OpenClaw
-- `OPENCLAW_BASE_URL` — Cloudflare tunnel URL to reumanlab
+- `HERMES_ECOSEEK_API_KEY` — to send commands to reumanlab via Hermes
+- Hermes endpoint: `https://hermes.ecoseek.org`
