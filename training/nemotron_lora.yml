@@ -1,0 +1,124 @@
+# Axolotl config -- LoRA fine-tuning on Nemotron-3-Nano-30B
+# NVIDIA Nemotron Model Reasoning Challenge (Kaggle)
+#
+# Hardware target: KU cluster, 2x A100 80GB (or 4x A40 48GB)
+# Estimated runtime: ~3-5 hours on 2x A100 for 45 examples
+#
+# Usage:
+#   # Install Axolotl first:
+#   pip install axolotl[flash-attn]
+#
+#   # Generate corpus first (from repo root):
+#   HERMES_ECOSEEK_API_KEY=sk-... python3 benchmarks/generate_sft_corpus.py \
+#       --format llama3 --output training/data/sft_corpus.jsonl
+#
+#   # Launch training:
+#   axolotl train training/nemotron_lora.yml
+#
+#   # On KU cluster via SLURM:
+#   sbatch training/train_slurm.sh
+
+# ---------------------------------------------------------------------------
+# Base model
+# ---------------------------------------------------------------------------
+base_model: metric/nemotron-3-nano-30b-a3b-bf16   # Kaggle dataset path
+model_type: LlamaForCausalLM
+tokenizer_type: AutoTokenizer
+trust_remote_code: true
+tokenizer_use_fast: true
+
+# ---------------------------------------------------------------------------
+# Dataset
+# ---------------------------------------------------------------------------
+datasets:
+  - path: training/data/sft_corpus.jsonl
+    type: completion          # raw text field, Llama-3 template already applied
+    field: text
+
+dataset_prepared_path: training/data/prepared
+val_set_size: 0.05            # 5% validation split
+
+# ---------------------------------------------------------------------------
+# LoRA adapter  (rank <= 32 required by competition rules)
+# ---------------------------------------------------------------------------
+adapter: lora
+lora_r: 16                    # rank -- well within the 32 limit
+lora_alpha: 32                # typically 2x lora_r
+lora_dropout: 0.05
+lora_target_modules:
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+  - gate_proj
+  - up_proj
+  - down_proj
+lora_target_linear: false
+lora_fan_in_fan_out: false
+
+# ---------------------------------------------------------------------------
+# Training hyperparameters
+# ---------------------------------------------------------------------------
+sequence_len: 4096
+sample_packing: true          # packs short examples together -- more GPU efficient
+pad_to_sequence_len: true
+
+num_epochs: 4
+micro_batch_size: 2
+gradient_accumulation_steps: 8   # effective batch = 2 * 8 = 16
+optimizer: adamw_torch_fused
+lr_scheduler: cosine
+learning_rate: 2e-4
+warmup_ratio: 0.05
+weight_decay: 0.01
+max_grad_norm: 1.0
+
+# ---------------------------------------------------------------------------
+# Precision & memory
+# ---------------------------------------------------------------------------
+bf16: true
+fp16: false
+tf32: false
+torch_compile: false
+
+flash_attention: true         # requires flash-attn package
+
+gradient_checkpointing: true
+gradient_checkpointing_kwargs:
+  use_reentrant: false
+
+# ---------------------------------------------------------------------------
+# Multi-GPU (FSDP) -- used when 2+ GPUs are allocated by SLURM
+# ---------------------------------------------------------------------------
+fsdp:
+  - full_shard
+  - auto_wrap
+fsdp_config:
+  fsdp_offload_params: false
+  fsdp_state_dict_type: FULL_STATE_DICT
+  fsdp_transformer_layer_cls_to_wrap: LlamaDecoderLayer
+
+# ---------------------------------------------------------------------------
+# Output
+# ---------------------------------------------------------------------------
+output_dir: training/output/nemotron_lora
+logging_dir: training/output/logs
+save_strategy: epoch
+save_total_limit: 2
+eval_steps: 20
+logging_steps: 5
+
+# Keep adapter separate (do NOT merge) -- Kaggle expects adapter-only weights
+merge_lora_on_train_end: false
+
+# ---------------------------------------------------------------------------
+# Weights & Biases (optional -- set WANDB_API_KEY to enable)
+# ---------------------------------------------------------------------------
+wandb_project: ecoseek-nemotron
+wandb_run_id:
+wandb_watch: false
+
+# ---------------------------------------------------------------------------
+# Reproducibility
+# ---------------------------------------------------------------------------
+seed: 42
