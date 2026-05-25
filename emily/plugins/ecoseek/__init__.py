@@ -481,11 +481,12 @@ HERMES_STATUS_SCHEMA = {
 CLASSIFY_PROMPT_SCHEMA = {
     "name": "classify_prompt",
     "description": (
-        "Classify a user prompt's scientific complexity to determine the best "
-        "response mode. Returns one of: 'direct' (simple/factual), 'didal' "
-        "(conceptual, needs dialectical loop), or 'didal_literature' (needs "
-        "evidence-backed synthesis with references). Use this before deciding "
-        "how to answer a question, or let didal_protocol handle it automatically."
+        "Classify a user prompt's scientific complexity BEFORE calling "
+        "didal_protocol. ALWAYS call this first, then tell the user what mode "
+        "was detected and what you will do, THEN call didal_protocol with the "
+        "mode parameter. Returns: 'direct' (simple), 'didal' (conceptual), or "
+        "'didal_literature' (evidence-backed synthesis). This is fast (~1s) and "
+        "gives the user immediate feedback while you prepare the full response."
     ),
     "parameters": {
         "type": "object",
