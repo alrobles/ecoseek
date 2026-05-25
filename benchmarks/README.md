@@ -1,7 +1,5 @@
 # EcoSeek Benchmarks
 
-## EcoCoder-7B vs DeepSeek
-
 Compares ecological answer quality between [EcoCoder-7B](https://huggingface.co/alrobles/EcoCoder-7B) (domain-specialized, 4.5 GB local) and DeepSeek v4 (cloud API).
 
 Uses the DiDAL judge component to score both models on 8 ecological prompts across three complexity levels:
@@ -9,54 +7,95 @@ Uses the DiDAL judge component to score both models on 8 ecological prompts acro
 - **DiDAL** (3 prompts): Conceptual scientific questions
 - **DiDAL Literature** (3 prompts): Deep synthesis requiring references
 
-### Judge Criteria (6 dimensions)
+---
 
-| Criterion | Weight | What it measures |
-|-----------|--------|------------------|
-| Scientific accuracy | 0.25 | Factual correctness |
-| Evidence grounding | 0.20 | Source citation and support |
-| Depth | 0.15 | Avoids superficiality |
-| Report structure | 0.15 | Mini-report format quality |
-| Definition clarity | 0.15 | Distinguishes definition from interpretation |
-| Perspective contrast | 0.10 | Contrasts competing views |
+## Scripts
 
-### Usage
+### `ecocoder_vs_deepseek.py` — Model Quality Benchmark
+
+Compares EcoCoder-7B vs DeepSeek on ecological prompts using the DiDAL judge.
 
 ```bash
-# Both models (requires both endpoints):
-ECOCODER_URL=http://localhost:1234/v1 \
-DEEPSEEK_API_KEY=sk-... \
-python3 benchmarks/ecocoder_vs_deepseek.py
+# Compare both models:
+DEEPSEEK_API_KEY=sk-... python3 benchmarks/ecocoder_vs_deepseek.py
 
-# EcoCoder only (via LM Studio):
-ECOCODER_URL=http://localhost:1234/v1 \
-python3 benchmarks/ecocoder_vs_deepseek.py --ecocoder-only
-
-# EcoCoder via Ollama:
-ECOCODER_URL=http://localhost:11434/v1 \
-ECOCODER_MODEL=hf.co/alrobles/EcoCoder-7B \
-python3 benchmarks/ecocoder_vs_deepseek.py --ecocoder-only
-
-# DeepSeek only:
-DEEPSEEK_API_KEY=sk-... \
-python3 benchmarks/ecocoder_vs_deepseek.py --deepseek-only
+# EcoCoder only:
+ECOCODER_URL=http://localhost:1234/v1 python3 benchmarks/ecocoder_vs_deepseek.py --ecocoder-only
 ```
 
-### Output
+---
 
-The script prints a comparison table and saves full results (including raw responses and per-criterion scores) to `benchmarks/results/benchmark_YYYYMMDD_HHMMSS.json`.
+### `generate_sft_corpus.py` — Nemotron SFT Corpus Generator
 
-### EcoCoder-7B Setup
+Builds a fine-tuning dataset for LoRA training on **Nemotron-3-Nano-30B** using the DiDAL protocol as a data pipeline.
 
-**LM Studio** (recommended for interactive use):
-1. Download from [HuggingFace](https://huggingface.co/alrobles/EcoCoder-7B)
-2. Load `ecocoder-7b-q4_k_m.gguf` in LM Studio
-3. Start the server (default: `http://localhost:1234/v1`)
+For each prompt, DiDAL runs the full dialectical loop:
+```
+classify -> frame -> retrieve (literature only) -> expert_draft -> critique -> revise -> judge
+```
+Only examples scoring `>= JUDGE_THRESHOLD` (default 0.65) are kept.
 
-**Ollama**:
+#### Quick start
+
 ```bash
-ollama run hf.co/alrobles/EcoCoder-7B
-# Endpoint: http://localhost:11434/v1
+# Preview prompts (no API calls):
+python3 benchmarks/generate_sft_corpus.py --dry-run
+
+# Show prompt bank stats:
+python3 benchmarks/generate_sft_corpus.py --stats-only
+
+# Full run (requires HERMES_ECOSEEK_API_KEY):
+HERMES_ECOSEEK_API_KEY=sk-... python3 benchmarks/generate_sft_corpus.py
+
+# Only ecology + reasoning, Llama-3 format, higher threshold:
+HERMES_ECOSEEK_API_KEY=sk-... python3 benchmarks/generate_sft_corpus.py \
+    --categories ecology reasoning --threshold 0.70 --format llama3
+
+# Alpaca format for other trainers:
+HERMES_ECOSEEK_API_KEY=sk-... python3 benchmarks/generate_sft_corpus.py --format alpaca
 ```
 
-> **Note:** EcoCoder-7B is a ~4.5 GB GGUF model (Qwen2.5-Coder-7B + ecological LoRA, Q4_K_M quantization). First download may take several minutes depending on connection speed.
+#### Output formats
+
+| Format | Description | Ready for |
+|--------|-------------|----------|
+| `llama3` | Llama-3 chat template (default) | Axolotl, TRL, Unsloth |
+| `alpaca` | Instruction/response format | LLaMA-Factory, FastChat |
+| `jsonl` | Raw `{prompt, response, meta}` | Custom trainers |
+
+Each output record includes a `meta` block with `judge_score`, `mode`, `critique_rounds`, and `protocol_id` for traceability.
+
+#### Prompt bank (45 prompts)
+
+| Category | Count | Levels |
+|----------|-------|--------|
+| ecology | 14 | direct, didal, didal_literature |
+| reasoning | 10 | direct, didal |
+| math | 7 | direct, didal |
+| science | 6 | didal, didal_literature |
+| multistep | 5 | didal |
+| analogy | 3 | didal |
+| ethics | 2 | didal |
+
+#### Connecting to Nemotron LoRA training
+
+After generating the corpus, fine-tune with [Axolotl](https://github.com/OpenAccess-AI-Collective/axolotl) or [TRL](https://github.com/huggingface/trl):
+
+```yaml
+# axolotl config snippet
+base_model: nvidia/Nemotron-3-Nano-30B
+adapter: lora
+lora_r: 16
+lora_alpha: 32
+datasets:
+  - path: benchmarks/results/sft_corpus_<timestamp>.jsonl
+    type: completion
+```
+
+The LoRA adapter can then be submitted to the [NVIDIA Nemotron Model Reasoning Challenge](https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge) as a Kaggle dataset.
+
+---
+
+## Results
+
+Generated benchmark and corpus files are saved to `benchmarks/results/` (gitignored).
