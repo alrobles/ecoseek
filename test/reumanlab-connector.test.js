@@ -141,8 +141,11 @@ const {
   clamp,
   remoteHealth,
   remoteInfo,
+  validateGbifArgs,
+  gbifQuery,
   READ_CAPABILITIES,
   WRITE_CAPABILITIES,
+  GBIF_MAX_LIMIT,
 } = require("../connector/reumanlab/capabilities");
 
 const mockConfig = {
@@ -155,6 +158,12 @@ const mockConfig = {
   allowedPaths: ["/scratch/testuser", "/home/testuser/work"],
   commandTimeoutMs: 5000,
   maxOutputBytes: 1048576,
+  gbifdbDir: "/home/a474r867/work/gbifdata/gbif_effort/gbifdata",
+  apptainerImage: "/home/a474r867/work/gbifdata/gbif_effort/container/gbif-kde.sif",
+  gbifQueryR: "/home/a474r867/work/scripts/gbif_query.R",
+  gbifRunner: "/home/a474r867/work/scripts/run_gbif_query.sh",
+  gbifTimeoutMs: 60000,
+  gbifMaxOutputBytes: 16777216,
 };
 
 // Mock exec function that returns canned output
@@ -388,6 +397,159 @@ async function timeoutTests() {
     } catch (err) {
       assert.ok(err.killed === true);
     }
+  });
+
+  // ── gbif.query: arg validation ───────────────────────────────────────
+  await test("validateGbifArgs rejects shell meta in species_name", async () => {
+    const v = validateGbifArgs({ species_name: "foo; rm -rf /" });
+    assert.strictEqual(v.ok, false);
+    assert.strictEqual(v.code, "invalid_spec");
+  });
+
+  await test("validateGbifArgs rejects species_name > 128 chars", async () => {
+    const v = validateGbifArgs({ species_name: "A".repeat(200) });
+    assert.strictEqual(v.ok, false);
+  });
+
+  await test("validateGbifArgs rejects negative taxon_key", async () => {
+    const v = validateGbifArgs({ taxon_key: -1 });
+    assert.strictEqual(v.ok, false);
+  });
+
+  await test("validateGbifArgs rejects unordered year_range", async () => {
+    const v = validateGbifArgs({ year_range: [2020, 2010] });
+    assert.strictEqual(v.ok, false);
+  });
+
+  await test("validateGbifArgs rejects out-of-bounds year_range", async () => {
+    const v = validateGbifArgs({ year_range: [1600, 2000] });
+    assert.strictEqual(v.ok, false);
+  });
+
+  await test("validateGbifArgs rejects unordered bbox", async () => {
+    const v = validateGbifArgs({ bbox: [10, 20, 5, 30] });
+    assert.strictEqual(v.ok, false);
+  });
+
+  await test("validateGbifArgs rejects limit > GBIF_MAX_LIMIT", async () => {
+    const v = validateGbifArgs({ limit: GBIF_MAX_LIMIT + 1 });
+    assert.strictEqual(v.ok, false);
+    assert.strictEqual(v.code, "row_cap_exceeded");
+  });
+
+  await test("validateGbifArgs accepts default empty args (uses default limit)", async () => {
+    const v = validateGbifArgs({});
+    assert.strictEqual(v.ok, true);
+    assert.strictEqual(v.spec.limit, 50000);
+  });
+
+  await test("validateGbifArgs forwards all optional filters", async () => {
+    const v = validateGbifArgs({
+      species_name: "Caligus elongatus",
+      taxon_key: 2294018,
+      year_range: [2010, 2020],
+      bbox: [-10, 30, 20, 60],
+      limit: 500,
+    });
+    assert.strictEqual(v.ok, true);
+    assert.strictEqual(v.spec.species_name, "Caligus elongatus");
+    assert.strictEqual(v.spec.taxon_key, 2294018);
+    assert.deepStrictEqual(v.spec.year_range, [2010, 2020]);
+    assert.deepStrictEqual(v.spec.bbox, [-10, 30, 20, 60]);
+    assert.strictEqual(v.spec.limit, 500);
+  });
+
+  // ── gbif.query: SSH integration via mock execFn ──────────────────────
+  function mockGbifExecOk() {
+    const envelope = JSON.stringify({
+      data: [
+        [50.1, 10.5, "Caligus elongatus", 2294018, 2018, 6, "HUMAN_OBSERVATION"],
+        [51.0, 11.0, "Caligus elongatus", 2294018, 2019, 7, "PRESERVED_SPECIMEN"],
+      ],
+      error: null,
+    });
+    return Promise.resolve(envelope + "\n");
+  }
+
+  function mockGbifExecMalformed() {
+    return Promise.resolve("this is not JSON\n");
+  }
+
+  function mockGbifExecTimeoutKilled() {
+    const err = new Error("Command timed out");
+    err.killed = true;
+    return Promise.reject(err);
+  }
+
+  function mockGbifExecConnRefused() {
+    return Promise.reject(new Error("ssh: Connection refused"));
+  }
+
+  await test("gbifQuery returns parsed envelope on happy path", async () => {
+    const result = await gbifQuery(
+      { args: { species_name: "Caligus elongatus", limit: 100 } },
+      mockConfig,
+      mockGbifExecOk
+    );
+    assert.strictEqual(result.error, null);
+    assert.strictEqual(result.data.length, 2);
+    assert.strictEqual(result.data[0][2], "Caligus elongatus");
+  });
+
+  await test("gbifQuery surfaces invalid_spec error from validation", async () => {
+    const result = await gbifQuery(
+      { args: { species_name: "bad; rm" } },
+      mockConfig,
+      mockGbifExecOk
+    );
+    assert.deepStrictEqual(result.data, []);
+    assert.strictEqual(result.error.code, "invalid_spec");
+  });
+
+  await test("gbifQuery surfaces runtime_error on malformed R output", async () => {
+    const result = await gbifQuery(
+      { args: { species_name: "Caligus elongatus" } },
+      mockConfig,
+      mockGbifExecMalformed
+    );
+    assert.deepStrictEqual(result.data, []);
+    assert.strictEqual(result.error.code, "runtime_error");
+  });
+
+  await test("gbifQuery returns runtime_error on SSH timeout", async () => {
+    const result = await gbifQuery(
+      { args: { limit: 10 } },
+      mockConfig,
+      mockGbifExecTimeoutKilled
+    );
+    assert.strictEqual(result.error.code, "runtime_error");
+    assert.ok(result.error.message.toLowerCase().includes("timed out"));
+  });
+
+  await test("gbifQuery returns cluster_unreachable on SSH failure", async () => {
+    const result = await gbifQuery(
+      { args: { limit: 10 } },
+      mockConfig,
+      mockGbifExecConnRefused
+    );
+    assert.strictEqual(result.error.code, "cluster_unreachable");
+  });
+
+  // ── gbif.query: dispatch wiring ──────────────────────────────────────
+  await test("dispatch gbif.query returns 200 with parsed data", async () => {
+    const out = await dispatch(
+      "gbif.query",
+      { args: { species_name: "Caligus elongatus", limit: 10 } },
+      mockConfig,
+      mockGbifExecOk
+    );
+    assert.strictEqual(out.status, 200);
+    assert.strictEqual(out.result.error, null);
+    assert.strictEqual(out.result.data.length, 2);
+  });
+
+  await test("gbif.query is in READ_CAPABILITIES set", async () => {
+    assert.ok(READ_CAPABILITIES.has("gbif.query"));
   });
 }
 
