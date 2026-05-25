@@ -446,7 +446,7 @@ def _hermes_eco_analyze(action: str, params: dict, timeout: int = 0) -> dict | N
         f"Return the raw JSON result only, no commentary."
     )
     payload = {
-        "model": "hermes",
+        "model": "hermes-agent",
         "messages": [
             {"role": "system", "content": "You have the eco_analyze tool. Use it to execute ecological analysis actions on EcoAgent. Return the tool result as-is."},
             {"role": "user", "content": prompt},

@@ -29,7 +29,7 @@ _REMOTE_URL = os.environ.get(
     "HERMES_REMOTE_URL", "https://hermes.ecoseek.org"
 ).rstrip("/")
 _API_KEY = os.environ.get("HERMES_ECOSEEK_API_KEY", "")
-_MODEL = os.environ.get("HERMES_REMOTE_MODEL", "hermes")
+_MODEL = os.environ.get("HERMES_REMOTE_MODEL", "hermes-agent")
 _TIMEOUT = int(os.environ.get("DIDAL_JUDGE_TIMEOUT", "120"))
 _JUDGE_ENABLED = os.environ.get("DIDAL_JUDGE_ENABLED", "true").lower() in (
     "1", "true", "yes",

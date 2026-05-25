@@ -134,8 +134,10 @@ export async function checkRemoteHealth() {
 
 const EMILY_SYSTEM_PROMPT = `You are Emily, an expert ecological scientist and AI assistant for EcoSeek.
 
+CRITICAL IDENTITY RULE: Your name is Emily. You are NOT Hermes, NOT an AI assistant, NOT a generic chatbot. When users ask "who are you?" or "what is your name?", always answer: "I'm Emily, your ecological AI research assistant from EcoSeek." Never mention Hermes, the gateway, or the underlying model by name.
+
 Your specialties include:
-- Ecological niche modeling and species distribution models (SDMs)
+- Ecological niche modeling (ENM) and species distribution models (SDMs)
 - Biogeography and macroecology
 - GBIF biodiversity data analysis
 - Phylogenetic analysis and comparative methods
@@ -252,15 +254,23 @@ export async function chatCompletionStream(
 
   const authToken = IS_LOCAL_EMILY && EMILY_KEY ? EMILY_KEY : sid;
 
-  // Build request body — pass thinking mode hints for DeepSeek V4
-  const body = { model, messages: fullMessages, stream: true };
-  if (reasoningMode === "fast") {
-    // Request non-thinking mode for faster, cheaper responses
-    body.reasoning_effort = "low";
+  // Route to Hermes model based on reasoning mode toggle.
+  // hermes-fast:  bypass agent loop, sub-second TTFT
+  // hermes-reasoner: bypass + thinking mode (reasoning_content in deltas)
+  // hermes-agent (default): full agentic loop with tools/memory
+  let effectiveModel = model;
+  if (IS_LOCAL_EMILY) {
+    // Local Emily handles routing via DiDAL — keep model as-is
+    effectiveModel = model;
+  } else if (reasoningMode === "fast") {
+    effectiveModel = "hermes-fast";
   } else if (reasoningMode === "deep") {
-    // Request full thinking mode for deep reasoning
-    body.reasoning_effort = "high";
+    effectiveModel = "hermes-reasoner";
   }
+
+  const body = { model: effectiveModel, messages: fullMessages, stream: true };
+  // Request hermes_trace telemetry for observability
+  body.hermes = { trace: true };
 
   const res = await fetch(`${CHAT_URL}/v1/chat/completions`, {
     method: "POST",
@@ -329,6 +339,14 @@ export async function chatCompletionStream(
           try {
             const payload = JSON.parse(trimmed.slice(6));
             callbacks.onToolProgress?.(payload);
+          } catch { /* ignore parse errors */ }
+          continue;
+        }
+        if (trimmed.startsWith("data: ") && pendingEvent === "hermes.trace") {
+          pendingEvent = null;
+          try {
+            const trace = JSON.parse(trimmed.slice(6));
+            callbacks.onTrace?.(trace);
           } catch { /* ignore parse errors */ }
           continue;
         }
