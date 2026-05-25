@@ -86,11 +86,19 @@ EMILY_ENV+=(-e "HERMES_REMOTE_URL=$HERMES_URL")
 [ -n "$OLLAMA_URL" ] && EMILY_ENV+=(-e "OLLAMA_BASE_URL=$OLLAMA_URL")
 [ -n "${PHOENIX_COLLECTOR_ENDPOINT:-}" ] && EMILY_ENV+=(-e "PHOENIX_COLLECTOR_ENDPOINT=$PHOENIX_COLLECTOR_ENDPOINT")
 [ -n "${PHOENIX_PROJECT_NAME:-}" ] && EMILY_ENV+=(-e "PHOENIX_PROJECT_NAME=$PHOENIX_PROJECT_NAME")
+[ -n "${DIDAL_MEMORY_ENABLED:-}" ] && EMILY_ENV+=(-e "DIDAL_MEMORY_ENABLED=$DIDAL_MEMORY_ENABLED")
+[ -n "${DIDAL_JUDGE_ENABLED:-}" ] && EMILY_ENV+=(-e "DIDAL_JUDGE_ENABLED=$DIDAL_JUDGE_ENABLED")
+[ -n "${DIDAL_WRITEBACK_SCORE_THRESHOLD:-}" ] && EMILY_ENV+=(-e "DIDAL_WRITEBACK_SCORE_THRESHOLD=$DIDAL_WRITEBACK_SCORE_THRESHOLD")
+
+# Memory persistence: mount host directory for SQLite DB survival across container restarts
+MEMORY_DIR="${DIDAL_MEMORY_DIR:-$HOME/.ecoseek/didal_memory}"
+mkdir -p "$MEMORY_DIR"
 
 docker run -d \
   --name "$EMILY_CONTAINER" \
   -p "127.0.0.1:${EMILY_PORT}:8642" \
   --add-host=host.docker.internal:host-gateway \
+  -v "${MEMORY_DIR}:/root/.hermes/didal_memory" \
   "${EMILY_ENV[@]}" \
   --restart unless-stopped \
   "$EMILY_IMAGE"
@@ -166,6 +174,7 @@ if [ -n "${PHOENIX_COLLECTOR_ENDPOINT:-}" ]; then
 else
   info "  Phoenix:      Disabled (set PHOENIX_COLLECTOR_ENDPOINT to enable tracing)"
 fi
+info "  Memory:       ${MEMORY_DIR}  (judge: ${DIDAL_JUDGE_ENABLED:-true})"
 echo ""
 info "  Open http://localhost:${FRONTEND_PORT} in your browser."
 info "  Sign in with GitHub to start chatting with Emily."
