@@ -29,6 +29,12 @@ from .prompts import (
     RETRIEVE_EVIDENCE_PROMPT,
     REVISION_PROMPT,
 )
+from .tracing import (
+    record_llm_call,
+    trace_protocol,
+    trace_retrieval_source,
+    trace_stage,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +87,10 @@ def _beta_call(
 
     content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
     usage = data.get("usage", {})
-    return {"content": content, "usage": usage, "model": data.get("model", _MODEL)}
+    model = data.get("model", _MODEL)
+    # Record LLM call on the current span if tracing is active
+    record_llm_call({}, model, usage, stage="beta_call")
+    return {"content": content, "usage": usage, "model": model}
 
 
 def _parse_json_response(content: str) -> dict | None:
@@ -448,108 +457,141 @@ def run_didal_protocol(
             total_usage[k] += usage.get(k, 0)
 
     # --- Stage 0: Classify ---
-    classify_result = _stage_classify(prompt)
-    stages.append(classify_result)
-    classification = classify_result["classification"]
+    with trace_protocol(protocol_id, prompt, force_mode or "auto") as tctx:
 
-    # Override mode if forced
-    mode = force_mode or classification["mode"]
-    classification["mode"] = mode  # update for report
+        with trace_stage("classification", tctx, agent_role="system") as sctx:
+            classify_result = _stage_classify(prompt)
+            stages.append(classify_result)
+            classification = classify_result["classification"]
+            sctx["confidence"] = classification["complexity_score"]
 
-    logger.info(
-        "didal[%s] classified: mode=%s score=%.2f reasons=%s",
-        protocol_id, mode, classification["complexity_score"],
-        classification["reasons"][:2],
-    )
+        # Override mode if forced
+        mode = force_mode or classification["mode"]
+        classification["mode"] = mode  # update for report
+        tctx["mode"] = mode
 
-    # --- Direct mode: skip dialectical loop ---
-    if mode == "direct":
-        direct_result = _stage_direct(prompt)
-        stages.append(direct_result)
-        _track_usage(direct_result)
+        logger.info(
+            "didal[%s] classified: mode=%s score=%.2f reasons=%s",
+            protocol_id, mode, classification["complexity_score"],
+            classification["reasons"][:2],
+        )
+
+        # --- Direct mode: skip dialectical loop ---
+        if mode == "direct":
+            with trace_stage("direct_answer", tctx, agent_role="backend_expert") as sctx:
+                direct_result = _stage_direct(prompt)
+                stages.append(direct_result)
+                _track_usage(direct_result)
+                sctx["tokens_used"] = direct_result.get("usage", {}).get("total_tokens", 0)
+
+            elapsed = round(time.time() - start_time, 1)
+            result = {
+                "success": True,
+                "protocol_id": protocol_id,
+                "mode": "direct",
+                "classification": classification,
+                "content": direct_result["content"],
+                "stages": stages,
+                "total_usage": total_usage,
+                "elapsed_seconds": elapsed,
+                "source": "hermes.ecoseek.org",
+            }
+            if tctx.get("trace_id"):
+                result["trace_id"] = tctx["trace_id"]
+            return json.dumps(result, ensure_ascii=False)
+
+        # --- DiDAL mode: full dialectical loop ---
+
+        # Stage 1: Frame task
+        with trace_stage("frontend.frame_task", tctx, agent_role="frontend_naive") as sctx:
+            frame_result = _stage_frame_task(prompt, classification)
+            stages.append(frame_result)
+            _track_usage(frame_result)
+            task_object = frame_result["task_object"]
+            sctx["tokens_used"] = frame_result.get("usage", {}).get("total_tokens", 0)
+
+        # Stage 2: Retrieve evidence (only for didal_literature)
+        evidence = None
+        if mode == "didal_literature":
+            with trace_stage("backend.retrieve", tctx, agent_role="backend_expert",
+                             question_type=task_object.get("task_type", "unknown")) as sctx:
+                retrieve_result = _stage_retrieve(task_object, classification)
+                stages.append(retrieve_result)
+                _track_usage(retrieve_result)
+                evidence = retrieve_result["evidence"]
+                n_sources = len(evidence.get("sources", [])) if isinstance(evidence, dict) else 0
+                sctx["retrieved_sources"] = n_sources
+                tctx["total_sources"] = n_sources
+
+        # Stage 3: Expert draft
+        with trace_stage("backend.synthesize_draft", tctx, agent_role="backend_expert") as sctx:
+            draft_result = _stage_expert_draft(task_object, evidence)
+            stages.append(draft_result)
+            _track_usage(draft_result)
+            current_draft = draft_result["draft"]
+            sctx["tokens_used"] = draft_result.get("usage", {}).get("total_tokens", 0)
+            sctx["evidence_used"] = len(current_draft.get("evidence", [])) if isinstance(current_draft, dict) else 0
+
+        # Stage 4-5: Critique-Revise loop (bounded)
+        rounds = 0
+        for round_idx in range(effective_max_rounds):
+            # Stage 4: Naive critique
+            with trace_stage("frontend.critique", tctx, agent_role="frontend_naive",
+                             round_index=round_idx + 1) as sctx:
+                critique_result = _stage_critique(current_draft, task_object)
+                stages.append(critique_result)
+                _track_usage(critique_result)
+                critique = critique_result["critique"]
+
+                rounds = round_idx + 1
+                sctx["quality"] = critique.get("overall_quality", "unknown")
+                sctx["requires_revision"] = critique.get("requires_revision", False)
+
+            # Check if revision needed
+            requires_revision = critique.get("requires_revision", False)
+            overall_quality = critique.get("overall_quality", "adequate")
+
+            if not requires_revision or overall_quality in ("good", "excellent"):
+                logger.info("didal[%s] critique round %d: quality=%s, no revision needed",
+                           protocol_id, rounds, overall_quality)
+                break
+
+            # Stage 5: Revision
+            with trace_stage("backend.revise", tctx, agent_role="backend_expert",
+                             round_index=round_idx + 1) as sctx:
+                revision_result = _stage_revise(current_draft, critique, task_object)
+                stages.append(revision_result)
+                _track_usage(revision_result)
+                current_draft = revision_result["revised_draft"]
+                sctx["tokens_used"] = revision_result.get("usage", {}).get("total_tokens", 0)
+
+            logger.info("didal[%s] revision round %d complete", protocol_id, rounds)
+
+        tctx["critique_rounds"] = rounds
+
+        # Stage 6: Assemble final report
+        with trace_stage("finalize_report", tctx, agent_role="system") as sctx:
+            report = _assemble_report(
+                prompt, classification, task_object, current_draft, evidence, rounds,
+            )
 
         elapsed = round(time.time() - start_time, 1)
-        return json.dumps({
+
+        result = {
             "success": True,
             "protocol_id": protocol_id,
-            "mode": "direct",
+            "mode": mode,
             "classification": classification,
-            "content": direct_result["content"],
+            "content": report,
+            "task_object": task_object,
+            "final_draft": current_draft,
+            "evidence": evidence,
+            "critique_rounds": rounds,
             "stages": stages,
             "total_usage": total_usage,
             "elapsed_seconds": elapsed,
             "source": "hermes.ecoseek.org",
-        }, ensure_ascii=False)
-
-    # --- DiDAL mode: full dialectical loop ---
-
-    # Stage 1: Frame task
-    frame_result = _stage_frame_task(prompt, classification)
-    stages.append(frame_result)
-    _track_usage(frame_result)
-    task_object = frame_result["task_object"]
-
-    # Stage 2: Retrieve evidence (only for didal_literature)
-    evidence = None
-    if mode == "didal_literature":
-        retrieve_result = _stage_retrieve(task_object, classification)
-        stages.append(retrieve_result)
-        _track_usage(retrieve_result)
-        evidence = retrieve_result["evidence"]
-
-    # Stage 3: Expert draft
-    draft_result = _stage_expert_draft(task_object, evidence)
-    stages.append(draft_result)
-    _track_usage(draft_result)
-    current_draft = draft_result["draft"]
-
-    # Stage 4-5: Critique-Revise loop (bounded)
-    rounds = 0
-    for round_idx in range(effective_max_rounds):
-        # Stage 4: Naive critique
-        critique_result = _stage_critique(current_draft, task_object)
-        stages.append(critique_result)
-        _track_usage(critique_result)
-        critique = critique_result["critique"]
-
-        rounds = round_idx + 1
-
-        # Check if revision needed
-        requires_revision = critique.get("requires_revision", False)
-        overall_quality = critique.get("overall_quality", "adequate")
-
-        if not requires_revision or overall_quality in ("good", "excellent"):
-            logger.info("didal[%s] critique round %d: quality=%s, no revision needed",
-                       protocol_id, rounds, overall_quality)
-            break
-
-        # Stage 5: Revision
-        revision_result = _stage_revise(current_draft, critique, task_object)
-        stages.append(revision_result)
-        _track_usage(revision_result)
-        current_draft = revision_result["revised_draft"]
-
-        logger.info("didal[%s] revision round %d complete", protocol_id, rounds)
-
-    # Stage 6: Assemble final report
-    report = _assemble_report(
-        prompt, classification, task_object, current_draft, evidence, rounds,
-    )
-
-    elapsed = round(time.time() - start_time, 1)
-
-    return json.dumps({
-        "success": True,
-        "protocol_id": protocol_id,
-        "mode": mode,
-        "classification": classification,
-        "content": report,
-        "task_object": task_object,
-        "final_draft": current_draft,
-        "evidence": evidence,
-        "critique_rounds": rounds,
-        "stages": stages,
-        "total_usage": total_usage,
-        "elapsed_seconds": elapsed,
-        "source": "hermes.ecoseek.org",
-    }, ensure_ascii=False)
+        }
+        if tctx.get("trace_id"):
+            result["trace_id"] = tctx["trace_id"]
+        return json.dumps(result, ensure_ascii=False)

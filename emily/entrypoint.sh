@@ -52,6 +52,14 @@ if [ -n "${DIDAL_MAX_CRITIQUE_ROUNDS:-}" ]; then
     echo "DIDAL_MAX_CRITIQUE_ROUNDS=${DIDAL_MAX_CRITIQUE_ROUNDS}" >> "$ENV_FILE"
 fi
 
+# Phoenix / OpenTelemetry tracing (no-op when endpoint is not set)
+if [ -n "${PHOENIX_COLLECTOR_ENDPOINT:-}" ]; then
+    echo "PHOENIX_COLLECTOR_ENDPOINT=${PHOENIX_COLLECTOR_ENDPOINT}" >> "$ENV_FILE"
+fi
+if [ -n "${PHOENIX_PROJECT_NAME:-}" ]; then
+    echo "PHOENIX_PROJECT_NAME=${PHOENIX_PROJECT_NAME}" >> "$ENV_FILE"
+fi
+
 # Literature retrieval configuration (BYOK)
 if [ -n "${OPENALEX_MAILTO:-}" ]; then
     echo "OPENALEX_MAILTO=${OPENALEX_MAILTO}" >> "$ENV_FILE"

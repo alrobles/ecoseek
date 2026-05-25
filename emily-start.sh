@@ -84,6 +84,8 @@ EMILY_ENV+=(-e "HERMES_REMOTE_URL=$HERMES_URL")
 [ -n "$BROKER_KEY" ] && EMILY_ENV+=(-e "ECOSEEK_BROKER_KEY=$BROKER_KEY")
 [ -n "$DEEPSEEK_KEY" ] && EMILY_ENV+=(-e "DEEPSEEK_API_KEY=$DEEPSEEK_KEY") && EMILY_ENV+=(-e "DEEPSEEK_MODEL=$DEEPSEEK_MODEL")
 [ -n "$OLLAMA_URL" ] && EMILY_ENV+=(-e "OLLAMA_BASE_URL=$OLLAMA_URL")
+[ -n "${PHOENIX_COLLECTOR_ENDPOINT:-}" ] && EMILY_ENV+=(-e "PHOENIX_COLLECTOR_ENDPOINT=$PHOENIX_COLLECTOR_ENDPOINT")
+[ -n "${PHOENIX_PROJECT_NAME:-}" ] && EMILY_ENV+=(-e "PHOENIX_PROJECT_NAME=$PHOENIX_PROJECT_NAME")
 
 docker run -d \
   --name "$EMILY_CONTAINER" \
@@ -158,6 +160,11 @@ if [ -n "$HERMES_KEY" ]; then
   info "  DiDAL:        Enabled (escalate_remote + dialectical_exchange)"
 else
   warn "  DiDAL:        Disabled (set HERMES_ECOSEEK_API_KEY to enable remote delegation)"
+fi
+if [ -n "${PHOENIX_COLLECTOR_ENDPOINT:-}" ]; then
+  info "  Phoenix:      ${PHOENIX_COLLECTOR_ENDPOINT}  (project: ${PHOENIX_PROJECT_NAME:-ecoseek-didal})"
+else
+  info "  Phoenix:      Disabled (set PHOENIX_COLLECTOR_ENDPOINT to enable tracing)"
 fi
 echo ""
 info "  Open http://localhost:${FRONTEND_PORT} in your browser."
