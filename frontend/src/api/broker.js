@@ -216,6 +216,7 @@ export async function chatCompletion(messages, model = "hermes") {
  *   - onToolCallStart(tool)    — tool call begins {name, id, arguments}
  *   - onToolCallDelta(id, arg) — streamed function arguments
  *   - onToolCallDone(result)   — tool result returned (from non-streaming follow-up)
+ *   - onToolProgress(info)     — tool execution progress {tool, emoji, label, status}
  *   - onDone(fullResponse)     — stream finished
  *   - onError(error)           — stream error
  * @param {string}   model       Model name
@@ -289,6 +290,7 @@ export async function chatCompletionStream(
   let finishReason = null;
   const toolCalls = new Map();
   let doneEmitted = false;
+  let pendingEvent = null; // For multi-line SSE events (event: ... \n data: ...)
 
   try {
     while (true) {
@@ -312,8 +314,25 @@ export async function chatCompletionStream(
               toolCalls: Array.from(toolCalls.values()),
             });
           }
+          pendingEvent = null;
           continue;
         }
+
+        // Handle custom SSE events (event: hermes.tool.progress)
+        if (trimmed.startsWith("event: ")) {
+          pendingEvent = trimmed.slice(7);
+          continue;
+        }
+
+        if (trimmed.startsWith("data: ") && pendingEvent === "hermes.tool.progress") {
+          pendingEvent = null;
+          try {
+            const payload = JSON.parse(trimmed.slice(6));
+            callbacks.onToolProgress?.(payload);
+          } catch { /* ignore parse errors */ }
+          continue;
+        }
+        pendingEvent = null;
 
         if (!trimmed.startsWith("data: ")) continue;
 

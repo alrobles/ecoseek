@@ -54,6 +54,7 @@ function App() {
   const [streamingContent, setStreamingContent] = useState("");
   const [streamingReasoning, setStreamingReasoning] = useState("");
   const [activeToolCalls, setActiveToolCalls] = useState([]);
+  const [toolProgress, setToolProgress] = useState(null); // {tool, emoji, label, status}
   const [didalExchanges, setDidalExchanges] = useState([]);
   const [lastClassification, setLastClassification] = useState(null);
   const [lastProtocolStages, setLastProtocolStages] = useState(null);
@@ -110,6 +111,7 @@ function App() {
       setStreamingContent("");
       setStreamingReasoning("");
       setActiveToolCalls([]);
+      setToolProgress(null);
 
       const history = [...messages, userMsg]
         .filter((m) => m.type === "user" || m.type === "agent")
@@ -157,6 +159,12 @@ function App() {
                 )
               );
             },
+            onToolProgress: (info) => {
+              setToolProgress(info);
+              if (info.status === "completed") {
+                setTimeout(() => setToolProgress(null), 1500);
+              }
+            },
             onDone: (result) => {
               setMessages((prev) => [
                 ...prev,
@@ -174,6 +182,7 @@ function App() {
               ]);
               setStreamingContent("");
               setStreamingReasoning("");
+              setToolProgress(null);
               setActiveToolCalls((prev) => prev.map((tc) => ({ ...tc, status: "done" })));
               setDidalExchanges((prev) =>
                 prev.map((ex) => ({
@@ -444,10 +453,20 @@ function App() {
               <div ref={messagesEndRef} />
             </div>
 
-            {isLoading && !streamingContent && activeToolCalls.length === 0 && (
+            {isLoading && !streamingContent && (
               <div className="loading-animation">
                 <img src={emilyAvatar} alt="Emily" className="emily-avatar" />
-                Emily is thinking...
+                {toolProgress && toolProgress.status === "running" ? (
+                  <span className="tool-progress-label">
+                    {toolProgress.emoji || "🔧"} {toolProgress.label || toolProgress.tool}
+                  </span>
+                ) : activeToolCalls.length > 0 ? (
+                  <span className="tool-progress-label">
+                    🔧 {activeToolCalls[activeToolCalls.length - 1]?.name || "Working"}...
+                  </span>
+                ) : (
+                  "Emily is thinking..."
+                )}
               </div>
             )}
 
