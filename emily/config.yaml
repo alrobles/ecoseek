@@ -9,6 +9,13 @@
 # Remote delegation to Hermes Beta (reumanlab) requires:
 #   HERMES_ECOSEEK_API_KEY → API key for hermes.ecoseek.org
 #
+# Reasoning mode (frontend toggle):
+#   Users can select Fast/Auto/Deep in the UI.
+#   Fast → deepseek-v4-flash, thinking disabled, skips DiDAL (cheapest)
+#   Auto → classifier decides (default)
+#   Deep → deepseek-v4-flash, thinking enabled, full DiDAL protocol
+#   DeepSeek V4 pricing: flash $0.14/M in, $0.28/M out; pro $0.435/M in, $0.87/M out
+#
 # DiDAL Protocol v2 env vars:
 #   DIDAL_ENABLED               → enable/disable DiDAL (default: true)
 #   DIDAL_MAX_CRITIQUE_ROUNDS   → max debate rounds (default: 2)
