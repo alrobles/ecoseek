@@ -44,6 +44,28 @@ if [ -n "${HERMES_REMOTE_MODEL:-}" ]; then
     echo "HERMES_REMOTE_MODEL=${HERMES_REMOTE_MODEL}" >> "$ENV_FILE"
 fi
 
+# DiDAL Protocol v2 configuration
+if [ -n "${DIDAL_ENABLED:-}" ]; then
+    echo "DIDAL_ENABLED=${DIDAL_ENABLED}" >> "$ENV_FILE"
+fi
+if [ -n "${DIDAL_MAX_CRITIQUE_ROUNDS:-}" ]; then
+    echo "DIDAL_MAX_CRITIQUE_ROUNDS=${DIDAL_MAX_CRITIQUE_ROUNDS}" >> "$ENV_FILE"
+fi
+
+# Literature retrieval configuration (BYOK)
+if [ -n "${OPENALEX_MAILTO:-}" ]; then
+    echo "OPENALEX_MAILTO=${OPENALEX_MAILTO}" >> "$ENV_FILE"
+fi
+if [ -n "${S2_API_KEY:-}" ]; then
+    echo "S2_API_KEY=${S2_API_KEY}" >> "$ENV_FILE"
+fi
+if [ -n "${ENTREZ_API_KEY:-}" ]; then
+    echo "ENTREZ_API_KEY=${ENTREZ_API_KEY}" >> "$ENV_FILE"
+fi
+if [ -n "${ENTREZ_EMAIL:-}" ]; then
+    echo "ENTREZ_EMAIL=${ENTREZ_EMAIL}" >> "$ENV_FILE"
+fi
+
 # Legacy broker credentials (kept for backward compatibility)
 if [ -n "${ECOSEEK_BROKER_URL:-}" ]; then
     echo "ECOSEEK_BROKER_URL=${ECOSEEK_BROKER_URL}" >> "$ENV_FILE"

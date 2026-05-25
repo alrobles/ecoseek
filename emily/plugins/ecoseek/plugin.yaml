@@ -1,9 +1,10 @@
 name: ecoseek
-version: "0.5.0"
+version: "1.0.0"
 description: >
-  EcoSeek DiDAL Phase 2 — dialectical dual-agent loop between Emily (Alpha, local)
-  and Hermes (Beta, remote on reumanlab). Escalation, structured debate, and
-  remote status check via hermes.ecoseek.org.
+  EcoSeek DiDAL Protocol v2 — complexity-aware routing with structured dialectical
+  research loop. Classifies prompts (direct/didal/didal_literature), runs asymmetric
+  Alpha↔Beta debate with bounded critique rounds, and produces scientific mini-reports.
+  Includes legacy escalation and exchange tools for backward compatibility.
 author: EcoSeek / alrobles
 requires_env: []
 hooks: []
