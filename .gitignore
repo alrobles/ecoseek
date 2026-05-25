@@ -101,3 +101,6 @@ config.ini
 
 # Workspace directory (shared volume for file transfers)
 workspace/
+
+# Benchmark results (JSON outputs from benchmark runs)
+benchmarks/results/

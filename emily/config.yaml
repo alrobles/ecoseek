@@ -3,7 +3,8 @@
 #
 # LLM provider is configured via environment variables:
 #   DEEPSEEK_API_KEY  → DeepSeek API (default)
-#   OLLAMA_BASE_URL   → local Ollama instance
+#   OLLAMA_BASE_URL   → local Ollama instance (Ollama / LM Studio)
+#   ECOCODER_URL      → EcoCoder-7B via LM Studio or Ollama (OpenAI-compatible)
 #
 # Remote delegation to Hermes Beta (reumanlab) requires:
 #   HERMES_ECOSEEK_API_KEY → API key for hermes.ecoseek.org
@@ -11,6 +12,11 @@
 # DiDAL Protocol v2 env vars:
 #   DIDAL_ENABLED               → enable/disable DiDAL (default: true)
 #   DIDAL_MAX_CRITIQUE_ROUNDS   → max debate rounds (default: 2)
+#
+# EcoCoder-7B (https://huggingface.co/alrobles/EcoCoder-7B):
+#   Domain-specialized ecological LLM (Qwen2.5-Coder-7B + LoRA, GGUF Q4_K_M).
+#   ⚠️  4.5 GB download. Compatible with LM Studio and Ollama.
+#   Set ECOCODER_URL=http://localhost:1234/v1 (LM Studio default) to use it.
 #
 # The entrypoint script (entrypoint.sh) writes ~/.hermes/.env with the
 # appropriate keys before starting the gateway.
@@ -30,6 +36,16 @@ agent:
       base_url: https://api.deepseek.com/v1
       api_mode: chat_completions
       model: deepseek-v4-flash
+    # EcoCoder-7B — domain-specialized ecological LLM
+    # https://huggingface.co/alrobles/EcoCoder-7B (GGUF Q4_K_M, ~4.5 GB)
+    # Base: Qwen2.5-Coder-7B-Instruct + ecological LoRA
+    # Use via LM Studio (localhost:1234) or Ollama:
+    #   ollama run hf.co/alrobles/EcoCoder-7B
+    # Activate with: ECOCODER_URL=http://localhost:1234/v1 bash emily-start.sh
+    ecocoder:
+      base_url: ${ECOCODER_URL:-http://localhost:1234/v1}
+      api_mode: chat_completions
+      model: ecocoder-7b
   personalities:
     emily:
       system_prompt: |
