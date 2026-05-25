@@ -25,9 +25,14 @@ WORKDIR /app
 # Install hermes-agent from the EcoSeek fork.
 # aiohttp is required by the gateway API server adapter but is an optional
 # dependency of hermes-agent (in the "messaging" extras group).
+# OpenTelemetry + OTLP exporter enable Phoenix tracing when
+# PHOENIX_COLLECTOR_ENDPOINT is set (no-op otherwise).
 RUN pip install --no-cache-dir \
     "git+https://github.com/alrobles/hermes-agent.git@main#egg=hermes-agent" \
-    aiohttp
+    aiohttp \
+    opentelemetry-sdk \
+    opentelemetry-exporter-otlp-proto-http \
+    opentelemetry-api
 
 # Create hermes home directory
 RUN mkdir -p /root/.hermes/plugins /root/.hermes/skills /root/.hermes/logs

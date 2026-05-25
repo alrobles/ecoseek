@@ -80,6 +80,8 @@ HERMES_ECOSEEK_API_KEY=agenticplu... DEEPSEEK_API_KEY=sk-... bash emily-start.sh
 | `S2_API_KEY` | *(optional)* | Semantic Scholar key for higher rate limits |
 | `OPENALEX_MAILTO` | `ecoseek@ecoseek.org` | Email for OpenAlex polite pool |
 | `GBIF_LITERATURE_ENABLED` | `true` | Enable GBIF Literature API search |
+| `PHOENIX_COLLECTOR_ENDPOINT` | *(optional)* | Phoenix/OTLP endpoint (e.g. `http://localhost:6006/v1/traces`) |
+| `PHOENIX_PROJECT_NAME` | `ecoseek-didal` | Project name in Phoenix UI |
 
 ## Architecture
 

@@ -149,6 +149,7 @@ function ProtocolStages({ stages }) {
 export function DiDALPanel({
   remoteStatus, isOnline, messages, didalExchanges = [],
   activeToolCalls = [], lastClassification = null, lastProtocolStages = null,
+  lastTraceId = null,
 }) {
   const didalMessages = messages.filter(
     (m) => m.didalPhase || (m.toolCalls && m.toolCalls.length > 0) || (m.content && m.content.includes("Hermes Beta"))
@@ -198,6 +199,14 @@ export function DiDALPanel({
 
       {/* Protocol stages */}
       <ProtocolStages stages={lastProtocolStages} />
+
+      {/* Phoenix trace ID */}
+      {lastTraceId && (
+        <div className="didal-trace-id">
+          <span className="didal-trace-label">🔭 Phoenix Trace</span>
+          <code className="didal-trace-code">{lastTraceId}</code>
+        </div>
+      )}
 
       {/* Live activity */}
       {(runningExchanges.length > 0 || activeToolCalls.length > 0) && (
