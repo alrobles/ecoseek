@@ -107,6 +107,10 @@ agent:
       tone: scientific-yet-approachable
       style: scientific
 
+plugins:
+  enabled:
+    - ecoseek
+
 display:
   personality: emily
   skin: default
