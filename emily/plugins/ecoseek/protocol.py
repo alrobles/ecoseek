@@ -12,8 +12,6 @@ import json
 import logging
 import os
 import time
-import urllib.error
-import urllib.request
 import uuid
 from typing import Optional
 
@@ -76,29 +74,33 @@ def _beta_call(
     context_messages: list[dict] | None = None,
     timeout: int | None = None,
 ) -> dict:
-    """Send a chat completion to Hermes Beta with a specific system prompt."""
+    """Send a chat completion to Hermes Beta with a specific system prompt.
+
+    Uses the Cloudflare-safe HTTP client that falls back to curl when
+    Python's urllib is blocked by Cloudflare Bot Fight Mode (error 1010).
+    """
+    from .http_client import http_post_json
+
     messages = [{"role": "system", "content": system_prompt}]
     if context_messages:
         messages.extend(context_messages)
     messages.append({"role": "user", "content": user_content})
 
     url = f"{_REMOTE_URL}/v1/chat/completions"
-    payload = json.dumps({"model": _MODEL, "messages": messages}).encode("utf-8")
-    headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-    }
+    headers = {}
     if _API_KEY:
         headers["Authorization"] = f"Bearer {_API_KEY}"
 
-    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-    with urllib.request.urlopen(req, timeout=timeout or _TIMEOUT) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
+    data = http_post_json(
+        url,
+        payload={"model": _MODEL, "messages": messages},
+        headers=headers,
+        timeout=timeout or _TIMEOUT,
+    )
 
     content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
     usage = data.get("usage", {})
     model = data.get("model", _MODEL)
-    # Record LLM call on the current span if tracing is active
     record_llm_call({}, model, usage, stage="beta_call")
     return {"content": content, "usage": usage, "model": model}
 

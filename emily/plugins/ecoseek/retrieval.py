@@ -6,6 +6,7 @@ Sources (in priority order):
   2. Semantic Scholar — 200M+ papers, abstracts + citation context
   3. GBIF Literature — biodiversity-specific papers via api.gbif.org
   4. NCBI Entrez / PubMed — BYOK via ENTREZ_API_KEY (optional)
+  5. EcoAgent RAG — GBIF literature + cofid via Hermes → reumanlab tool_server
 
 Each source returns normalized Evidence objects that the protocol can
 inject into the expert draft stage.
@@ -36,6 +37,12 @@ _ENTREZ_API_KEY = os.environ.get("ENTREZ_API_KEY", "")
 _ENTREZ_EMAIL = os.environ.get("ENTREZ_EMAIL", "ecoseek@ecoseek.org")
 _GBIF_LIT_ENABLED = os.environ.get("GBIF_LITERATURE_ENABLED", "true").lower() in ("true", "1", "yes")
 _REQUEST_TIMEOUT = int(os.environ.get("RETRIEVAL_TIMEOUT", "15"))
+
+# EcoAgent RAG backend on reumanlab (accessed via Hermes → eco_analyze)
+_ECOAGENT_ENABLED = os.environ.get("ECOAGENT_ENABLED", "true").lower() in ("true", "1", "yes")
+_HERMES_REMOTE_URL = os.environ.get("HERMES_REMOTE_URL", "https://hermes.ecoseek.org").rstrip("/")
+_HERMES_API_KEY = os.environ.get("HERMES_ECOSEEK_API_KEY", "")
+_ECOAGENT_TIMEOUT = int(os.environ.get("ECOAGENT_RETRIEVAL_TIMEOUT", "30"))
 
 # ---------------------------------------------------------------------------
 # Normalized evidence schema
@@ -414,6 +421,166 @@ def search_entrez(query: str, max_results: int = 5) -> list[Evidence]:
 
 
 # ---------------------------------------------------------------------------
+# EcoAgent RAG backend (via Hermes → eco_analyze on reumanlab)
+# ---------------------------------------------------------------------------
+
+def _ecoagent_available() -> bool:
+    """Return True if we can reach EcoAgent via Hermes."""
+    return bool(_ECOAGENT_ENABLED and _HERMES_REMOTE_URL and _HERMES_API_KEY)
+
+
+def _hermes_eco_analyze(action: str, params: dict, timeout: int = 0) -> dict | None:
+    """Call eco_analyze tool on reumanlab via Hermes chat completion.
+
+    Hermes Beta has the eco_analyze tool which wraps EcoAgent's tool_server
+    at localhost:8200 on reumanlab. We ask Hermes to call it for us.
+
+    Uses the Cloudflare-safe HTTP client (curl fallback) to avoid
+    Cloudflare Bot Fight Mode blocking from inside Docker containers.
+    """
+    from .http_client import http_post_json
+
+    prompt = (
+        f"Use the eco_analyze tool to run action={action!r} with these params: "
+        f"{json.dumps(params, ensure_ascii=False)}. "
+        f"Return the raw JSON result only, no commentary."
+    )
+    payload = {
+        "model": "hermes",
+        "messages": [
+            {"role": "system", "content": "You have the eco_analyze tool. Use it to execute ecological analysis actions on EcoAgent. Return the tool result as-is."},
+            {"role": "user", "content": prompt},
+        ],
+    }
+
+    headers = {"Authorization": f"Bearer {_HERMES_API_KEY}"}
+
+    try:
+        data = http_post_json(
+            f"{_HERMES_REMOTE_URL}/v1/chat/completions",
+            payload,
+            headers,
+            timeout=timeout or _ECOAGENT_TIMEOUT,
+        )
+        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        if not content:
+            return None
+        content = content.strip()
+        if content.startswith("```"):
+            lines = content.split("\n")
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            content = "\n".join(lines)
+        try:
+            return json.loads(content)
+        except (json.JSONDecodeError, ValueError):
+            return {"raw_text": content}
+    except Exception as exc:
+        logger.warning("ecoagent via hermes failed (%s): %s", action, exc)
+        return None
+
+
+def search_ecoagent_literature(query: str, max_results: int = 5) -> list[Evidence]:
+    """Search EcoAgent's GBIF literature + vector store via Hermes.
+
+    Calls two ecoagent tools:
+      1. query_gbif_literature — structured GBIF literature API search
+      2. search_literature — semantic vector search over indexed papers
+
+    Results are merged and returned as Evidence objects.
+    """
+    if not _ecoagent_available():
+        return []
+
+    results: list[Evidence] = []
+
+    # 1. GBIF Literature via EcoAgent (structured, curated)
+    gbif_data = _hermes_eco_analyze(
+        "query_gbif_literature",
+        {"args": {"query": query, "limit": max_results}},
+    )
+    if gbif_data and isinstance(gbif_data, dict):
+        result_text = ""
+        if "result" in gbif_data:
+            r = gbif_data["result"]
+            result_text = r.get("result", "") if isinstance(r, dict) else str(r)
+        elif "raw_text" in gbif_data:
+            result_text = gbif_data["raw_text"]
+
+        # Parse structured results from the text
+        if result_text:
+            for block in result_text.split("\n\n"):
+                block = block.strip()
+                if not block or "Title:" not in block:
+                    continue
+                title = ""
+                year = None
+                doi = ""
+                topics = ""
+                for line in block.split("\n"):
+                    line = line.strip()
+                    if line.startswith("Title:"):
+                        title = line[6:].strip()
+                    elif line.startswith("Year:"):
+                        try:
+                            year = int(line[5:].strip())
+                        except ValueError:
+                            pass
+                    elif line.startswith("DOI:"):
+                        doi = line[4:].strip()
+                    elif line.startswith("Topics:"):
+                        topics = line[7:].strip()
+                if title:
+                    url = f"https://doi.org/{doi}" if doi else ""
+                    results.append(Evidence(
+                        source_type="paper",
+                        title=title,
+                        authors="",
+                        year=year,
+                        url=url,
+                        doi=doi,
+                        abstract=topics,
+                        claim_used_for="",
+                        confidence=0.80,
+                        provider="ecoagent:gbif",
+                    ))
+
+    # 2. Cofid host-parasite interactions (if query is relevant)
+    query_lower = query.lower()
+    cofid_keywords = ("host", "parasite", "parasit", "infection", "pathogen", "cofid", "helminth")
+    if any(kw in query_lower for kw in cofid_keywords):
+        cofid_data = _hermes_eco_analyze(
+            "query_cofid",
+            {"args": {"query": query, "limit": max_results}},
+        )
+        if cofid_data and isinstance(cofid_data, dict):
+            result_text = ""
+            if "result" in cofid_data:
+                r = cofid_data["result"]
+                result_text = r.get("result", "") if isinstance(r, dict) else str(r)
+            elif "raw_text" in cofid_data:
+                result_text = cofid_data["raw_text"]
+            if result_text and len(result_text) > 20:
+                results.append(Evidence(
+                    source_type="web_reference",
+                    title=f"CoFID host-parasite interactions: {query[:60]}",
+                    authors="CoFID Database",
+                    year=2024,
+                    url="https://github.com/alrobles/cofid",
+                    doi="",
+                    abstract=result_text[:500],
+                    claim_used_for="",
+                    confidence=0.85,
+                    provider="ecoagent:cofid",
+                ))
+
+    logger.info("ecoagent search: %d results for '%s'", len(results), query[:60])
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Multi-source retrieval orchestrator
 # ---------------------------------------------------------------------------
 
@@ -537,6 +704,19 @@ def retrieve_literature(
                 errors.append(f"entrez: {exc}")
                 src_ctx["error"] = str(exc)[:200]
                 logger.warning("Entrez search failed: %s", exc)
+
+    # --- Source 5: EcoAgent RAG on reumanlab (via Hermes) ---
+    if _ecoagent_available():
+        with trace_retrieval_source("ecoagent", _tctx, query) as src_ctx:
+            try:
+                results = search_ecoagent_literature(query, max_results=max_per_source)
+                all_evidence.extend(results)
+                provider_stats["ecoagent"] = len(results)
+                src_ctx["results_count"] = len(results)
+            except Exception as exc:
+                errors.append(f"ecoagent: {exc}")
+                src_ctx["error"] = str(exc)[:200]
+                logger.warning("EcoAgent search failed: %s", exc)
 
     # --- Deduplicate by DOI ---
     seen_dois: set[str] = set()

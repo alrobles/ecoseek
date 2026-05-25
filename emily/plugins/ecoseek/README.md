@@ -8,6 +8,7 @@ Emily (Alpha, local) ↔ Hermes (Beta, remote on reumanlab) via `hermes.ecoseek.
 |------|-------------|
 | `didal_protocol` | **Primary tool** — full dialectical research loop with automatic complexity routing |
 | `classify_prompt` | Classify prompt complexity (direct/didal/didal_literature) |
+| `ecoagent_query` | Execute ecological analysis on EcoAgent (reumanlab) — 25 tools: GBIF, SDM, taxonomy, cofid, etc. |
 | `literature_search` | Search the local literature database (cached papers from all retrieval sources) |
 | `hermes_status` | Check if Hermes Beta is available |
 | `escalate_remote` | One-shot delegation to Beta (execution tasks) |
