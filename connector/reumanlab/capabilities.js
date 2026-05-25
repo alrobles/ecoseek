@@ -210,6 +210,192 @@ async function hpcQueue(payload, config, execFn) {
   };
 }
 
+// ── Capability: gbif.query ─────────────────────────────────────────────
+// Bridge to the local GBIF Parquet mirror on KU-HPC.
+// Invokes ~/work/scripts/gbif_query.R inside the gbif-kde.sif Apptainer
+// image over SSH and streams a one-line JSON envelope back.
+//
+// Contract (alrobles/ecoseek#71):
+//   payload.args = {
+//     species_name?: string,
+//     taxon_key?:    integer,
+//     bbox?:         [min_lon, min_lat, max_lon, max_lat],
+//     year_range?:   [start_year, end_year],
+//     limit?:        integer (1..100000)
+//   }
+//   returns: { data: [[lat,lon,species,taxonKey,year,month,basisOfRecord], ...],
+//              error: null | { code, message } }
+
+const GBIF_SPECIES_RE = /^[A-Za-z][A-Za-z .\-']{0,127}$/;
+const GBIF_MAX_LIMIT = 100000;
+const GBIF_DEFAULT_LIMIT = 50000;
+
+function validateGbifArgs(args) {
+  if (!args || typeof args !== "object") {
+    return { ok: false, code: "invalid_spec", message: "args must be an object" };
+  }
+  if (args.species_name !== undefined && args.species_name !== null) {
+    if (typeof args.species_name !== "string" ||
+        args.species_name.length > 128 ||
+        !GBIF_SPECIES_RE.test(args.species_name)) {
+      return {
+        ok: false,
+        code: "invalid_spec",
+        message: "species_name fails allowlist or length check",
+      };
+    }
+  }
+  if (args.taxon_key !== undefined && args.taxon_key !== null) {
+    if (typeof args.taxon_key !== "number" ||
+        !Number.isFinite(args.taxon_key) ||
+        args.taxon_key < 0 || args.taxon_key > 1e12) {
+      return {
+        ok: false,
+        code: "invalid_spec",
+        message: "taxon_key out of range",
+      };
+    }
+  }
+  if (args.year_range !== undefined && args.year_range !== null) {
+    const yr = args.year_range;
+    if (!Array.isArray(yr) || yr.length !== 2 ||
+        yr[0] > yr[1] || yr[0] < 1700 || yr[1] > 2100) {
+      return {
+        ok: false,
+        code: "invalid_spec",
+        message: "year_range must be [low, high] within [1700, 2100]",
+      };
+    }
+  }
+  if (args.bbox !== undefined && args.bbox !== null) {
+    const bb = args.bbox;
+    if (!Array.isArray(bb) || bb.length !== 4 ||
+        bb[0] >= bb[2] || bb[1] >= bb[3]) {
+      return {
+        ok: false,
+        code: "invalid_spec",
+        message: "bbox must be [min_lon, min_lat, max_lon, max_lat]",
+      };
+    }
+  }
+  let limit = args.limit;
+  if (limit === undefined || limit === null) {
+    limit = GBIF_DEFAULT_LIMIT;
+  }
+  if (typeof limit !== "number" || !Number.isInteger(limit) ||
+      limit < 1 || limit > GBIF_MAX_LIMIT) {
+    return {
+      ok: false,
+      code: "row_cap_exceeded",
+      message: `limit must be in [1, ${GBIF_MAX_LIMIT}]`,
+    };
+  }
+
+  // Build the spec object that will be JSON-encoded for the R script.
+  const spec = { limit };
+  if (args.species_name) spec.species_name = args.species_name;
+  if (args.taxon_key !== undefined && args.taxon_key !== null) {
+    spec.taxon_key = args.taxon_key;
+  }
+  if (Array.isArray(args.year_range)) spec.year_range = args.year_range;
+  if (Array.isArray(args.bbox)) spec.bbox = args.bbox;
+  return { ok: true, spec };
+}
+
+async function gbifQuery(payload, config, execFn) {
+  const args = (payload && payload.args) || {};
+  const v = validateGbifArgs(args);
+  if (!v.ok) {
+    return { data: [], error: { code: v.code, message: v.message } };
+  }
+
+  const run = execFn || execBounded;
+
+  // Build the remote command: pipe JSON spec via stdin into a wrapper that
+  // launches Apptainer and Rscript on the cluster. Using `bash -lc` keeps the
+  // login profile (PATH for apptainer, R) and avoids quoting issues — the
+  // payload itself is base64-encoded so shell meta in JSON can't break out.
+  const specJson = JSON.stringify(v.spec);
+  const specB64 = Buffer.from(specJson, "utf8").toString("base64");
+
+  const remoteCmd =
+    "bash -lc " +
+    JSON.stringify(
+      `set -euo pipefail; \
+GBIFDB_DIR='${config.gbifdbDir}' \
+APPTAINER_IMAGE='${config.apptainerImage}' \
+GBIF_QUERY_R='${config.gbifQueryR}' \
+echo '${specB64}' | base64 -d | '${config.gbifRunner}'`
+    );
+
+  let stdout;
+  try {
+    stdout = await run(
+      "ssh",
+      [...sshArgs(config), remoteCmd],
+      {
+        timeoutMs: config.gbifTimeoutMs || 600000,
+        maxOutputBytes: config.gbifMaxOutputBytes || 16 * 1024 * 1024,
+        env: sshEnv(),
+      }
+    );
+  } catch (err) {
+    // Distinguish kill-by-timeout from connection failure where possible
+    if (err && err.killed) {
+      return {
+        data: [],
+        error: {
+          code: "runtime_error",
+          message: "cluster query timed out",
+        },
+      };
+    }
+    return {
+      data: [],
+      error: {
+        code: "cluster_unreachable",
+        message: "ssh to cluster failed",
+      },
+    };
+  }
+
+  // The R script emits the envelope as one JSON object (followed by \n).
+  // Be defensive: take the last non-empty line.
+  const lines = stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+  const payloadLine = lines.length > 0 ? lines[lines.length - 1] : "";
+  let parsed;
+  try {
+    parsed = JSON.parse(payloadLine);
+  } catch (err) {
+    return {
+      data: [],
+      error: {
+        code: "runtime_error",
+        message: "could not parse R script output",
+      },
+    };
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return {
+      data: [],
+      error: {
+        code: "runtime_error",
+        message: "R script returned non-object envelope",
+      },
+    };
+  }
+  if (!("data" in parsed)) {
+    return {
+      data: [],
+      error: {
+        code: "runtime_error",
+        message: "envelope missing data field",
+      },
+    };
+  }
+  return { data: parsed.data || [], error: parsed.error || null };
+}
+
 // ── Capability: hpc.logs.read ──────────────────────────────────────────
 async function hpcLogsRead(payload, config, execFn) {
   const requestedPath = payload.path;
@@ -256,6 +442,7 @@ const READ_CAPABILITIES = new Set([
   "hpc.status",
   "hpc.queue",
   "hpc.logs.read",
+  "gbif.query",
 ]);
 
 const WRITE_CAPABILITIES = new Set([
@@ -328,6 +515,9 @@ async function dispatch(capability, payload, config, execFn) {
       }
       return { status: 200, result: await hpcLogsRead(payload, config, execFn) };
 
+    case "gbif.query":
+      return { status: 200, result: await gbifQuery(payload || {}, config, execFn) };
+
     default:
       return {
         status: 400,
@@ -350,7 +540,12 @@ module.exports = {
   hpcStatus,
   hpcQueue,
   hpcLogsRead,
+  gbifQuery,
+  validateGbifArgs,
   READ_CAPABILITIES,
   WRITE_CAPABILITIES,
   SHELL_META_RE,
+  GBIF_SPECIES_RE,
+  GBIF_MAX_LIMIT,
+  GBIF_DEFAULT_LIMIT,
 };
