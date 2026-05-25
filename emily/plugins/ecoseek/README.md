@@ -8,6 +8,7 @@ Emily (Alpha, local) ↔ Hermes (Beta, remote on reumanlab) via `hermes.ecoseek.
 |------|-------------|
 | `didal_protocol` | **Primary tool** — full dialectical research loop with automatic complexity routing |
 | `classify_prompt` | Classify prompt complexity (direct/didal/didal_literature) |
+| `literature_search` | Search the local literature database (cached papers from all retrieval sources) |
 | `hermes_status` | Check if Hermes Beta is available |
 | `escalate_remote` | One-shot delegation to Beta (execution tasks) |
 | `dialectical_exchange` | Legacy DiDAL exchange (iterative execution tasks) |
@@ -158,6 +159,62 @@ Stats from `policy_signals` table can tune classifier thresholds, round limits, 
 | `DIDAL_WRITEBACK_SCORE_THRESHOLD` | `0.6` | Min judge score to write memory |
 | `DIDAL_JUDGE_ENABLED` | `true` | Enable/disable LLM judge |
 | `DIDAL_JUDGE_TIMEOUT` | `120` | Judge LLM call timeout (seconds) |
+
+## Reasoning Mode Toggle (Fast / Auto / Deep)
+
+The frontend provides a 3-way toggle that controls how Emily processes questions:
+
+| Mode | Frontend Label | Behavior | DeepSeek Cost |
+|------|---------------|----------|---------------|
+| ⚡ **Fast** (Rápido) | `fast` | Skips DiDAL → direct single-call answer | Cheapest ($0.14/M in, $0.28/M out) |
+| 🔄 **Auto** | `auto` | Classifier decides (default) | Varies by complexity |
+| 🧠 **Deep** (Profundo) | `deep` | Forces full DiDAL protocol + literature retrieval | Standard cost, deeper reasoning |
+
+### How It Works
+
+1. User selects mode via toggle button next to the chat input
+2. Frontend injects `[reasoning_mode:fast|deep]` prefix into the message
+3. Emily's `didal_protocol` tool parses the prefix and maps:
+   - `fast` → `direct` mode (skip dialectical loop)
+   - `deep` → `didal_literature` mode (full protocol + evidence retrieval)
+   - `auto` → classifier decides based on prompt complexity score
+4. The `reasoning_effort` parameter is also passed in the API body for DeepSeek V4 thinking mode hints
+
+### DeepSeek V4 Pricing Reference
+
+| Model | Input | Output | Cache Hit |
+|-------|-------|--------|-----------|
+| `deepseek-v4-flash` | $0.14/M | $0.28/M | $0.0028/M |
+| `deepseek-v4-pro` | $0.435/M | $0.87/M | $0.003625/M |
+
+Both support thinking mode toggle (`thinking: {type: "enabled/disabled"}`).
+
+## Literature Database (litdb)
+
+Persistent SQLite cache for retrieved papers. Stores papers from OpenAlex, GBIF Literature, Semantic Scholar, and Entrez so repeated queries hit the local cache instead of the API.
+
+### Features
+
+- **FTS5 full-text search** over titles, abstracts, and authors (Porter stemming + Unicode)
+- **Automatic caching**: `retrieve_literature()` stores API results → subsequent queries are instant
+- **Deduplication** by DOI (with use-count tracking)
+- **`literature_search` tool**: Emily can search the cache directly for quick reference lookups
+- **Persistent**: stored at `~/.ecoseek/didal_memory/literature.db` (Docker volume mount)
+
+### Usage
+
+```python
+from emily.plugins.ecoseek.litdb import search, store_paper, get_stats
+
+# Search cached papers
+results = search("niche modeling MaxEnt", limit=10)
+
+# Store a paper manually
+store_paper(doi="10.1234/test", title="...", provider="openalex")
+
+# Check statistics
+stats = get_stats()  # {'total_papers': 42, 'by_provider': {...}, ...}
+```
 
 ## EcoCoder-7B Integration
 

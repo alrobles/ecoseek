@@ -128,6 +128,18 @@ def classify_prompt_tool(prompt: str, task_id: Optional[str] = None) -> str:
 # Tool: didal_protocol — full dialectical research loop
 # ---------------------------------------------------------------------------
 
+_REASONING_MODE_RE = __import__("re").compile(
+    r"^\[reasoning_mode:(fast|deep|auto)\]\s*", __import__("re").IGNORECASE
+)
+
+# Map frontend reasoning toggle to DiDAL modes
+_REASONING_MODE_MAP = {
+    "fast": "direct",           # skip DiDAL, quick answer
+    "deep": "didal_literature", # force full protocol + evidence retrieval
+    # "auto" → let classifier decide (no override)
+}
+
+
 def didal_protocol_tool(
     prompt: str,
     mode: str = "",
@@ -143,13 +155,27 @@ def didal_protocol_tool(
     mode : str, optional
         Force a specific mode: "direct", "didal", or "didal_literature".
         If empty, the classifier decides automatically.
+        The frontend may inject [reasoning_mode:fast|deep|auto] prefix
+        to override the classifier based on the user's toggle choice.
     max_rounds : int, optional
         Max critique-revise rounds (default: DIDAL_MAX_CRITIQUE_ROUNDS env or 2).
     """
+    # Parse reasoning mode injected by the frontend toggle
+    clean_prompt = prompt
+    frontend_mode = None
+    m = _REASONING_MODE_RE.match(prompt)
+    if m:
+        frontend_mode = m.group(1).lower()
+        clean_prompt = prompt[m.end():]
+        logger.info("reasoning_mode override from frontend: %s", frontend_mode)
+
+    # Priority: explicit mode param > frontend toggle > classifier auto
+    effective_mode = mode or _REASONING_MODE_MAP.get(frontend_mode or "", "") or None
+
     from .protocol import run_didal_protocol
     return run_didal_protocol(
-        prompt=prompt,
-        force_mode=mode or None,
+        prompt=clean_prompt,
+        force_mode=effective_mode or None,
         max_rounds=max_rounds,
         task_id=task_id,
     )
@@ -535,6 +561,68 @@ ESCALATE_REMOTE_SCHEMA = {
     },
 }
 
+LITERATURE_SEARCH_SCHEMA = {
+    "name": "literature_search",
+    "description": (
+        "Search the local literature database for scientific papers. "
+        "Returns cached papers from OpenAlex, GBIF Literature, Semantic Scholar, "
+        "and Entrez/PubMed. Use this for quick reference lookups without running "
+        "the full DiDAL protocol."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Search query (scientific terms, species names, methods).",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum number of results (default: 10).",
+            },
+        },
+        "required": ["query"],
+    },
+}
+
+
+def literature_search_tool(
+    query: str,
+    limit: int = 10,
+    task_id: Optional[str] = None,
+) -> str:
+    """Search the local literature cache and optionally fetch from APIs."""
+    from .litdb import search as litdb_search, get_stats
+
+    results = litdb_search(query, limit=limit)
+
+    # If no cache results, try a quick API fetch
+    if not results:
+        try:
+            from .retrieval import retrieve_literature
+            lit = retrieve_literature(query=query, tier="A", max_per_source=3)
+            # After retrieve_literature, results should be cached now
+            results = litdb_search(query, limit=limit)
+            if not results:
+                # Convert directly from API results
+                results = lit.get("sources", [])[:limit]
+        except Exception as exc:
+            logger.warning("literature_search API fallback failed: %s", exc)
+
+    stats = {}
+    try:
+        stats = get_stats()
+    except Exception:
+        pass
+
+    return json.dumps({
+        "success": True,
+        "results": results,
+        "count": len(results),
+        "cache_stats": stats,
+    }, ensure_ascii=False)
+
+
 DIALECTICAL_EXCHANGE_SCHEMA = {
     "name": "dialectical_exchange",
     "description": (
@@ -630,7 +718,19 @@ def register(ctx) -> None:
         check_fn=_is_configured,
     )
 
-    n = 5 if _is_configured() else 2
+    ctx.register_tool(
+        name="literature_search",
+        toolset="ecoseek",
+        schema=LITERATURE_SEARCH_SCHEMA,
+        handler=lambda args, **kw: literature_search_tool(
+            query=args.get("query", ""),
+            limit=args.get("limit", 10),
+            task_id=kw.get("task_id"),
+        ),
+        check_fn=lambda: True,
+    )
+
+    n = 6 if _is_configured() else 3
     logger.info(
         "ecoseek plugin registered: %d tools, remote=%s configured=%s didal=v2",
         n, _REMOTE_URL, _is_configured(),
@@ -700,6 +800,18 @@ try:
             task_id=kw.get("task_id"),
         ),
         check_fn=_is_configured,
+        requires_env=[],
+    )
+    registry.register(
+        name="literature_search",
+        toolset="ecoseek",
+        schema=LITERATURE_SEARCH_SCHEMA,
+        handler=lambda args, **kw: literature_search_tool(
+            query=args.get("query", ""),
+            limit=args.get("limit", 10),
+            task_id=kw.get("task_id"),
+        ),
+        check_fn=lambda: True,
         requires_env=[],
     )
 except ImportError:

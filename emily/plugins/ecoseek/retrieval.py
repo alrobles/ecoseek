@@ -451,6 +451,29 @@ def retrieve_literature(
     provider_stats: dict[str, int] = {}
     errors: list[str] = []
 
+    # --- Check local literature cache first ---
+    try:
+        from .litdb import search as litdb_search
+        cached = litdb_search(query, limit=max_per_source * 2)
+        for paper in cached:
+            all_evidence.append(Evidence(
+                source_type=paper.get("source_type", "paper"),
+                title=paper.get("title", ""),
+                authors=paper.get("authors", ""),
+                year=paper.get("year"),
+                url=paper.get("url", ""),
+                doi=paper.get("doi", ""),
+                abstract=paper.get("abstract", ""),
+                claim_used_for="",
+                confidence=paper.get("confidence", 0.7),
+                provider=f"cache:{paper.get('provider', '')}",
+            ))
+        if cached:
+            provider_stats["cache"] = len(cached)
+            logger.info("litdb cache hit: %d papers for query '%s'", len(cached), query[:60])
+    except Exception as exc:
+        logger.debug("litdb cache miss or error: %s", exc)
+
     # Build search queries
     queries = [query]
     if subquestions and tier == "B":
@@ -537,6 +560,21 @@ def retrieve_literature(
 
     # Sort by confidence (highest first)
     unique_evidence.sort(key=lambda e: e.confidence, reverse=True)
+
+    # --- Store new API results in local literature cache ---
+    try:
+        from .litdb import store_many
+        api_papers = [
+            evidence_to_dict(e)
+            for e in unique_evidence
+            if not e.provider.startswith("cache:")
+        ]
+        if api_papers:
+            stored = store_many(api_papers)
+            if stored:
+                logger.info("litdb cached %d new papers", stored)
+    except Exception as exc:
+        logger.debug("litdb store failed: %s", exc)
 
     # Ensure we have at least some diversity of source types
     # Protocol spec: at least 1 contrast/critique source when available
