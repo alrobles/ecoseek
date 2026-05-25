@@ -37,6 +37,17 @@ function load(env) {
     allowedPaths,
     commandTimeoutMs: parseInt(env.COMMAND_TIMEOUT_MS || "30000", 10),
     maxOutputBytes: parseInt(env.MAX_OUTPUT_BYTES || "1048576", 10),
+    // gbif.query capability — see capabilities.js
+    gbifdbDir: env.GBIFDB_DIR ||
+      "/home/a474r867/work/gbifdata/gbif_effort/gbifdata",
+    apptainerImage: env.GBIF_APPTAINER_IMAGE ||
+      "/home/a474r867/work/gbifdata/gbif_effort/container/gbif-kde.sif",
+    gbifQueryR: env.GBIF_QUERY_R ||
+      "/home/a474r867/work/scripts/gbif_query.R",
+    gbifRunner: env.GBIF_RUNNER ||
+      "/home/a474r867/work/scripts/run_gbif_query.sh",
+    gbifTimeoutMs: parseInt(env.GBIF_TIMEOUT_MS || "600000", 10),
+    gbifMaxOutputBytes: parseInt(env.GBIF_MAX_OUTPUT_BYTES || "16777216", 10),
   };
 }
 
@@ -63,6 +74,16 @@ function validate(env) {
       allowedPaths,
       commandTimeoutMs: parseInt(env.COMMAND_TIMEOUT_MS || "30000", 10),
       maxOutputBytes: parseInt(env.MAX_OUTPUT_BYTES || "1048576", 10),
+      gbifdbDir: env.GBIFDB_DIR ||
+        "/home/a474r867/work/gbifdata/gbif_effort/gbifdata",
+      apptainerImage: env.GBIF_APPTAINER_IMAGE ||
+        "/home/a474r867/work/gbifdata/gbif_effort/container/gbif-kde.sif",
+      gbifQueryR: env.GBIF_QUERY_R ||
+        "/home/a474r867/work/scripts/gbif_query.R",
+      gbifRunner: env.GBIF_RUNNER ||
+        "/home/a474r867/work/scripts/run_gbif_query.sh",
+      gbifTimeoutMs: parseInt(env.GBIF_TIMEOUT_MS || "600000", 10),
+      gbifMaxOutputBytes: parseInt(env.GBIF_MAX_OUTPUT_BYTES || "16777216", 10),
     },
   };
 }
