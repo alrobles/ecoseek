@@ -555,6 +555,17 @@ body {
   flex-shrink: 0;
 }
 
+.tool-progress-label {
+  animation: pulse-fade 1.5s ease-in-out infinite;
+  font-weight: 500;
+  color: var(--primary);
+}
+
+@keyframes pulse-fade {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 .input-form {
   display: flex;
   align-items: center;

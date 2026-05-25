@@ -5,12 +5,16 @@ Implements the full DiDAL pipeline:
 
 The orchestrator sends each stage to Hermes Beta (hermes.ecoseek.org) with
 stage-specific system prompts, then assembles the final mini-report.
+
+Progress logging: each stage emits a logger.info message with a stage tag
+so that gateway/CLI consumers can show real-time progress.
 """
 from __future__ import annotations
 
 import json
 import logging
 import os
+import sys
 import time
 import uuid
 from typing import Optional
@@ -62,6 +66,21 @@ _MAX_CRITIQUE_ROUNDS = int(os.environ.get("DIDAL_MAX_CRITIQUE_ROUNDS", "2"))
 
 def _is_configured() -> bool:
     return bool(_REMOTE_URL and _API_KEY)
+
+
+def _emit_progress(stage: str, detail: str = "") -> None:
+    """Emit a progress message for the current protocol stage.
+
+    These messages are logged at INFO level and also printed to stdout
+    so that gateway consumers (TUI, API server) can surface them to the
+    user during long-running tool calls.
+    """
+    msg = f"[DiDAL] {stage}"
+    if detail:
+        msg += f" — {detail}"
+    logger.info(msg)
+    # Print to stdout for gateway tool-progress display
+    print(msg, flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -471,6 +490,7 @@ def run_didal_protocol(
     # --- Stage 0: Classify ---
     with trace_protocol(protocol_id, prompt, force_mode or "auto") as tctx:
 
+        _emit_progress("Classifying", "analyzing question complexity")
         with trace_stage("classification", tctx, agent_role="system") as sctx:
             classify_result = _stage_classify(prompt)
             stages.append(classify_result)
@@ -482,6 +502,10 @@ def run_didal_protocol(
         classification["mode"] = mode  # update for report
         tctx["mode"] = mode
 
+        _emit_progress(
+            "Classified",
+            f"mode={mode}, score={classification['complexity_score']:.2f}",
+        )
         logger.info(
             "didal[%s] classified: mode=%s score=%.2f reasons=%s",
             protocol_id, mode, classification["complexity_score"],
@@ -490,6 +514,7 @@ def run_didal_protocol(
 
         # --- Direct mode: skip dialectical loop ---
         if mode == "direct":
+            _emit_progress("Direct", "fast answer mode")
             with trace_stage("direct_answer", tctx, agent_role="backend_expert") as sctx:
                 direct_result = _stage_direct(prompt)
                 stages.append(direct_result)
@@ -517,6 +542,7 @@ def run_didal_protocol(
         # Memory read: recall relevant context before framing
         memory_context = []
         if is_memory_enabled():
+            _emit_progress("Memory", "recalling relevant context")
             with trace_stage("memory.read", tctx, agent_role="system") as sctx:
                 with memory_read_stage(prompt, classification) as mctx:
                     memory_context = mctx.get("memories", [])
@@ -527,6 +553,7 @@ def run_didal_protocol(
                     })
 
         # Stage 1: Frame task
+        _emit_progress("Framing", "structuring the research question")
         with trace_stage("frontend.frame_task", tctx, agent_role="frontend_naive") as sctx:
             frame_result = _stage_frame_task(prompt, classification)
             stages.append(frame_result)
@@ -537,6 +564,7 @@ def run_didal_protocol(
         # Stage 2: Retrieve evidence (only for didal_literature)
         evidence = None
         if mode == "didal_literature":
+            _emit_progress("Retrieving", "searching literature databases")
             with trace_stage("backend.retrieve", tctx, agent_role="backend_expert",
                              question_type=task_object.get("task_type", "unknown")) as sctx:
                 retrieve_result = _stage_retrieve(task_object, classification)
@@ -546,8 +574,10 @@ def run_didal_protocol(
                 n_sources = len(evidence.get("sources", [])) if isinstance(evidence, dict) else 0
                 sctx["retrieved_sources"] = n_sources
                 tctx["total_sources"] = n_sources
+                _emit_progress("Retrieved", f"{n_sources} sources found")
 
         # Stage 3: Expert draft
+        _emit_progress("Drafting", "writing expert synthesis")
         with trace_stage("backend.synthesize_draft", tctx, agent_role="backend_expert") as sctx:
             draft_result = _stage_expert_draft(task_object, evidence)
             stages.append(draft_result)
@@ -560,6 +590,7 @@ def run_didal_protocol(
         rounds = 0
         for round_idx in range(effective_max_rounds):
             # Stage 4: Naive critique
+            _emit_progress("Critiquing", f"peer review round {round_idx + 1}")
             with trace_stage("frontend.critique", tctx, agent_role="frontend_naive",
                              round_index=round_idx + 1) as sctx:
                 critique_result = _stage_critique(current_draft, task_object)
@@ -581,6 +612,7 @@ def run_didal_protocol(
                 break
 
             # Stage 5: Revision
+            _emit_progress("Revising", f"improving draft (round {round_idx + 1})")
             with trace_stage("backend.revise", tctx, agent_role="backend_expert",
                              round_index=round_idx + 1) as sctx:
                 revision_result = _stage_revise(current_draft, critique, task_object)
@@ -594,12 +626,14 @@ def run_didal_protocol(
         tctx["critique_rounds"] = rounds
 
         # Stage 6: Assemble final report
+        _emit_progress("Finalizing", "assembling mini-report")
         with trace_stage("finalize_report", tctx, agent_role="system") as sctx:
             report = _assemble_report(
                 prompt, classification, task_object, current_draft, evidence, rounds,
             )
 
         # Stage 7: Judge — score the final answer
+        _emit_progress("Judging", "scoring answer quality")
         judge_result = {"overall_score": 0.0, "verdict": "unknown"}
         with trace_stage("judge.score", tctx, agent_role="judge") as sctx:
             try:
@@ -625,6 +659,7 @@ def run_didal_protocol(
 
         # Stage 8: Memory write — persist useful knowledge
         if is_memory_enabled():
+            _emit_progress("Saving", "persisting to memory")
             with trace_stage("memory.write", tctx, agent_role="system") as sctx:
                 elapsed_so_far = round(time.time() - start_time, 1)
                 write_result = {
@@ -653,6 +688,7 @@ def run_didal_protocol(
                     })
 
         elapsed = round(time.time() - start_time, 1)
+        _emit_progress("Complete", f"finished in {elapsed}s")
 
         result = {
             "success": True,
