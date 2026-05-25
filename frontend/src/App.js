@@ -499,15 +499,15 @@ function App() {
               {rightPanelTab === "terminal" && (
                 <div className="terminal-panel">
                   <iframe
-                    src="http://localhost:8000"
+                    src="http://localhost:8001"
                     title="Local Terminal"
                     className="terminal-iframe"
                     sandbox="allow-scripts allow-same-origin allow-forms"
                   />
                   <div className="terminal-fallback">
-                    <p>Terminal runs on <code>localhost:8000</code> via ttyd.</p>
+                    <p>Terminal runs on <code>localhost:8001</code> via ttyd.</p>
                     <p>Start with: <code>bash emily-start.sh</code> (includes terminal container).</p>
-                    <p>Or manually: <code>docker run -d --name ecoseek-terminal -p 8000:7681 tsl0922/ttyd:latest bash</code></p>
+                    <p>Or manually: <code>docker run -d --name ecoseek-terminal -p 8001:7681 tsl0922/ttyd:latest bash</code></p>
                   </div>
                 </div>
               )}
