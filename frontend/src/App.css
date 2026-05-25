@@ -633,6 +633,60 @@ body {
   background-color: #dc2626;
 }
 
+/* --- Reasoning Mode Toggle --- */
+.reasoning-toggle {
+  display: flex;
+  gap: 2px;
+  background-color: var(--muted);
+  border-radius: 16px;
+  padding: 2px;
+  flex-shrink: 0;
+}
+
+.reasoning-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-family: inherit;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.reasoning-btn:hover:not(:disabled) {
+  color: var(--foreground);
+  background-color: var(--card);
+}
+
+.reasoning-btn.active {
+  background-color: var(--card);
+  color: var(--foreground);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  font-weight: 600;
+}
+
+.reasoning-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.reasoning-icon {
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.reasoning-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
 .view-selector {
   display: flex;
   gap: 0.25rem;
@@ -839,6 +893,14 @@ body {
     width: 36px;
     height: 36px;
   }
+
+  .reasoning-label {
+    display: none;
+  }
+
+  .reasoning-btn {
+    padding: 4px 8px;
+  }
 }
 
 @media (max-width: 480px) {
@@ -887,6 +949,14 @@ body {
   .input-form .icon-button.stop-button {
     width: 34px;
     height: 34px;
+  }
+
+  .reasoning-toggle {
+    order: 2;
+  }
+
+  .input-form {
+    flex-wrap: wrap;
   }
 }
 

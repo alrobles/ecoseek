@@ -91,6 +91,11 @@ EMILY_ENV+=(-e "HERMES_REMOTE_URL=$HERMES_URL")
 [ -n "${DIDAL_MEMORY_ENABLED:-}" ] && EMILY_ENV+=(-e "DIDAL_MEMORY_ENABLED=$DIDAL_MEMORY_ENABLED")
 [ -n "${DIDAL_JUDGE_ENABLED:-}" ] && EMILY_ENV+=(-e "DIDAL_JUDGE_ENABLED=$DIDAL_JUDGE_ENABLED")
 [ -n "${DIDAL_WRITEBACK_SCORE_THRESHOLD:-}" ] && EMILY_ENV+=(-e "DIDAL_WRITEBACK_SCORE_THRESHOLD=$DIDAL_WRITEBACK_SCORE_THRESHOLD")
+# Literature retrieval BYOK keys
+[ -n "${ENTREZ_API_KEY:-}" ] && EMILY_ENV+=(-e "ENTREZ_API_KEY=$ENTREZ_API_KEY")
+[ -n "${ENTREZ_EMAIL:-}" ] && EMILY_ENV+=(-e "ENTREZ_EMAIL=$ENTREZ_EMAIL")
+[ -n "${S2_API_KEY:-}" ] && EMILY_ENV+=(-e "S2_API_KEY=$S2_API_KEY")
+[ -n "${OPENALEX_MAILTO:-}" ] && EMILY_ENV+=(-e "OPENALEX_MAILTO=$OPENALEX_MAILTO")
 
 # Memory persistence: mount host directory for SQLite DB survival across container restarts
 MEMORY_DIR="${DIDAL_MEMORY_DIR:-$HOME/.ecoseek/didal_memory}"
@@ -177,6 +182,7 @@ else
   info "  Phoenix:      Disabled (set PHOENIX_COLLECTOR_ENDPOINT to enable tracing)"
 fi
 info "  Memory:       ${MEMORY_DIR}  (judge: ${DIDAL_JUDGE_ENABLED:-true})"
+info "  LitDB:        ${MEMORY_DIR}/literature.db  (cached papers)"
 echo ""
 info "  Open http://localhost:${FRONTEND_PORT} in your browser."
 info "  Sign in with GitHub to start chatting with Emily."
