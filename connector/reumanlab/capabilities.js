@@ -226,7 +226,11 @@ async function hpcQueue(payload, config, execFn) {
 //   returns: { data: [[lat,lon,species,taxonKey,year,month,basisOfRecord], ...],
 //              error: null | { code, message } }
 
-const GBIF_SPECIES_RE = /^[A-Za-z][A-Za-z .\-']{0,127}$/;
+// Place `-` at the end of the bracket class so it's a literal across all
+// regex engines (POSIX/TRE rejects \- inside []; JS/PCRE accept both forms).
+// Kept in sync with knowledgebase/hpc-scripts/gbif-query/gbif_query.R and
+// ecoagent/src/ecoagent/gbif_cluster.py.
+const GBIF_SPECIES_RE = /^[A-Za-z][A-Za-z .'-]{0,127}$/;
 const GBIF_MAX_LIMIT = 100000;
 const GBIF_DEFAULT_LIMIT = 50000;
 
