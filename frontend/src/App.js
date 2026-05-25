@@ -60,6 +60,7 @@ function App() {
   const [lastProtocolStages, setLastProtocolStages] = useState(null);
   const [lastTraceId, setLastTraceId] = useState(null);
   const [lastJudgeResult, setLastJudgeResult] = useState(null);
+  const [lastHermesTrace, setLastHermesTrace] = useState(null);
   const [reasoningMode, setReasoningMode] = useState("auto"); // "fast" | "deep" | "auto"
   const messagesEndRef = useRef(null);
   const abortRef = useRef(null);
@@ -164,6 +165,9 @@ function App() {
               if (info.status === "completed") {
                 setTimeout(() => setToolProgress(null), 1500);
               }
+            },
+            onTrace: (trace) => {
+              setLastHermesTrace(trace);
             },
             onDone: (result) => {
               setMessages((prev) => [
@@ -471,7 +475,7 @@ function App() {
             )}
 
             <form onSubmit={handleSubmit} className="input-form">
-              <div className="reasoning-toggle" title="Reasoning mode: Fast skips deep analysis, Deep forces full DiDAL, Auto lets the classifier decide">
+              <div className="reasoning-toggle" title="Reasoning mode: Fast (hermes-fast) skips agent loop for sub-second answers, Deep (hermes-reasoner) enables thinking mode, Auto (hermes-agent) uses full agentic loop">
                 {[
                   { key: "fast", label: "Rapido", icon: "\u26A1" },
                   { key: "auto", label: "Auto", icon: "\uD83D\uDD04" },
@@ -690,6 +694,44 @@ function App() {
                     </div>
                   )}
                 </div>
+
+                {lastHermesTrace && (
+                  <div className="info-section">
+                    <h3>Hermes Trace</h3>
+                    {lastHermesTrace.agent_loop && (
+                      <>
+                        <div className="info-row">
+                          <span className="info-label">Iterations</span>
+                          <span className="info-value">{lastHermesTrace.agent_loop.iterations}</span>
+                        </div>
+                        <div className="info-row">
+                          <span className="info-label">Total</span>
+                          <span className="info-value">{lastHermesTrace.agent_loop.total_ms}ms</span>
+                        </div>
+                        {lastHermesTrace.agent_loop.llm_calls?.length > 0 && (
+                          <div className="info-row">
+                            <span className="info-label">LLM Calls</span>
+                            <span className="info-value">{lastHermesTrace.agent_loop.llm_calls.length}</span>
+                          </div>
+                        )}
+                        {lastHermesTrace.agent_loop.tool_calls?.length > 0 && (
+                          <div className="info-row">
+                            <span className="info-label">Tools</span>
+                            <span className="info-value info-tools">
+                              {lastHermesTrace.agent_loop.tool_calls.map(tc => tc.name).join(", ")}
+                            </span>
+                          </div>
+                        )}
+                      </>
+                    )}
+                    {lastHermesTrace.gateway && (
+                      <div className="info-row">
+                        <span className="info-label">Gateway</span>
+                        <span className="info-value">{lastHermesTrace.gateway.version || "active"}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {error && (
                   <div className="info-section error-section">

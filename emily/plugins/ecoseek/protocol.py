@@ -11,6 +11,7 @@ so that gateway/CLI consumers can show real-time progress.
 """
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import os
@@ -58,10 +59,15 @@ _REMOTE_URL = os.environ.get(
     "HERMES_REMOTE_URL", "https://hermes.ecoseek.org"
 ).rstrip("/")
 _API_KEY = os.environ.get("HERMES_ECOSEEK_API_KEY", "")
-_MODEL = os.environ.get("HERMES_REMOTE_MODEL", "hermes")
+_MODEL = os.environ.get("HERMES_REMOTE_MODEL", "hermes-agent")
 _TIMEOUT = int(os.environ.get("HERMES_REMOTE_TIMEOUT", "300"))
 _DIDAL_ENABLED = os.environ.get("DIDAL_ENABLED", "true").lower() in ("true", "1", "yes")
 _MAX_CRITIQUE_ROUNDS = int(os.environ.get("DIDAL_MAX_CRITIQUE_ROUNDS", "2"))
+
+# Per-request model override (set by run_didal_protocol, read by _beta_call)
+_request_model: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "_request_model", default=None
+)
 
 
 def _is_configured() -> bool:
@@ -92,11 +98,20 @@ def _beta_call(
     user_content: str,
     context_messages: list[dict] | None = None,
     timeout: int | None = None,
+    model: str | None = None,
+    trace: bool = True,
 ) -> dict:
     """Send a chat completion to Hermes Beta with a specific system prompt.
 
     Uses the Cloudflare-safe HTTP client that falls back to curl when
     Python's urllib is blocked by Cloudflare Bot Fight Mode (error 1010).
+
+    Parameters
+    ----------
+    model : str, optional
+        Override the Hermes model (hermes-fast, hermes-reasoner, hermes-agent).
+    trace : bool
+        Request hermes_trace telemetry (default True).
     """
     from .http_client import http_post_json
 
@@ -110,18 +125,31 @@ def _beta_call(
     if _API_KEY:
         headers["Authorization"] = f"Bearer {_API_KEY}"
 
+    effective_model = model or _request_model.get() or _MODEL
+    payload: dict = {"model": effective_model, "messages": messages}
+    if trace:
+        payload["hermes"] = {"trace": True}
+
     data = http_post_json(
         url,
-        payload={"model": _MODEL, "messages": messages},
+        payload=payload,
         headers=headers,
         timeout=timeout or _TIMEOUT,
     )
 
     content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
     usage = data.get("usage", {})
-    model = data.get("model", _MODEL)
-    record_llm_call({}, model, usage, stage="beta_call")
-    return {"content": content, "usage": usage, "model": model}
+    resp_model = data.get("model", effective_model)
+    hermes_trace = data.get("hermes_trace")
+    cached_tokens = (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
+    record_llm_call({}, resp_model, usage, stage="beta_call")
+    return {
+        "content": content,
+        "usage": usage,
+        "model": resp_model,
+        "hermes_trace": hermes_trace,
+        "cached_tokens": cached_tokens,
+    }
 
 
 def _parse_json_response(content: str) -> dict | None:
@@ -446,6 +474,7 @@ def run_didal_protocol(
     force_mode: str | None = None,
     max_rounds: int = 0,
     task_id: str | None = None,
+    model_override: str | None = None,
 ) -> str:
     """Run the full DiDAL protocol on a user prompt.
 
@@ -459,6 +488,8 @@ def run_didal_protocol(
         Override max critique rounds (default: DIDAL_MAX_CRITIQUE_ROUNDS env).
     task_id : str, optional
         Session/task identifier for tracing.
+    model_override : str, optional
+        Hermes model alias (hermes-fast, hermes-reasoner, hermes-agent).
 
     Returns
     -------
@@ -480,12 +511,20 @@ def run_didal_protocol(
     effective_max_rounds = max_rounds if max_rounds > 0 else _MAX_CRITIQUE_ROUNDS
     stages: list[dict] = []
     total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    all_cached_tokens = 0
     start_time = time.time()
 
+    # Set per-request model override for all _beta_call invocations
+    _model_token = _request_model.set(model_override)
+
     def _track_usage(stage_data: dict):
+        nonlocal all_cached_tokens
         usage = stage_data.get("usage", {})
         for k in total_usage:
             total_usage[k] += usage.get(k, 0)
+        ct = stage_data.get("cached_tokens")
+        if ct:
+            all_cached_tokens += ct
 
     # --- Stage 0: Classify ---
     with trace_protocol(protocol_id, prompt, force_mode or "auto") as tctx:
@@ -521,6 +560,7 @@ def run_didal_protocol(
                 _track_usage(direct_result)
                 sctx["tokens_used"] = direct_result.get("usage", {}).get("total_tokens", 0)
 
+            _request_model.reset(_model_token)
             elapsed = round(time.time() - start_time, 1)
             result = {
                 "success": True,
@@ -530,6 +570,8 @@ def run_didal_protocol(
                 "content": direct_result["content"],
                 "stages": stages,
                 "total_usage": total_usage,
+                "cached_tokens": all_cached_tokens,
+                "hermes_model": model_override or _MODEL,
                 "elapsed_seconds": elapsed,
                 "source": "hermes.ecoseek.org",
             }
@@ -687,6 +729,7 @@ def run_didal_protocol(
                         "fitness": mctx.get("fitness"),
                     })
 
+        _request_model.reset(_model_token)
         elapsed = round(time.time() - start_time, 1)
         _emit_progress("Complete", f"finished in {elapsed}s")
 
@@ -707,6 +750,8 @@ def run_didal_protocol(
             },
             "stages": stages,
             "total_usage": total_usage,
+            "cached_tokens": all_cached_tokens,
+            "hermes_model": model_override or _MODEL,
             "elapsed_seconds": elapsed,
             "source": "hermes.ecoseek.org",
         }
