@@ -31,6 +31,12 @@ if [ -n "${OLLAMA_BASE_URL:-}" ]; then
     echo "[emily] Ollama configured at ${OLLAMA_BASE_URL}"
 fi
 
+# EcoCoder-7B via LM Studio or Ollama (OpenAI-compatible endpoint)
+if [ -n "${ECOCODER_URL:-}" ]; then
+    echo "ECOCODER_URL=${ECOCODER_URL}" >> "$ENV_FILE"
+    echo "[emily] EcoCoder-7B configured at ${ECOCODER_URL}"
+fi
+
 # Hermes remote credentials (for DiDAL escalation to hermes.ecoseek.org)
 if [ -n "${HERMES_ECOSEEK_API_KEY:-}" ]; then
     echo "HERMES_ECOSEEK_API_KEY=${HERMES_ECOSEEK_API_KEY}" >> "$ENV_FILE"
@@ -114,9 +120,9 @@ if [ -n "${API_SERVER_CORS_ORIGINS:-}" ]; then
 fi
 
 # Validate: at least one LLM backend must be configured
-if [ -z "${DEEPSEEK_API_KEY:-}" ] && [ -z "${OLLAMA_BASE_URL:-}" ]; then
+if [ -z "${DEEPSEEK_API_KEY:-}" ] && [ -z "${OLLAMA_BASE_URL:-}" ] && [ -z "${ECOCODER_URL:-}" ]; then
     echo "[emily] WARNING: No LLM backend configured!"
-    echo "[emily] Set DEEPSEEK_API_KEY or OLLAMA_BASE_URL."
+    echo "[emily] Set DEEPSEEK_API_KEY, OLLAMA_BASE_URL, or ECOCODER_URL."
     echo "[emily] Emily will start but cannot generate responses."
 fi
 
