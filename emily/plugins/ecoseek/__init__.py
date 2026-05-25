@@ -45,7 +45,9 @@ _REMOTE_URL = os.environ.get(
     "HERMES_REMOTE_URL", "https://hermes.ecoseek.org"
 ).rstrip("/")
 _API_KEY = os.environ.get("HERMES_ECOSEEK_API_KEY", "")
-_MODEL = os.environ.get("HERMES_REMOTE_MODEL", "hermes")
+_MODEL = os.environ.get("HERMES_REMOTE_MODEL", "hermes-agent")
+_MODEL_FAST = os.environ.get("HERMES_FAST_MODEL", "hermes-fast")
+_MODEL_REASONER = os.environ.get("HERMES_REASONER_MODEL", "hermes-reasoner")
 _TIMEOUT = int(os.environ.get("HERMES_REMOTE_TIMEOUT", "300"))
 _MAX_TURNS = int(os.environ.get("DIDAL_MAX_TURNS", "12"))
 _STUCK_THRESHOLD = int(os.environ.get("DIDAL_STUCK_THRESHOLD", "3"))
@@ -140,9 +142,16 @@ _REASONING_MODE_RE = __import__("re").compile(
 
 # Map frontend reasoning toggle to DiDAL modes
 _REASONING_MODE_MAP = {
-    "fast": "direct",           # skip DiDAL, quick answer
+    "fast": "direct",           # skip DiDAL, quick answer via hermes-fast
     "deep": "didal_literature", # force full protocol + evidence retrieval
     # "auto" → let classifier decide (no override)
+}
+
+# Map frontend reasoning toggle to Hermes model aliases
+_REASONING_MODEL_MAP = {
+    "fast": _MODEL_FAST,         # hermes-fast: bypass agent loop, sub-second TTFT
+    "deep": _MODEL_REASONER,     # hermes-reasoner: bypass + thinking mode
+    # "auto" / None → _MODEL (hermes-agent: full agentic loop)
 }
 
 
@@ -178,12 +187,16 @@ def didal_protocol_tool(
     # Priority: explicit mode param > frontend toggle > classifier auto
     effective_mode = mode or _REASONING_MODE_MAP.get(frontend_mode or "", "") or None
 
+    # Select Hermes model based on reasoning mode
+    effective_model = _REASONING_MODEL_MAP.get(frontend_mode or "", _MODEL)
+
     from .protocol import run_didal_protocol
     return run_didal_protocol(
         prompt=clean_prompt,
         force_mode=effective_mode or None,
         max_rounds=max_rounds,
         task_id=task_id,
+        model_override=effective_model,
     )
 
 
