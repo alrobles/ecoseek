@@ -6,6 +6,16 @@ const TOOL_META = {
     icon: "🔍",
     color: "#6366f1",
   },
+  classify_prompt: {
+    label: "Classifying Complexity",
+    icon: "📊",
+    color: "#8b5cf6",
+  },
+  didal_protocol: {
+    label: "DiDAL Protocol",
+    icon: "🔬",
+    color: "#ef4444",
+  },
   escalate_remote: {
     label: "Delegating to Hermes Beta",
     icon: "🚀",
@@ -87,6 +97,18 @@ export function ToolCallCard({ toolCall, status = "running" }) {
             <div className="tool-arg">
               <span className="tool-arg-key">Action:</span>
               <span className="tool-arg-value">{args.action}</span>
+            </div>
+          )}
+          {args.prompt && (
+            <div className="tool-arg">
+              <span className="tool-arg-key">Prompt:</span>
+              <span className="tool-arg-value">{args.prompt.substring(0, 200)}{args.prompt.length > 200 ? "..." : ""}</span>
+            </div>
+          )}
+          {args.mode && (
+            <div className="tool-arg">
+              <span className="tool-arg-key">Mode:</span>
+              <span className={`tool-arg-value mode-${args.mode}`}>{args.mode}</span>
             </div>
           )}
         </div>

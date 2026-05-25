@@ -75,11 +75,81 @@ const TOOL_LABELS = {
   hermes_status: "Status Check",
   escalate_remote: "Remote Delegation",
   dialectical_exchange: "DiDAL Exchange",
+  didal_protocol: "DiDAL Protocol",
+  classify_prompt: "Classify Prompt",
   eco_analyze: "Ecological Analysis",
   ku_hpc: "HPC Job",
 };
 
-export function DiDALPanel({ remoteStatus, isOnline, messages, didalExchanges = [], activeToolCalls = [] }) {
+const MODE_CONFIG = {
+  direct: { label: "Direct", color: "#6366f1", icon: "⚡", desc: "Fast single-call answer" },
+  didal: { label: "DiDAL", color: "#f59e0b", icon: "🔬", desc: "Dialectical loop with structured debate" },
+  didal_literature: { label: "DiDAL + Literature", color: "#ef4444", icon: "📚", desc: "Evidence-backed synthesis with retrieval" },
+};
+
+function ClassificationBadge({ classification }) {
+  if (!classification) return null;
+  const cfg = MODE_CONFIG[classification.mode] || MODE_CONFIG.direct;
+  const score = classification.complexity_score ?? 0;
+  const pct = Math.round(score * 100);
+  return (
+    <div className="didal-classification" style={{ "--mode-color": cfg.color }}>
+      <div className="didal-class-header">
+        <span className="didal-class-icon">{cfg.icon}</span>
+        <span className="didal-class-mode">{cfg.label}</span>
+        <span className="didal-class-score">{pct}%</span>
+      </div>
+      <div className="didal-class-bar">
+        <div className="didal-class-fill" style={{ width: `${pct}%` }} />
+        <div className="didal-class-threshold didal-thresh-25" />
+        <div className="didal-class-threshold didal-thresh-60" />
+      </div>
+      <div className="didal-class-labels">
+        <span>Direct</span>
+        <span>DiDAL</span>
+        <span>Literature</span>
+      </div>
+      {classification.reasons && classification.reasons.length > 0 && (
+        <div className="didal-class-reasons">
+          {classification.reasons.slice(0, 3).map((r, i) => (
+            <span key={i} className="didal-reason-chip">{r.split(":")[0]}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProtocolStages({ stages }) {
+  if (!stages || stages.length === 0) return null;
+  const stageNames = {
+    classify: "Classify",
+    frame_task: "Frame Task",
+    retrieve_evidence: "Retrieve Evidence",
+    expert_draft: "Expert Draft",
+    naive_critique: "Naive Critique",
+    revision: "Revision",
+    direct_answer: "Direct Answer",
+  };
+  return (
+    <div className="didal-stages">
+      <h4>Protocol Stages</h4>
+      <div className="didal-stage-flow">
+        {stages.map((s, i) => (
+          <div key={i} className={`didal-stage-chip ${s.error ? "stage-error" : "stage-ok"}`}>
+            <span className="stage-num">{i + 1}</span>
+            <span className="stage-name">{stageNames[s.stage] || s.stage}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function DiDALPanel({
+  remoteStatus, isOnline, messages, didalExchanges = [],
+  activeToolCalls = [], lastClassification = null, lastProtocolStages = null,
+}) {
   const didalMessages = messages.filter(
     (m) => m.didalPhase || (m.toolCalls && m.toolCalls.length > 0) || (m.content && m.content.includes("Hermes Beta"))
   );
@@ -115,13 +185,19 @@ export function DiDALPanel({ remoteStatus, isOnline, messages, didalExchanges = 
       </div>
 
       <div className="didal-info">
-        <h4>DiDAL Phase 4 — Streaming</h4>
+        <h4>DiDAL Protocol v2 — Complexity-Aware Routing</h4>
         <p>
           {remoteStatus
-            ? "Real-time streaming with tool call visualization. Emily delegates heavy tasks to Hermes Beta on reumanlab."
-            : "Hermes Beta is not connected. Emily will work locally without remote validation."}
+            ? "Automatic classification routes questions to the right mode: Direct (fast), DiDAL (debate), or Literature (evidence-backed)."
+            : "Hermes Beta is not connected. Emily will work locally without dialectical validation."}
         </p>
       </div>
+
+      {/* Last classification result */}
+      <ClassificationBadge classification={lastClassification} />
+
+      {/* Protocol stages */}
+      <ProtocolStages stages={lastProtocolStages} />
 
       {/* Live activity */}
       {(runningExchanges.length > 0 || activeToolCalls.length > 0) && (
@@ -133,7 +209,10 @@ export function DiDALPanel({ remoteStatus, isOnline, messages, didalExchanges = 
           {activeToolCalls.map((tc, i) => (
             <div key={tc.id || i} className="didal-live-entry">
               <span className="didal-live-icon">
-                {tc.name === "escalate_remote" ? "🚀" : tc.name === "dialectical_exchange" ? "⚡" : "🔧"}
+                {tc.name === "didal_protocol" ? "🔬"
+                  : tc.name === "escalate_remote" ? "🚀"
+                  : tc.name === "dialectical_exchange" ? "⚡"
+                  : "🔧"}
               </span>
               <span className="didal-live-text">
                 {TOOL_LABELS[tc.name] || tc.name}
@@ -154,6 +233,7 @@ export function DiDALPanel({ remoteStatus, isOnline, messages, didalExchanges = 
                 {ex.status === "done" ? "✓" : ex.status === "error" ? "✗" : "…"}
               </span>
               <span className="didal-log-tool">{TOOL_LABELS[ex.tool] || ex.tool}</span>
+              {ex.mode && <span className="didal-log-mode">{ex.mode}</span>}
               {ex.completedAt && (
                 <span className="didal-log-time">
                   {new Date(ex.completedAt).toLocaleTimeString()}
@@ -174,9 +254,9 @@ export function DiDALPanel({ remoteStatus, isOnline, messages, didalExchanges = 
 
       {remoteStatus && (
         <div className="didal-tools">
-          <h4>Available Remote Tools</h4>
+          <h4>Available Tools</h4>
           <div className="didal-tool-grid">
-            {["eco_analyze", "ku_hpc", "escalate_remote", "dialectical_exchange"].map((tool) => (
+            {["didal_protocol", "classify_prompt", "escalate_remote", "dialectical_exchange", "eco_analyze", "ku_hpc"].map((tool) => (
               <div key={tool} className="didal-tool-chip">{tool}</div>
             ))}
           </div>
