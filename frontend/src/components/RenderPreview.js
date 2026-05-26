@@ -1,37 +1,17 @@
 import React, { useMemo, useRef, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
-import "katex/dist/katex.min.css";
-
-/**
- * Normalize LaTeX notation so remarkMath/KaTeX can parse it.
- * LLMs often return \[...\] and \(...\) which remarkMath doesn't handle.
- * Also handles bare [ ... ] display math (single line starting with [).
- */
-function normalizeMath(text) {
-  if (!text) return text;
-  // \[...\] → $$...$$  (display math)
-  let out = text.replace(/\\\[([\s\S]*?)\\\]/g, (_, body) => `$$${body.trim()}$$`);
-  // \(...\) → $...$  (inline math)
-  out = out.replace(/\\\(([\s\S]*?)\\\)/g, (_, body) => `$${body.trim()}$`);
-  // Bare [ ... ] on its own line containing LaTeX commands → $$...$$
-  out = out.replace(/^\[\s*((?:[^[\]]*\\[a-zA-Z]+[^[\]]*)+)\s*\]$/gm, (_, body) => `$$${body.trim()}$$`);
-  return out;
-}
+import { MathJax } from "better-react-mathjax";
 
 function downloadPdf(contentEl) {
   if (!contentEl) return;
   const printWin = window.open("", "_blank", "width=800,height=600");
   if (!printWin) return;
-  // Gather KaTeX stylesheet links from the host page
-  const katexLinks = Array.from(document.querySelectorAll('link[href*="katex"]'))
-    .map((l) => l.outerHTML)
-    .join("\n");
+  // Include MathJax for PDF rendering
+  const mathjaxScript = '<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>';
   printWin.document.write(`<!DOCTYPE html><html><head>
     <meta charset="utf-8"/>
     <title>EcoSeek Report</title>
-    ${katexLinks}
+    ${mathjaxScript}
     <style>
       body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 2rem; max-width: 800px; margin: 0 auto; color: #1e293b; line-height: 1.7; }
       h1 { font-size: 1.6rem; border-bottom: 2px solid #10b981; padding-bottom: 0.4rem; }
@@ -67,7 +47,7 @@ export function RenderPreview({ messages, streamingContent = "", isLoading = fal
         }
       }
     }
-    return normalizeMath(raw);
+    return raw;
   }, [messages, streamingContent, isLoading]);
 
   const handleDownloadPdf = useCallback(() => {
@@ -108,9 +88,8 @@ export function RenderPreview({ messages, streamingContent = "", isLoading = fal
           </div>
         ) : (
           <div className="output-markdown">
+            <MathJax>
             <ReactMarkdown
-              remarkPlugins={[remarkMath]}
-              rehypePlugins={[rehypeKatex]}
               components={{
                 code({ node, inline, className, children, ...props }) {
                   if (inline) {
@@ -131,6 +110,7 @@ export function RenderPreview({ messages, streamingContent = "", isLoading = fal
             >
               {latestAgentContent}
             </ReactMarkdown>
+            </MathJax>
           </div>
         )}
       </div>

@@ -159,9 +159,20 @@ Output Formatting (IMPORTANT):
   - Inline math: $E = mc^2$, $N_t = N_0 e^{rt}$
   - Display math: $$\\frac{dN}{dt} = rN\\left(1 - \\frac{N}{K}\\right)$$
   - Shannon diversity: $H' = -\\sum p_i \\ln p_i$
-- The frontend renders LaTeX with KaTeX. Use it for ANY equation, formula, or statistical notation.
+- The frontend renders LaTeX with MathJax v3. Use it for ANY equation, formula, or statistical notation.
+  - Supported: \\begin{cases}, \\begin{aligned}, \\begin{equation}, \\begin{pmatrix}, etc.
 
 Always introduce yourself as Emily on the first interaction. Keep responses focused and scientifically rigorous.`;
+
+// Minimal prompt for FAST mode — no tool instructions, no DiDAL protocol.
+// Used when Local Emily + FAST toggle: bypasses the agent loop entirely
+// so the LLM responds in a single turn without calling any tools.
+const EMILY_FAST_PROMPT = `You are Emily, an expert ecological scientist and AI assistant for EcoSeek.
+FAST MODE: Respond directly and concisely. Do NOT call any tools.
+
+Your specialties: ecological niche modeling, SDMs, GBIF data, phylogenetics, population ecology, R/Python for ecology.
+Use Markdown formatting. For math, use LaTeX: $inline$ and $$display$$.
+Keep answers focused and scientifically rigorous.`;
 
 // ── Chat completions ───────────────────────────────────────────────────
 
@@ -236,13 +247,28 @@ export async function chatCompletionStream(
   // Extract reasoning mode from callbacks (set by frontend toggle)
   const reasoningMode = callbacks.reasoningMode || "auto";
 
-  const fullMessages = IS_LOCAL_EMILY
-    ? messages
-    : [{ role: "system", content: EMILY_SYSTEM_PROMPT }, ...messages];
+  // FAST mode bypass: skip agent loop entirely for instant responses.
+  // Instead of entering Emily's multi-turn agent loop (classify → status →
+  // didal_protocol → Hermes remote), send a single LLM call with no tools.
+  const isFastBypass = reasoningMode === "fast" && IS_LOCAL_EMILY;
+
+  let fullMessages;
+  if (isFastBypass) {
+    // Minimal system prompt — no tool instructions, no DiDAL protocol.
+    // This prevents the agent from entering the multi-turn tool dispatch loop.
+    fullMessages = [
+      { role: "system", content: EMILY_FAST_PROMPT },
+      ...messages,
+    ];
+  } else if (IS_LOCAL_EMILY) {
+    fullMessages = messages;
+  } else {
+    fullMessages = [{ role: "system", content: EMILY_SYSTEM_PROMPT }, ...messages];
+  }
 
   // Inject reasoning mode as metadata in the last user message
-  // so Emily's plugin can read it and route accordingly
-  if (reasoningMode !== "auto" && fullMessages.length > 0) {
+  // so Emily's plugin can read it and route accordingly (AUTO/DEEP modes)
+  if (!isFastBypass && reasoningMode !== "auto" && fullMessages.length > 0) {
     const last = fullMessages[fullMessages.length - 1];
     if (last.role === "user") {
       fullMessages[fullMessages.length - 1] = {
@@ -255,12 +281,14 @@ export async function chatCompletionStream(
   const authToken = IS_LOCAL_EMILY && EMILY_KEY ? EMILY_KEY : sid;
 
   // Route to Hermes model based on reasoning mode toggle.
-  // hermes-fast:  bypass agent loop, sub-second TTFT
+  // hermes-fast:  bypass agent loop, sub-second TTFT (~3s)
   // hermes-reasoner: bypass + thinking mode (reasoning_content in deltas)
   // hermes-agent (default): full agentic loop with tools/memory
   let effectiveModel = model;
-  if (IS_LOCAL_EMILY) {
-    // Local Emily handles routing via DiDAL — keep model as-is
+  if (isFastBypass) {
+    // Local Emily FAST: hermes-fast bypasses the agent loop (PR hermes-agent#10)
+    effectiveModel = "hermes-fast";
+  } else if (IS_LOCAL_EMILY) {
     effectiveModel = model;
   } else if (reasoningMode === "fast") {
     effectiveModel = "hermes-fast";
