@@ -72,6 +72,39 @@ CREATE TRIGGER IF NOT EXISTS papers_au AFTER UPDATE ON papers BEGIN
     VALUES (new.id, new.title, new.abstract, new.authors);
 END;
 
+-- User-uploaded documents (PDFs, etc.)
+CREATE TABLE IF NOT EXISTS user_papers (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename    TEXT NOT NULL,
+    title       TEXT DEFAULT '',
+    authors     TEXT DEFAULT '',
+    year        INTEGER,
+    abstract    TEXT DEFAULT '',
+    full_text   TEXT DEFAULT '',
+    num_pages   INTEGER DEFAULT 0,
+    num_tokens  INTEGER DEFAULT 0,
+    file_hash   TEXT UNIQUE,
+    created_at  REAL NOT NULL
+);
+
+-- FTS5 for user-uploaded documents
+CREATE VIRTUAL TABLE IF NOT EXISTS user_papers_fts USING fts5(
+    title, abstract, full_text, authors,
+    content='user_papers',
+    content_rowid='id',
+    tokenize='porter unicode61'
+);
+
+CREATE TRIGGER IF NOT EXISTS user_papers_ai AFTER INSERT ON user_papers BEGIN
+    INSERT INTO user_papers_fts(rowid, title, abstract, full_text, authors)
+    VALUES (new.id, new.title, new.abstract, new.full_text, new.authors);
+END;
+
+CREATE TRIGGER IF NOT EXISTS user_papers_ad AFTER DELETE ON user_papers BEGIN
+    INSERT INTO user_papers_fts(user_papers_fts, rowid, title, abstract, full_text, authors)
+    VALUES ('delete', old.id, old.title, old.abstract, old.full_text, old.authors);
+END;
+
 -- Statistics table for cache monitoring
 CREATE TABLE IF NOT EXISTS lit_stats (
     key   TEXT PRIMARY KEY,
@@ -256,6 +289,156 @@ def _fts_query(query: str) -> str:
     if not terms:
         return query
     return " OR ".join(terms)
+
+
+# ---------------------------------------------------------------------------
+# User-uploaded documents (PDFs)
+# ---------------------------------------------------------------------------
+
+def ingest_document(
+    filename: str,
+    full_text: str,
+    title: str = "",
+    authors: str = "",
+    year: int | None = None,
+    abstract: str = "",
+    num_pages: int = 0,
+) -> dict:
+    """Ingest a user-uploaded document into the local FTS5 index.
+
+    Parameters
+    ----------
+    filename : str
+        Original filename (e.g., "smith_2023_niche.pdf").
+    full_text : str
+        Extracted text content from the document.
+    title : str
+        Paper title (auto-detected from first line if empty).
+    authors, year, abstract : str/int
+        Optional metadata.
+    num_pages : int
+        Number of pages in the source document.
+
+    Returns
+    -------
+    dict
+        Ingest result with id, num_tokens, and status.
+    """
+    import hashlib
+
+    if not full_text.strip():
+        return {"success": False, "error": "empty_document"}
+
+    file_hash = hashlib.sha256(full_text.encode("utf-8")).hexdigest()[:32]
+    num_tokens = len(full_text.split())
+
+    if not title:
+        first_line = full_text.strip().split("\n")[0][:200]
+        title = first_line
+
+    if not abstract and len(full_text) > 500:
+        abstract = full_text[:500]
+
+    now = time.time()
+
+    with _connect() as conn:
+        existing = conn.execute(
+            "SELECT id FROM user_papers WHERE file_hash = ?", (file_hash,)
+        ).fetchone()
+        if existing:
+            return {
+                "success": True,
+                "status": "already_indexed",
+                "id": existing["id"],
+                "filename": filename,
+            }
+
+        cursor = conn.execute(
+            """INSERT INTO user_papers
+               (filename, title, authors, year, abstract, full_text,
+                num_pages, num_tokens, file_hash, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (filename, title, authors, year, abstract[:2000],
+             full_text[:50000], num_pages, num_tokens, file_hash, now),
+        )
+        doc_id = cursor.lastrowid
+
+    logger.info("Ingested user document '%s': %d tokens, %d pages", filename, num_tokens, num_pages)
+    return {
+        "success": True,
+        "status": "indexed",
+        "id": doc_id,
+        "filename": filename,
+        "title": title[:100],
+        "num_pages": num_pages,
+        "num_tokens": num_tokens,
+    }
+
+
+def search_user_papers(query: str, limit: int = 5) -> list[dict]:
+    """Search user-uploaded documents via FTS5."""
+    if not query.strip():
+        return []
+
+    with _connect() as conn:
+        try:
+            rows = conn.execute(
+                """SELECT p.*, rank
+                   FROM user_papers_fts f
+                   JOIN user_papers p ON p.id = f.rowid
+                   WHERE user_papers_fts MATCH ?
+                   ORDER BY rank
+                   LIMIT ?""",
+                (_fts_query(query), limit),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            like = f"%{query}%"
+            rows = conn.execute(
+                """SELECT *, 0 as rank FROM user_papers
+                   WHERE title LIKE ? OR full_text LIKE ?
+                   ORDER BY created_at DESC
+                   LIMIT ?""",
+                (like, like, limit),
+            ).fetchall()
+
+    results = []
+    for row in rows:
+        text = row["full_text"] or ""
+        snippet = ""
+        lower_q = query.lower()
+        idx = text.lower().find(lower_q)
+        if idx >= 0:
+            start = max(0, idx - 100)
+            end = min(len(text), idx + len(query) + 200)
+            snippet = text[start:end]
+        elif text:
+            snippet = text[:300]
+
+        results.append({
+            "id": row["id"],
+            "filename": row["filename"],
+            "title": row["title"],
+            "authors": row["authors"],
+            "year": row["year"],
+            "snippet": snippet,
+            "num_pages": row["num_pages"],
+            "num_tokens": row["num_tokens"],
+            "source_type": "user_upload",
+            "provider": "user_upload",
+            "confidence": 0.9,
+        })
+
+    return results
+
+
+def get_user_paper_stats() -> dict:
+    """Return stats about user-uploaded documents."""
+    with _connect() as conn:
+        total = conn.execute("SELECT COUNT(*) as n FROM user_papers").fetchone()["n"]
+        total_tokens = conn.execute(
+            "SELECT COALESCE(SUM(num_tokens), 0) as n FROM user_papers"
+        ).fetchone()["n"]
+    return {"total_documents": total, "total_tokens": total_tokens}
 
 
 # Auto-initialize on import

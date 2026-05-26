@@ -32,7 +32,8 @@ RUN pip install --no-cache-dir \
     aiohttp \
     opentelemetry-sdk \
     opentelemetry-exporter-otlp-proto-http \
-    opentelemetry-api
+    opentelemetry-api \
+    pdfplumber
 
 # Create hermes home directory
 RUN mkdir -p /root/.hermes/plugins /root/.hermes/skills /root/.hermes/logs
