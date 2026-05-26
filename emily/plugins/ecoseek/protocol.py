@@ -60,10 +60,15 @@ _REMOTE_URL = os.environ.get(
     "HERMES_REMOTE_URL", "https://hermes.ecoseek.org"
 ).rstrip("/")
 _API_KEY = os.environ.get("HERMES_ECOSEEK_API_KEY", "")
-_MODEL = os.environ.get("HERMES_REMOTE_MODEL", "hermes-agent")
-_TIMEOUT = int(os.environ.get("HERMES_REMOTE_TIMEOUT", "300"))
+_MODEL = os.environ.get("HERMES_REMOTE_MODEL", "hermes-fast")
+_TIMEOUT = int(os.environ.get("HERMES_REMOTE_TIMEOUT", "60"))
 _DIDAL_ENABLED = os.environ.get("DIDAL_ENABLED", "true").lower() in ("true", "1", "yes")
-_MAX_CRITIQUE_ROUNDS = int(os.environ.get("DIDAL_MAX_CRITIQUE_ROUNDS", "2"))
+_MAX_CRITIQUE_ROUNDS = int(os.environ.get("DIDAL_MAX_CRITIQUE_ROUNDS", "1"))
+
+# Model routing: hermes-fast for text generation, hermes-agent only when tools needed
+_FAST_MODEL = os.environ.get("HERMES_FAST_MODEL", "hermes-fast")
+_AGENT_MODEL = os.environ.get("HERMES_AGENT_MODEL", "hermes-agent")
+_STAGE_TIMEOUT = int(os.environ.get("DIDAL_STAGE_TIMEOUT", "45"))
 
 # Per-request model override (set by run_didal_protocol, read by _beta_call)
 _request_model: contextvars.ContextVar[str | None] = contextvars.ContextVar(
@@ -126,7 +131,9 @@ def _beta_call(
     if _API_KEY:
         headers["Authorization"] = f"Bearer {_API_KEY}"
 
-    effective_model = model or _request_model.get() or _MODEL
+    # Priority: request-level override (deep/fast mode) > per-stage model > default
+    req_override = _request_model.get()
+    effective_model = req_override or model or _MODEL
     payload: dict = {"model": effective_model, "messages": messages}
     if trace:
         payload["hermes"] = {"trace": True}
@@ -218,7 +225,7 @@ def _stage_frame_task(prompt: str, classification: dict) -> dict:
         f"score={classification['complexity_score']}"
     )
     try:
-        result = _beta_call(FRAME_TASK_PROMPT, context)
+        result = _beta_call(FRAME_TASK_PROMPT, context, model=_FAST_MODEL, timeout=_STAGE_TIMEOUT)
         task_obj = _parse_json_response(result["content"])
         return {
             "stage": "frame_task",
@@ -280,7 +287,8 @@ def _stage_retrieve(task_object: dict, classification: dict) -> dict:
             result = _beta_call(
                 f"{BETA_EXPERT_SYSTEM}\n\n{RETRIEVE_EVIDENCE_PROMPT}",
                 context,
-                timeout=120,
+                timeout=_STAGE_TIMEOUT,
+                model=_FAST_MODEL,
             )
             beta_analysis = _parse_json_response(result["content"])
             usage = result["usage"]
@@ -310,7 +318,8 @@ def _stage_retrieve(task_object: dict, classification: dict) -> dict:
             result = _beta_call(
                 f"{BETA_EXPERT_SYSTEM}\n\n{RETRIEVE_EVIDENCE_PROMPT}",
                 context,
-                timeout=120,
+                timeout=_STAGE_TIMEOUT,
+                model=_FAST_MODEL,
             )
             evidence = _parse_json_response(result["content"])
             return {
@@ -338,6 +347,8 @@ def _stage_expert_draft(task_object: dict, evidence: dict | None) -> dict:
         result = _beta_call(
             f"{BETA_EXPERT_SYSTEM}\n\n{EXPERT_DRAFT_PROMPT}",
             "\n".join(context_parts),
+            model=_FAST_MODEL,
+            timeout=_STAGE_TIMEOUT,
         )
         draft = _parse_json_response(result["content"])
         return {
@@ -364,6 +375,8 @@ def _stage_critique(draft: dict, task_object: dict) -> dict:
         result = _beta_call(
             f"{BETA_NAIVE_SYSTEM}\n\n{NAIVE_CRITIQUE_PROMPT}",
             context,
+            model=_FAST_MODEL,
+            timeout=_STAGE_TIMEOUT,
         )
         critique = _parse_json_response(result["content"])
         return {
@@ -395,6 +408,8 @@ def _stage_revise(draft: dict, critique: dict, task_object: dict) -> dict:
         result = _beta_call(
             f"{BETA_EXPERT_SYSTEM}\n\n{REVISION_PROMPT}",
             context,
+            model=_FAST_MODEL,
+            timeout=_STAGE_TIMEOUT,
         )
         revised = _parse_json_response(result["content"])
         return {
@@ -414,7 +429,7 @@ def _stage_revise(draft: dict, critique: dict, task_object: dict) -> dict:
 def _stage_direct(prompt: str) -> dict:
     """Direct mode: simple one-shot answer without dialectical loop."""
     try:
-        result = _beta_call(DIRECT_MODE_PROMPT, prompt)
+        result = _beta_call(DIRECT_MODE_PROMPT, prompt, model=_FAST_MODEL, timeout=_STAGE_TIMEOUT)
         return {
             "stage": "direct_answer",
             "content": result["content"],
