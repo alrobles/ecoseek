@@ -380,6 +380,8 @@ services:
       context: ./frontend
       args:
         REACT_APP_BROKER_URL: "${REACT_APP_BROKER_URL:-https://broker.ecoseek.org}"
+        REACT_APP_EMILY_URL: "${REACT_APP_EMILY_URL:-}"
+        REACT_APP_EMILY_KEY: "${REACT_APP_EMILY_KEY:-${EMILY_API_KEY:-emily-local-key}}"
     container_name: ecoseek-frontend
     profiles: ["frontend"]
     ports:
@@ -457,6 +459,13 @@ services:
       API_SERVER_KEY: "${EMILY_API_KEY:-emily-local-key}"
       API_SERVER_CORS_ORIGINS: "http://localhost:4000,http://localhost:3001,http://127.0.0.1:4000"
       R_WORKSPACE_URL: "http://r-workspace:8787"
+      # Hermes remote (DiDAL escalation + fast/deep modes)
+      HERMES_ECOSEEK_API_KEY: "${HERMES_ECOSEEK_API_KEY:-}"
+      HERMES_REMOTE_URL: "${HERMES_REMOTE_URL:-https://hermes.ecoseek.org}"
+      HERMES_REMOTE_MODEL: "${HERMES_REMOTE_MODEL:-hermes-fast}"
+      HERMES_FAST_MODEL: "${HERMES_FAST_MODEL:-hermes-fast}"
+      DIDAL_ENABLED: "${DIDAL_ENABLED:-true}"
+      DIDAL_MAX_CRITIQUE_ROUNDS: "${DIDAL_MAX_CRITIQUE_ROUNDS:-1}"
     volumes:
       - emily-data:/root/.hermes
       - r-workspace-data:/workspace

@@ -78,12 +78,18 @@ def _post_once(
                 raise ValueError("Empty response body from server")
             return json.loads(raw)
     except urllib.error.HTTPError as exc:
+        err_body = ""
+        try:
+            err_body = exc.read().decode("utf-8", errors="replace")[:500]
+        except Exception:
+            pass
+        if exc.code == 401:
+            logger.error("HTTP 401 Unauthorized from %s: %s", url[:80], err_body[:200])
+            raise RuntimeError(
+                f"Authentication failed (HTTP 401). Check HERMES_ECOSEEK_API_KEY. "
+                f"Server: {err_body[:100]}"
+            ) from exc
         if exc.code == 403:
-            err_body = ""
-            try:
-                err_body = exc.read().decode("utf-8", errors="replace")[:500]
-            except Exception:
-                pass
             if "1010" in err_body or "cloudflare" in err_body.lower() or not err_body.strip():
                 logger.info("urllib blocked by Cloudflare (1010), falling back to curl")
                 return _curl_post(url, payload, hdrs, timeout)
@@ -149,6 +155,11 @@ def _curl_post(url: str, payload: dict, headers: dict, timeout: int) -> dict:
     body = lines[0] if len(lines) == 2 else stdout
     status = int(lines[1]) if len(lines) == 2 and lines[1].isdigit() else 0
 
+    if status == 401:
+        raise RuntimeError(
+            f"Authentication failed (HTTP 401). Check HERMES_ECOSEEK_API_KEY. "
+            f"Server: {body[:100]}"
+        )
     if status >= 500:
         raise RuntimeError(f"curl POST got HTTP {status}: {body[:200]}")
     if not body.strip():
