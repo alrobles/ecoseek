@@ -50,7 +50,7 @@ function App() {
   const [isOnline, setIsOnline] = useState(false);
   const [remoteStatus, setRemoteStatus] = useState(null);
   const [expandedReasoning, setExpandedReasoning] = useState(new Set());
-  const [rightPanelTab, setRightPanelTab] = useState("preview");
+  const [rightPanelTab, setRightPanelTab] = useState("output");
   const [streamingContent, setStreamingContent] = useState("");
   const [streamingReasoning, setStreamingReasoning] = useState("");
   const [activeToolCalls, setActiveToolCalls] = useState([]);
@@ -477,9 +477,9 @@ function App() {
             <form onSubmit={handleSubmit} className="input-form">
               <div className="reasoning-toggle" title="Reasoning mode: Fast (hermes-fast) skips agent loop for sub-second answers, Deep (hermes-reasoner) enables thinking mode, Auto (hermes-agent) uses full agentic loop">
                 {[
-                  { key: "fast", label: "Rapido", icon: "\u26A1" },
+                  { key: "fast", label: "Fast", icon: "\u26A1" },
                   { key: "auto", label: "Auto", icon: "\uD83D\uDD04" },
-                  { key: "deep", label: "Profundo", icon: "\uD83E\uDDE0" },
+                  { key: "deep", label: "Deep", icon: "\uD83E\uDDE0" },
                 ].map(({ key, label, icon }) => (
                   <button
                     key={key}
@@ -529,10 +529,10 @@ function App() {
           <div className="computer-section">
             <div className="panel-tabs">
               <button
-                className={`panel-tab ${rightPanelTab === "preview" ? "active" : ""}`}
-                onClick={() => setRightPanelTab("preview")}
+                className={`panel-tab ${rightPanelTab === "output" ? "active" : ""}`}
+                onClick={() => setRightPanelTab("output")}
               >
-                Preview
+                Output
               </button>
               <button
                 className={`panel-tab ${rightPanelTab === "terminal" ? "active" : ""}`}
@@ -561,8 +561,8 @@ function App() {
               </button>
             </div>
             <div className="content">
-              {rightPanelTab === "preview" && (
-                <RenderPreview messages={messages} />
+              {rightPanelTab === "output" && (
+                <RenderPreview messages={messages} streamingContent={streamingContent} isLoading={isLoading} />
               )}
               {rightPanelTab === "terminal" && (
                 <div className="terminal-panel">
