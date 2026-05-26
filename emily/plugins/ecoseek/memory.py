@@ -15,6 +15,7 @@ Writeback policy — only write when:
 
 All reads/writes are auditable via Phoenix trace spans.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -38,7 +39,9 @@ _MEMORY_DIR = os.environ.get(
     os.path.join(os.path.expanduser("~"), ".hermes", "didal_memory"),
 )
 _MEMORY_ENABLED = os.environ.get("DIDAL_MEMORY_ENABLED", "true").lower() in (
-    "1", "true", "yes",
+    "1",
+    "true",
+    "yes",
 )
 _MEMORY_MAX_RESULTS = int(os.environ.get("DIDAL_MEMORY_MAX_RESULTS", "5"))
 _WRITEBACK_SCORE_THRESHOLD = float(
@@ -125,6 +128,7 @@ CREATE INDEX IF NOT EXISTS idx_policy_mode ON policy_signals(mode);
 # Connection management
 # ---------------------------------------------------------------------------
 
+
 def _get_db() -> sqlite3.Connection:
     """Get or create a thread-local SQLite connection."""
     db = getattr(_local, "db", None)
@@ -152,6 +156,7 @@ def is_memory_enabled() -> bool:
 # Memory ID helpers
 # ---------------------------------------------------------------------------
 
+
 def _memory_id(mem_class: str, key: str) -> str:
     """Deterministic ID for upsert semantics."""
     raw = f"{mem_class}:{key}"
@@ -165,6 +170,7 @@ def _signal_id(protocol_id: str) -> str:
 # ---------------------------------------------------------------------------
 # Read operations
 # ---------------------------------------------------------------------------
+
 
 def recall(
     query: str,
@@ -196,9 +202,7 @@ def recall(
         db = _get_db()
 
         # Build FTS query — escape special chars
-        fts_query = " ".join(
-            w for w in query.split() if len(w) > 1
-        )
+        fts_query = " ".join(w for w in query.split() if len(w) > 1)
         if not fts_query:
             return []
 
@@ -234,15 +238,17 @@ def recall(
                 "UPDATE memories SET access_count = access_count + 1 WHERE id = ?",
                 (row["id"],),
             )
-            results.append({
-                "id": row["id"],
-                "class": row["class"],
-                "key": row["key"],
-                "content": row["content"],
-                "metadata": json.loads(row["metadata"] or "{}"),
-                "score": row["score"],
-                "access_count": row["access_count"] + 1,
-            })
+            results.append(
+                {
+                    "id": row["id"],
+                    "class": row["class"],
+                    "key": row["key"],
+                    "content": row["content"],
+                    "metadata": json.loads(row["metadata"] or "{}"),
+                    "score": row["score"],
+                    "access_count": row["access_count"] + 1,
+                }
+            )
         db.commit()
         return results
 
@@ -287,6 +293,7 @@ def recall_by_class(mem_class: str, limit: int = 10) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Write operations
 # ---------------------------------------------------------------------------
+
 
 def memorize(
     mem_class: str,
@@ -348,8 +355,18 @@ def memorize(
                 protocol_id = excluded.protocol_id,
                 trace_id = excluded.trace_id
             """,
-            (mid, mem_class, key, content, meta_json, score,
-             now, now, protocol_id, trace_id),
+            (
+                mid,
+                mem_class,
+                key,
+                content,
+                meta_json,
+                score,
+                now,
+                now,
+                protocol_id,
+                trace_id,
+            ),
         )
         db.commit()
         logger.debug("memorize[%s] %s/%s score=%.2f", mid, mem_class, key, score)
@@ -363,6 +380,7 @@ def memorize(
 # ---------------------------------------------------------------------------
 # Writeback policy helpers
 # ---------------------------------------------------------------------------
+
 
 def should_write(
     judge_score: float = 0.0,
@@ -411,38 +429,50 @@ def extract_memories_from_protocol(
     # Episodic: record what the user asked and what mode was used
     if prompt:
         prompt_key = hashlib.sha256(prompt.encode()).hexdigest()[:12]
-        memories.append({
-            "class": "episodic",
-            "key": f"session_{prompt_key}",
-            "content": json.dumps({
-                "prompt": prompt[:500],
-                "mode": mode,
-                "complexity_score": classification.get("complexity_score", 0),
-                "elapsed_seconds": protocol_result.get("elapsed_seconds", 0),
-                "critique_rounds": protocol_result.get("critique_rounds", 0),
-            }, ensure_ascii=False),
-            "score": min(judge_score, 1.0),
-            "metadata": {"mode": mode, "protocol_id": protocol_id},
-        })
+        memories.append(
+            {
+                "class": "episodic",
+                "key": f"session_{prompt_key}",
+                "content": json.dumps(
+                    {
+                        "prompt": prompt[:500],
+                        "mode": mode,
+                        "complexity_score": classification.get("complexity_score", 0),
+                        "elapsed_seconds": protocol_result.get("elapsed_seconds", 0),
+                        "critique_rounds": protocol_result.get("critique_rounds", 0),
+                    },
+                    ensure_ascii=False,
+                ),
+                "score": min(judge_score, 1.0),
+                "metadata": {"mode": mode, "protocol_id": protocol_id},
+            }
+        )
 
     # Semantic: extract stable concepts from the draft
     draft = protocol_result.get("final_draft", {})
     if isinstance(draft, dict):
         thesis = draft.get("thesis", "")
         if thesis and len(thesis) > 50:
-            task_type = protocol_result.get("task_object", {}).get("task_type", "unknown")
+            task_type = protocol_result.get("task_object", {}).get(
+                "task_type", "unknown"
+            )
             concept_key = f"concept_{task_type}_{hashlib.sha256(thesis[:100].encode()).hexdigest()[:8]}"
-            memories.append({
-                "class": "semantic",
-                "key": concept_key,
-                "content": json.dumps({
-                    "thesis": thesis[:1000],
-                    "key_points": draft.get("key_points", [])[:5],
-                    "uncertainties": draft.get("uncertainties", [])[:3],
-                }, ensure_ascii=False),
-                "score": min(judge_score * 0.9, 1.0),
-                "metadata": {"task_type": task_type, "mode": mode},
-            })
+            memories.append(
+                {
+                    "class": "semantic",
+                    "key": concept_key,
+                    "content": json.dumps(
+                        {
+                            "thesis": thesis[:1000],
+                            "key_points": draft.get("key_points", [])[:5],
+                            "uncertainties": draft.get("uncertainties", [])[:3],
+                        },
+                        ensure_ascii=False,
+                    ),
+                    "score": min(judge_score * 0.9, 1.0),
+                    "metadata": {"task_type": task_type, "mode": mode},
+                }
+            )
 
     # Procedural: record what strategy worked
     if mode in ("didal", "didal_literature"):
@@ -452,18 +482,23 @@ def extract_memories_from_protocol(
         if isinstance(evidence, dict):
             n_sources = len(evidence.get("sources", []))
 
-        memories.append({
-            "class": "procedural",
-            "key": f"strategy_{mode}",
-            "content": json.dumps({
-                "mode": mode,
-                "avg_rounds": rounds,
-                "avg_sources": n_sources,
-                "complexity_score": classification.get("complexity_score", 0),
-            }, ensure_ascii=False),
-            "score": min(judge_score * 0.8, 1.0),
-            "metadata": {"mode": mode},
-        })
+        memories.append(
+            {
+                "class": "procedural",
+                "key": f"strategy_{mode}",
+                "content": json.dumps(
+                    {
+                        "mode": mode,
+                        "avg_rounds": rounds,
+                        "avg_sources": n_sources,
+                        "complexity_score": classification.get("complexity_score", 0),
+                    },
+                    ensure_ascii=False,
+                ),
+                "score": min(judge_score * 0.8, 1.0),
+                "metadata": {"mode": mode},
+            }
+        )
 
     return memories
 
@@ -471,6 +506,7 @@ def extract_memories_from_protocol(
 # ---------------------------------------------------------------------------
 # Policy signals — fitness tracking for evolution
 # ---------------------------------------------------------------------------
+
 
 def record_policy_signal(
     protocol_id: str,
@@ -525,14 +561,30 @@ def record_policy_signal(
              sources_used, fitness, metadata, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (sid, protocol_id, trace_id, mode, judge_score, evidence_quality,
-             report_quality, clarification_quality, latency_s, rounds,
-             sources_used, fitness, json.dumps(metadata or {}), now),
+            (
+                sid,
+                protocol_id,
+                trace_id,
+                mode,
+                judge_score,
+                evidence_quality,
+                report_quality,
+                clarification_quality,
+                latency_s,
+                rounds,
+                sources_used,
+                fitness,
+                json.dumps(metadata or {}),
+                now,
+            ),
         )
         db.commit()
         logger.debug(
             "policy_signal[%s] mode=%s fitness=%.3f judge=%.2f",
-            protocol_id, mode, fitness, judge_score,
+            protocol_id,
+            mode,
+            fitness,
+            judge_score,
         )
         return fitness
 
@@ -574,7 +626,9 @@ def get_policy_stats(mode: Optional[str] = None, limit: int = 50) -> dict:
         return {
             "count": len(rows),
             "avg_fitness": sum(scores) / len(scores),
-            "avg_judge_score": sum(judge_scores) / len(judge_scores) if judge_scores else 0,
+            "avg_judge_score": sum(judge_scores) / len(judge_scores)
+            if judge_scores
+            else 0,
             "avg_rounds": sum(rounds_list) / len(rounds_list) if rounds_list else 0,
             "mode_distribution": _count_modes(rows),
         }
@@ -594,6 +648,7 @@ def _count_modes(rows) -> dict:
 # ---------------------------------------------------------------------------
 # Context managers for tracing integration
 # ---------------------------------------------------------------------------
+
 
 @contextmanager
 def memory_read_stage(prompt: str, classification: dict):
@@ -623,7 +678,9 @@ def memory_read_stage(prompt: str, classification: dict):
 
         logger.debug(
             "memory.read: %d episodic, %d semantic, %d procedural",
-            len(episodic), len(semantic), len(procedural),
+            len(episodic),
+            len(semantic),
+            len(procedural),
         )
     except Exception as exc:
         logger.warning("memory.read failed: %s", exc)
@@ -656,7 +713,9 @@ def memory_write_stage(
             new_concept=new_concept,
         ):
             ctx["skipped"] = 1
-            logger.debug("memory.write: writeback policy rejected (score=%.2f)", judge_score)
+            logger.debug(
+                "memory.write: writeback policy rejected (score=%.2f)", judge_score
+            )
             yield ctx
             return
 
@@ -694,7 +753,8 @@ def memory_write_stage(
 
         logger.info(
             "memory.write: wrote %d memories, fitness=%.3f",
-            ctx["written"], ctx["fitness"] or 0,
+            ctx["written"],
+            ctx["fitness"] or 0,
         )
     except Exception as exc:
         logger.warning("memory.write failed: %s", exc)

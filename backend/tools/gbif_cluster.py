@@ -47,7 +47,9 @@ class GbifClusterError(RuntimeError):
     ``cluster_unreachable``, ``query_timeout``, ``result_too_large``).
     """
 
-    def __init__(self, code: str, message: str, *, payload: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self, code: str, message: str, *, payload: Optional[Dict[str, Any]] = None
+    ):
         super().__init__(f"{code}: {message}")
         self.code = code
         self.message = message
@@ -55,6 +57,7 @@ class GbifClusterError(RuntimeError):
 
 
 # ── Client-side validation (defense in depth — connector also validates) ──
+
 
 def _validate_args(
     species_name: str,
@@ -70,7 +73,9 @@ def _validate_args(
             f"species_name must be a string of length <= {SPECIES_NAME_MAX_LEN}",
         )
     if any(ch in species_name for ch in ";|&$`><\n\x00"):
-        raise GbifClusterError("invalid_spec", "species_name contains forbidden characters")
+        raise GbifClusterError(
+            "invalid_spec", "species_name contains forbidden characters"
+        )
 
     if taxon_key is not None:
         if not isinstance(taxon_key, int) or taxon_key < 1 or taxon_key > TAXON_KEY_MAX:
@@ -84,9 +89,13 @@ def _validate_args(
             raise GbifClusterError("invalid_spec", "bbox must be 4 numbers")
         min_lon, min_lat, max_lon, max_lat = bbox
         if not (-180 <= min_lon <= max_lon <= 180):
-            raise GbifClusterError("invalid_spec", "bbox longitudes out of range or unordered")
+            raise GbifClusterError(
+                "invalid_spec", "bbox longitudes out of range or unordered"
+            )
         if not (-90 <= min_lat <= max_lat <= 90):
-            raise GbifClusterError("invalid_spec", "bbox latitudes out of range or unordered")
+            raise GbifClusterError(
+                "invalid_spec", "bbox latitudes out of range or unordered"
+            )
 
     if year_range is not None:
         if len(year_range) != 2 or not all(isinstance(v, int) for v in year_range):
@@ -142,6 +151,7 @@ def _rows_to_dataframe(rows: List[list], schema: List[str]) -> Any:
 
 
 # ── Public API ────────────────────────────────────────────────────────────
+
 
 async def query_gbif_cluster(
     *,
@@ -200,7 +210,11 @@ async def query_gbif_cluster(
 
     logger.info(
         "gbif.query → species=%r taxon_key=%s bbox=%s year_range=%s limit=%d",
-        species_name, taxon_key, bbox, year_range, limit,
+        species_name,
+        taxon_key,
+        bbox,
+        year_range,
+        limit,
     )
 
     own_client = http_client is None
@@ -212,7 +226,9 @@ async def query_gbif_cluster(
             await client.aclose()
 
     if response.status_code in (401, 403):
-        raise GbifClusterError("unauthorized", f"AgenticPlug rejected the session ({response.status_code})")
+        raise GbifClusterError(
+            "unauthorized", f"AgenticPlug rejected the session ({response.status_code})"
+        )
     if response.status_code >= 500:
         raise GbifClusterError(
             "cluster_unreachable",

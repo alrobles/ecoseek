@@ -10,6 +10,7 @@ as the memory store) so it persists across Docker restarts.
 Architecture:
   retrieve_literature() → litdb.search() → if miss → API call → litdb.store()
 """
+
 from __future__ import annotations
 
 import json
@@ -22,7 +23,9 @@ from typing import Generator
 
 logger = logging.getLogger(__name__)
 
-_DB_DIR = os.environ.get("DIDAL_MEMORY_DIR", os.path.expanduser("~/.ecoseek/didal_memory"))
+_DB_DIR = os.environ.get(
+    "DIDAL_MEMORY_DIR", os.path.expanduser("~/.ecoseek/didal_memory")
+)
 _DB_PATH = os.path.join(_DB_DIR, "literature.db")
 
 _SCHEMA = """
@@ -178,8 +181,20 @@ def store_paper(
             """INSERT INTO papers (doi, title, authors, year, abstract, url,
                source_type, provider, confidence, raw_json, created_at, last_used)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (dedup_key or "", title, authors, year, abstract[:2000], url,
-             source_type, provider, confidence, raw, now, now),
+            (
+                dedup_key or "",
+                title,
+                authors,
+                year,
+                abstract[:2000],
+                url,
+                source_type,
+                provider,
+                confidence,
+                raw,
+                now,
+                now,
+            ),
         )
         return True
 
@@ -244,17 +259,19 @@ def search(query: str, limit: int = 10) -> list[dict]:
         except Exception:
             pass
 
-        results.append({
-            "doi": row["doi"],
-            "title": row["title"],
-            "authors": row["authors"],
-            "year": row["year"],
-            "abstract": row["abstract"][:500],
-            "url": row["url"],
-            "source_type": row["source_type"],
-            "provider": row["provider"],
-            "confidence": row["confidence"],
-        })
+        results.append(
+            {
+                "doi": row["doi"],
+                "title": row["title"],
+                "authors": row["authors"],
+                "year": row["year"],
+                "abstract": row["abstract"][:500],
+                "url": row["url"],
+                "source_type": row["source_type"],
+                "provider": row["provider"],
+                "confidence": row["confidence"],
+            }
+        )
 
     return results
 
@@ -294,6 +311,7 @@ def _fts_query(query: str) -> str:
 # ---------------------------------------------------------------------------
 # User-uploaded documents (PDFs)
 # ---------------------------------------------------------------------------
+
 
 def ingest_document(
     filename: str,
@@ -358,12 +376,27 @@ def ingest_document(
                (filename, title, authors, year, abstract, full_text,
                 num_pages, num_tokens, file_hash, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (filename, title, authors, year, abstract[:2000],
-             full_text[:50000], num_pages, num_tokens, file_hash, now),
+            (
+                filename,
+                title,
+                authors,
+                year,
+                abstract[:2000],
+                full_text[:50000],
+                num_pages,
+                num_tokens,
+                file_hash,
+                now,
+            ),
         )
         doc_id = cursor.lastrowid
 
-    logger.info("Ingested user document '%s': %d tokens, %d pages", filename, num_tokens, num_pages)
+    logger.info(
+        "Ingested user document '%s': %d tokens, %d pages",
+        filename,
+        num_tokens,
+        num_pages,
+    )
     return {
         "success": True,
         "status": "indexed",
@@ -414,19 +447,21 @@ def search_user_papers(query: str, limit: int = 5) -> list[dict]:
         elif text:
             snippet = text[:300]
 
-        results.append({
-            "id": row["id"],
-            "filename": row["filename"],
-            "title": row["title"],
-            "authors": row["authors"],
-            "year": row["year"],
-            "snippet": snippet,
-            "num_pages": row["num_pages"],
-            "num_tokens": row["num_tokens"],
-            "source_type": "user_upload",
-            "provider": "user_upload",
-            "confidence": 0.9,
-        })
+        results.append(
+            {
+                "id": row["id"],
+                "filename": row["filename"],
+                "title": row["title"],
+                "authors": row["authors"],
+                "year": row["year"],
+                "snippet": snippet,
+                "num_pages": row["num_pages"],
+                "num_tokens": row["num_tokens"],
+                "source_type": "user_upload",
+                "provider": "user_upload",
+                "confidence": 0.9,
+            }
+        )
 
     return results
 

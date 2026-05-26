@@ -18,6 +18,7 @@ Files are organized by date and session: ``YYYY-MM-DD/{session_id}/{filename}``
 
 For files <5MB, use inline base64 in the JSON response instead.
 """
+
 from __future__ import annotations
 
 import base64
@@ -30,7 +31,9 @@ logger = logging.getLogger(__name__)
 
 _ARTIFACTS_REPO = os.environ.get("ECOSEEK_ARTIFACTS_REPO", "alrobles/ecoseek-artifacts")
 _GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
-_HERMES_REMOTE_URL = os.environ.get("HERMES_REMOTE_URL", "https://hermes.ecoseek.org").rstrip("/")
+_HERMES_REMOTE_URL = os.environ.get(
+    "HERMES_REMOTE_URL", "https://hermes.ecoseek.org"
+).rstrip("/")
 _HERMES_API_KEY = os.environ.get("HERMES_ECOSEEK_API_KEY", "")
 
 _INLINE_SIZE_LIMIT = 5 * 1024 * 1024  # 5MB — files smaller than this go inline
@@ -70,29 +73,33 @@ def upload_artifact_via_hermes(
         return {"success": False, "error": "HERMES_ECOSEEK_API_KEY not configured"}
 
     from datetime import datetime
+
     date_prefix = datetime.utcnow().strftime("%Y-%m-%d")
     sid = session_id or f"session-{int(time.time())}"
     repo_path = f"{date_prefix}/{sid}/{artifact_name}"
 
     try:
         from .http_client import http_post_json
+
         resp = http_post_json(
             f"{_HERMES_REMOTE_URL}/v1/chat/completions",
             body={
                 "model": "hermes-agent",
-                "messages": [{
-                    "role": "user",
-                    "content": (
-                        f"Upload the file at '{local_path}' to the GitHub repo "
-                        f"'{_ARTIFACTS_REPO}' at path '{repo_path}'. "
-                        f"Use: cd /tmp && git clone https://github.com/{_ARTIFACTS_REPO}.git artifacts-repo && "
-                        f"mkdir -p artifacts-repo/{date_prefix}/{sid} && "
-                        f"cp '{local_path}' artifacts-repo/{repo_path} && "
-                        f"cd artifacts-repo && git add . && "
-                        f"git commit -m 'artifact: {artifact_name}' && git push && "
-                        f"echo 'UPLOAD_SUCCESS:{repo_path}'"
-                    ),
-                }],
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Upload the file at '{local_path}' to the GitHub repo "
+                            f"'{_ARTIFACTS_REPO}' at path '{repo_path}'. "
+                            f"Use: cd /tmp && git clone https://github.com/{_ARTIFACTS_REPO}.git artifacts-repo && "
+                            f"mkdir -p artifacts-repo/{date_prefix}/{sid} && "
+                            f"cp '{local_path}' artifacts-repo/{repo_path} && "
+                            f"cd artifacts-repo && git add . && "
+                            f"git commit -m 'artifact: {artifact_name}' && git push && "
+                            f"echo 'UPLOAD_SUCCESS:{repo_path}'"
+                        ),
+                    }
+                ],
             },
             headers={"Authorization": f"Bearer {_HERMES_API_KEY}"},
             timeout=60,
@@ -137,7 +144,10 @@ def upload_artifact_direct(
     Requires GITHUB_TOKEN environment variable.
     """
     if not _GITHUB_TOKEN:
-        return {"success": False, "error": "GITHUB_TOKEN not configured for direct upload"}
+        return {
+            "success": False,
+            "error": "GITHUB_TOKEN not configured for direct upload",
+        }
 
     import urllib.request
     import urllib.error
@@ -151,10 +161,12 @@ def upload_artifact_direct(
     msg = commit_message or f"artifact: {artifact_name}"
 
     api_url = f"https://api.github.com/repos/{_ARTIFACTS_REPO}/contents/{repo_path}"
-    payload = json.dumps({
-        "message": msg,
-        "content": b64_content,
-    }).encode("utf-8")
+    payload = json.dumps(
+        {
+            "message": msg,
+            "content": b64_content,
+        }
+    ).encode("utf-8")
 
     req = urllib.request.Request(
         api_url,
@@ -170,7 +182,9 @@ def upload_artifact_direct(
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            download_url = data.get("content", {}).get("download_url", get_artifact_url(repo_path))
+            download_url = data.get("content", {}).get(
+                "download_url", get_artifact_url(repo_path)
+            )
             logger.info("Artifact uploaded directly: %s", download_url)
             return {
                 "success": True,

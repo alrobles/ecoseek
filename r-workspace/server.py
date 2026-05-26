@@ -8,6 +8,7 @@ Endpoints:
   GET  /health    — container health check
   GET  /packages  — list installed R packages
 """
+
 from __future__ import annotations
 
 import json
@@ -61,10 +62,18 @@ class RWorkspaceHandler(BaseHTTPRequestHandler):
         """List installed R packages."""
         try:
             result = subprocess.run(
-                ["Rscript", "-e", "cat(paste(installed.packages()[,'Package'], collapse='\\n'))"],
-                capture_output=True, text=True, timeout=30,
+                [
+                    "Rscript",
+                    "-e",
+                    "cat(paste(installed.packages()[,'Package'], collapse='\\n'))",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
-            packages = [p.strip() for p in result.stdout.strip().split("\n") if p.strip()]
+            packages = [
+                p.strip() for p in result.stdout.strip().split("\n") if p.strip()
+            ]
             self._send_json(200, {"packages": packages, "count": len(packages)})
         except Exception as exc:
             self._send_json(500, {"error": str(exc)})
@@ -115,7 +124,9 @@ tryCatch({{
         try:
             result = subprocess.run(
                 ["Rscript", "--vanilla", str(wrapper_path)],
-                capture_output=True, text=True, timeout=timeout,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
                 cwd=str(job_dir),
                 env={**os.environ, "R_LIBS_USER": str(WORKSPACE / "R_libs")},
             )
@@ -125,37 +136,52 @@ tryCatch({{
             output_files = []
             for f in job_dir.iterdir():
                 if f.name not in ("script.R", "wrapper.R") and f.is_file():
-                    output_files.append({
-                        "name": f.name,
-                        "size": f.stat().st_size,
-                        "path": str(f),
-                    })
+                    output_files.append(
+                        {
+                            "name": f.name,
+                            "size": f.stat().st_size,
+                            "path": str(f),
+                        }
+                    )
 
-            self._send_json(200, {
-                "success": result.returncode == 0,
-                "job_id": job_id,
-                "stdout": result.stdout[-10000:] if len(result.stdout) > 10000 else result.stdout,
-                "stderr": result.stderr[-5000:] if len(result.stderr) > 5000 else result.stderr,
-                "exit_code": result.returncode,
-                "elapsed_seconds": elapsed,
-                "output_files": output_files,
-                "working_dir": str(job_dir),
-            })
+            self._send_json(
+                200,
+                {
+                    "success": result.returncode == 0,
+                    "job_id": job_id,
+                    "stdout": result.stdout[-10000:]
+                    if len(result.stdout) > 10000
+                    else result.stdout,
+                    "stderr": result.stderr[-5000:]
+                    if len(result.stderr) > 5000
+                    else result.stderr,
+                    "exit_code": result.returncode,
+                    "elapsed_seconds": elapsed,
+                    "output_files": output_files,
+                    "working_dir": str(job_dir),
+                },
+            )
 
         except subprocess.TimeoutExpired:
             elapsed = round(time.time() - start, 2)
-            self._send_json(408, {
-                "success": False,
-                "job_id": job_id,
-                "error": f"R execution timed out after {timeout}s",
-                "elapsed_seconds": elapsed,
-            })
+            self._send_json(
+                408,
+                {
+                    "success": False,
+                    "job_id": job_id,
+                    "error": f"R execution timed out after {timeout}s",
+                    "elapsed_seconds": elapsed,
+                },
+            )
         except Exception as exc:
-            self._send_json(500, {
-                "success": False,
-                "job_id": job_id,
-                "error": str(exc)[:500],
-            })
+            self._send_json(
+                500,
+                {
+                    "success": False,
+                    "job_id": job_id,
+                    "error": str(exc)[:500],
+                },
+            )
 
 
 def main() -> None:
