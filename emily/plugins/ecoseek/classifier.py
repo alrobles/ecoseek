@@ -125,6 +125,13 @@ _EXECUTION_PATTERNS = [
 # Classification result
 # ---------------------------------------------------------------------------
 
+_WEB_SEARCH_PATTERNS = [
+    r"\bsearch\b", r"\bbusca\b", r"\bbuscar\b", r"\bfind\b", r"\bencuentra\b",
+    r"\blook\s*up\b", r"\bgoogle\b", r"\bgithub\b", r"\brepo\b", r"\brepository\b",
+    r"\brepositorio\b", r"\bwebsite\b", r"\bsitio\b", r"\burl\b", r"\blink\b",
+]
+
+
 class ClassificationResult(NamedTuple):
     mode: str                # "direct" | "didal" | "didal_literature"
     complexity_score: float  # 0.0 - 1.0
@@ -132,6 +139,7 @@ class ClassificationResult(NamedTuple):
     needs_clarification: bool
     expected_depth: str      # "low" | "medium" | "high"
     is_execution: bool = False  # True → route to escalate_remote, not didal
+    is_web_search: bool = False  # True → route to web_search tool
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +182,13 @@ def _is_execution(text: str) -> bool:
     return hits >= 2
 
 
+def _is_web_search(text: str) -> bool:
+    """True if the prompt asks to search the web, GitHub, or look up info."""
+    lower = text.lower()
+    hits = sum(1 for p in _WEB_SEARCH_PATTERNS if re.search(p, lower))
+    return hits >= 1
+
+
 # ---------------------------------------------------------------------------
 # Main classifier
 # ---------------------------------------------------------------------------
@@ -211,6 +226,18 @@ def classify_complexity(prompt: str) -> ClassificationResult:
             needs_clarification=False,
             expected_depth="low",
             is_execution=True,
+        )
+
+    # --- Web search shortcut: direct mode + flag for web_search tool ---
+    web_search = _is_web_search(prompt)
+    if web_search:
+        return ClassificationResult(
+            mode="direct",
+            complexity_score=0.0,
+            reasons=["web_search_use_web_search_tool"],
+            needs_clarification=False,
+            expected_depth="low",
+            is_web_search=True,
         )
 
     # --- Scoring heuristics (from protocol spec) ---
