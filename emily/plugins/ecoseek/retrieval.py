@@ -822,7 +822,6 @@ def retrieve_literature(
         queries.extend(subquestions[:2])
 
     # Import tracing (no-op when Phoenix is not configured)
-    from .tracing import trace_retrieval_source
 
     # Build a minimal trace context for retrieval spans
     _tctx: dict = {"protocol_id": "retrieval"}

@@ -144,7 +144,6 @@ def run_niche_model(
         JSON with success status, output file paths, model summary.
     """
     vars_r = ", ".join(f'"{v.strip()}"' for v in bioclim_vars.split(","))
-    gbif_source = "rgbif::occ_search" if use_gbif_api else "arrow parquet"
 
     code = f'''
 suppressPackageStartupMessages({{

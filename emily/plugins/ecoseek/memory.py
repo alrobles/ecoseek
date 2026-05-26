@@ -615,7 +615,7 @@ def memory_read_stage(prompt: str, classification: dict):
         semantic = recall(prompt, mem_class="semantic", max_results=3)
 
         # Recall procedural memories (strategy for this mode)
-        mode = classification.get("mode", "didal")
+        _mode = classification.get("mode", "didal")
         procedural = recall_by_class("procedural", limit=2)
 
         ctx["memories"] = episodic + semantic + procedural

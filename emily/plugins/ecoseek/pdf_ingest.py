@@ -97,7 +97,7 @@ def _extract_pymupdf(pdf_path: str) -> dict:
 
 def _guess_metadata(text: str) -> dict:
     """Heuristically extract title, authors, year from PDF text."""
-    lines = [l.strip() for l in text.split("\n") if l.strip()][:20]
+    lines = [line.strip() for line in text.split("\n") if line.strip()][:20]
     title = lines[0] if lines else ""
     authors = ""
     year = None
