@@ -186,6 +186,113 @@ def _beta_call(
     }
 
 
+def _beta_call_stream(
+    system_prompt: str,
+    user_content: str,
+    context_messages: list[dict] | None = None,
+    timeout: int | None = None,
+    model: str | None = None,
+    trace: bool = True,
+    on_token: object | None = None,
+) -> dict:
+    """Streaming variant of _beta_call — emits tokens as they arrive.
+
+    Parameters
+    ----------
+    on_token : callable, optional
+        Called with each text chunk as it arrives. If None, collects silently.
+        Signature: on_token(chunk: str) -> None
+    """
+    import urllib.request
+    import urllib.error
+
+    messages = [{"role": "system", "content": system_prompt}]
+    if context_messages:
+        messages.extend(context_messages)
+    messages.append({"role": "user", "content": user_content})
+
+    url = f"{_REMOTE_URL}/v1/chat/completions"
+    req_override = _request_model.get()
+    effective_model = req_override or model or _MODEL
+    payload: dict = {
+        "model": effective_model,
+        "messages": messages,
+        "stream": True,
+    }
+    if trace:
+        payload["hermes"] = {"trace": True}
+
+    body = json.dumps(payload).encode("utf-8")
+    hdrs = {"Content-Type": "application/json", "Accept": "text/event-stream"}
+    if _API_KEY:
+        hdrs["Authorization"] = f"Bearer {_API_KEY}"
+
+    full_content = ""
+    usage = {}
+    resp_model = effective_model
+    token_count = 0
+
+    try:
+        req = urllib.request.Request(url, data=body, headers=hdrs, method="POST")
+        with urllib.request.urlopen(req, timeout=timeout or _TIMEOUT) as resp:
+            buffer = ""
+            for raw_chunk in iter(lambda: resp.read(4096), b""):
+                buffer += raw_chunk.decode("utf-8", errors="replace")
+                while "\n" in buffer:
+                    line, buffer = buffer.split("\n", 1)
+                    line = line.strip()
+                    if not line or line == "data: [DONE]":
+                        continue
+                    if not line.startswith("data: "):
+                        continue
+                    try:
+                        chunk = json.loads(line[6:])
+                    except json.JSONDecodeError:
+                        continue
+
+                    if chunk.get("model"):
+                        resp_model = chunk["model"]
+                    if chunk.get("usage"):
+                        usage = chunk["usage"]
+
+                    delta = (chunk.get("choices") or [{}])[0].get("delta", {})
+                    text = delta.get("content", "")
+                    if text:
+                        full_content += text
+                        token_count += 1
+                        if on_token:
+                            on_token(text)
+                        # Emit progress every ~50 tokens so the user sees text building
+                        if token_count % 50 == 0:
+                            _emit_progress("Drafting", f"{token_count} tokens generated")
+
+    except urllib.error.HTTPError as exc:
+        err_body = ""
+        try:
+            err_body = exc.read().decode("utf-8", errors="replace")[:300]
+        except Exception:
+            pass
+        if exc.code == 403 and ("1010" in err_body or "cloudflare" in err_body.lower()):
+            logger.info("Streaming blocked by Cloudflare, falling back to non-streaming")
+            return _beta_call(system_prompt, user_content, context_messages, timeout, model, trace)
+        logger.warning("Streaming request failed (HTTP %d): %s", exc.code, err_body[:200])
+        return _beta_call(system_prompt, user_content, context_messages, timeout, model, trace)
+    except Exception as exc:
+        logger.warning("Streaming request failed: %s, falling back to non-streaming", exc)
+        return _beta_call(system_prompt, user_content, context_messages, timeout, model, trace)
+
+    record_llm_call({}, resp_model, usage, stage="beta_call_stream")
+    return {
+        "content": full_content,
+        "usage": usage,
+        "model": resp_model,
+        "hermes_trace": None,
+        "cached_tokens": (usage.get("prompt_tokens_details") or {}).get("cached_tokens"),
+        "streamed": True,
+        "tokens_generated": token_count,
+    }
+
+
 def _parse_json_response(content: str) -> dict | None:
     """Try to parse JSON from Beta's response, handling markdown wrapping.
 
@@ -364,24 +471,37 @@ def _stage_retrieve(task_object: dict, classification: dict) -> dict:
 
 
 def _stage_expert_draft(task_object: dict, evidence: dict | None) -> dict:
-    """Stage 3: Expert produces first scientific synthesis."""
+    """Stage 3: Expert produces first scientific synthesis.
+
+    Uses streaming when available so the user sees tokens arriving in real-time
+    instead of waiting 15-30s for the full response.
+    """
     context_parts = [f"Structured task:\n{json.dumps(task_object, indent=2, ensure_ascii=False)}"]
     if evidence and evidence.get("sources"):
         context_parts.append(f"\nRetrieved evidence:\n{json.dumps(evidence, indent=2, ensure_ascii=False)}")
 
+    # Use streaming for the draft stage — this is the longest single call
+    # and the user benefits most from seeing tokens arrive progressively.
+    stream_enabled = os.environ.get("DIDAL_STREAM_DRAFT", "true").lower() in ("true", "1", "yes")
+
     try:
-        result = _beta_call(
+        call_fn = _beta_call_stream if stream_enabled else _beta_call
+        result = call_fn(
             f"{BETA_EXPERT_SYSTEM}\n\n{EXPERT_DRAFT_PROMPT}",
             "\n".join(context_parts),
             model=_FAST_MODEL,
             timeout=_STAGE_TIMEOUT,
         )
         draft = _parse_json_response(result["content"])
-        return {
+        stage_result = {
             "stage": "expert_draft",
             "draft": draft or {"raw_response": result["content"]},
             "usage": result["usage"],
         }
+        if result.get("streamed"):
+            stage_result["streamed"] = True
+            stage_result["tokens_generated"] = result.get("tokens_generated", 0)
+        return stage_result
     except Exception as exc:
         logger.warning("expert_draft failed: %s", exc)
         return {
@@ -762,8 +882,8 @@ def _run_protocol_inner(
                 tctx["total_sources"] = n_sources
                 _emit_progress("Retrieved", f"{n_sources} sources found")
 
-        # Stage 3: Expert draft
-        _emit_progress("Drafting", "writing expert synthesis")
+        # Stage 3: Expert draft (streaming — tokens arrive in real-time)
+        _emit_progress("Drafting", "writing expert synthesis (streaming)")
         with trace_stage("backend.synthesize_draft", tctx, agent_role="backend_expert") as sctx:
             draft_result = _stage_expert_draft(task_object, evidence)
             stages.append(draft_result)
@@ -771,6 +891,10 @@ def _run_protocol_inner(
             current_draft = draft_result["draft"]
             sctx["tokens_used"] = draft_result.get("usage", {}).get("total_tokens", 0)
             sctx["evidence_used"] = len(current_draft.get("evidence", [])) if isinstance(current_draft, dict) else 0
+            if draft_result.get("streamed"):
+                sctx["streamed"] = True
+                sctx["tokens_generated"] = draft_result.get("tokens_generated", 0)
+                _emit_progress("Drafted", f"{draft_result.get('tokens_generated', 0)} tokens (streamed)")
 
         # Stage 4-5: Critique-Revise loop (bounded, with early termination)
         rounds = 0
