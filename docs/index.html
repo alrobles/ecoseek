@@ -353,7 +353,9 @@ AgenticPlug gateway (auth, sessions, policy, approvals, audit)
 Compute backends
   EcoCoder local ---- domain-specialized ecological LLM
   EcoCoder cluster -- remote HPC inference via tunnel
-  EcoAgent tools ---- 30+ ecological analysis tools
+  EcoAgent tools ---- 25 ecological analysis tools
+  Emily / Hermes ---- DiDAL v2 dialectical protocol
+                        Alpha (local) ↔ Beta (remote)
   DeepSeek BYOK ----- user-provided API key
   HPC / Hermes ------ lab servers and clusters</div>
 
@@ -384,7 +386,15 @@ Compute backends
             </li>
             <li>
               <span class="comp-name"><a href="https://github.com/alrobles/ecoagent">EcoAgent</a></span>
-              <span class="comp-desc">Ecological workflow and tool layer. 30+ tools including species queries (GBIF), literature search, diversity analysis, species distribution modeling (MaxEnt, SDM), triplet extraction, taxonomy resolution, and knowledge graph construction.</span>
+              <span class="comp-desc">Ecological workflow and tool layer. 25 tools including species queries (GBIF), literature search, diversity analysis, species distribution modeling (MaxEnt, SDM), host-parasite interaction extraction, taxonomy resolution, and knowledge graph construction.</span>
+            </li>
+            <li>
+              <span class="comp-name"><a href="https://github.com/alrobles/ecoseek/tree/main/emily">Emily</a></span>
+              <span class="comp-desc">Scientific reasoning engine with DiDAL v2 dialectical protocol. Alpha (local, Emily) acts as naive scientific interlocutor; Beta (remote, Hermes) is the expert researcher. Automatic complexity-based routing (direct → didal → didal_literature), structured evidence retrieval, critique-revise loops, and mini-report generation.</span>
+            </li>
+            <li>
+              <span class="comp-name">Hermes</span>
+              <span class="comp-desc">Remote orchestration service at <a href="https://hermes.ecoseek.org">hermes.ecoseek.org</a>. Optional advanced scientific reasoning backend. Runs on reumanlab with DeepSeek and EcoCoder models. Emily escalates complex tasks to Hermes for expert synthesis.</span>
             </li>
           </ul>
         </div>
@@ -396,7 +406,7 @@ Compute backends
           <div class="section-title">
             <h2>Ecological Tools</h2>
           </div>
-          <p>EcoAgent exposes 30+ tools via an HTTP API with risk classification and AgenticPlug approval gating:</p>
+          <p>EcoAgent exposes 25 tools via an HTTP API with risk classification and AgenticPlug approval gating:</p>
           <ul class="pills" aria-label="Tool categories" style="margin: 1rem 0; gap: 0.5rem;">
             <li class="pill">query_species</li>
             <li class="pill">query_papers</li>
@@ -412,6 +422,11 @@ Compute backends
             <li class="pill">evaluate_niche</li>
             <li class="pill">predict_susceptibility</li>
             <li class="pill">compute_effort_bias</li>
+            <li class="pill">query_pubtator</li>
+            <li class="pill">query_cofid</li>
+            <li class="pill">compute_ecological_distance</li>
+            <li class="pill">fit_geotax</li>
+            <li class="pill">search_literature</li>
           </ul>
           <p style="color: var(--muted); font-size: 0.92rem; margin-top: 0.5rem;">
             Read-only tools run freely. Compute-intensive tools (SDM, MaxEnt, niche evaluation) carry risk metadata
@@ -453,11 +468,13 @@ docker run -p 8200:8200 -e ECOAGENT_PROFILE=ci ghcr.io/alrobles/ecoagent:0.1.0</
         <div class="container">
           <div class="attribution">
             <strong>Attribution:</strong> EcoSeek is built on a fork of
-            <a href="https://github.com/Fosowl/agenticSeek">AgenticSeek</a>.
-            We gratefully acknowledge the AgenticSeek project and contributors
-            as the foundation for this work. EcoSeek is an independent downstream
+            <a href="https://github.com/Fosowl/agenticSeek">AgenticSeek</a>
+            and uses <a href="https://github.com/NousResearch/hermes-agent">Hermes Agent</a> for orchestration.
+            We gratefully acknowledge both projects and their contributors
+            as foundations for this work. EcoSeek is an independent downstream
             adaptation focused on scientific and ecological computing.
-            AgenticSeek is licensed under GPLv3.
+            EcoSeek is licensed under the <a href="https://www.gnu.org/licenses/agpl-3.0.html">GNU AGPLv3</a>.
+            AgenticSeek is licensed under GPLv3; Hermes Agent is licensed under MIT.
           </div>
         </div>
       </section>
