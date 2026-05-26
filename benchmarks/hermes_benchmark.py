@@ -9,7 +9,7 @@ import os
 import sys
 import time
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 HERMES_URL = os.environ.get("HERMES_URL", "https://hermes.ecoseek.org")
 API_KEY = os.environ.get("HERMES_ECOSEEK_API_KEY", "")
