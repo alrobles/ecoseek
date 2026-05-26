@@ -11,10 +11,8 @@ Run with:
 import json
 import os
 import re
-import sqlite3
 import sys
 import tempfile
-from unittest import mock
 
 # ── make the plugin package importable without Hermes runtime ──────────────
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -501,7 +499,7 @@ def test_memory_schema_creation():
 
 def test_memory_write_and_recall():
     """Write a memory, then recall it via FTS."""
-    from plugins.ecoseek.memory import _get_db, recall, memorize
+    from plugins.ecoseek.memory import recall, memorize
 
     # Write a semantic memory
     memorize("semantic", "grinnell_niche_definition",
@@ -529,7 +527,7 @@ def test_memory_write_and_recall():
 
 def test_memory_recall_by_class():
     """recall_by_class returns memories of a specific type."""
-    from plugins.ecoseek.memory import _get_db, memorize, recall_by_class
+    from plugins.ecoseek.memory import memorize, recall_by_class
 
     memorize("procedural", "sdm_best_practice",
              "Always use bias files with MaxEnt for presence-only SDM.",
@@ -542,7 +540,7 @@ def test_memory_recall_by_class():
 
 def test_memory_write_increments_access_count():
     """Recall bumps access_count."""
-    from plugins.ecoseek.memory import _get_db, memorize, recall
+    from plugins.ecoseek.memory import memorize, recall
 
     memorize("semantic", "shannon_index",
              "Shannon diversity index H' = -Σ(pi * ln(pi)).",
