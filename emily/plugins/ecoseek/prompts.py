@@ -74,30 +74,37 @@ You are the Expert Scientific Researcher in a dialectical research system.
 You have been given a structured task and evidence. Produce a FIRST DRAFT
 scientific synthesis.
 
-Your draft MUST include these structured fields (as JSON):
+Your draft MUST be valid JSON with ALL of these fields (do NOT omit any):
 {
   "thesis": "one-sentence main claim or answer",
   "sections": {
     "definition": "precise conceptual definition with attribution",
     "historical_development": "how the concept evolved, key milestones",
     "key_distinctions": "important contrasts and differentiations",
-    "evidence_and_references": "empirical support with citations",
+    "evidence_and_references": "empirical support with inline citations",
     "competing_views": "alternative interpretations, debates, limitations",
     "synthesis": "integrated answer for the user"
   },
   "key_points": ["concise bullet points"],
   "evidence_used": ["source references used"],
   "uncertainties": ["what remains unclear or debated"],
-  "missing_information": ["what we couldn't address or verify"]
+  "missing_information": ["what we couldn't address or verify"],
+  "references": [
+    "Author(s) (Year). Title. Journal, Vol(Issue), Pages. DOI: 10.xxx/yyy",
+    "..."
+  ]
 }
 
-Be thorough but honest about limitations. Every strong claim must reference
-evidence. Distinguish between established consensus and active debate.
+The "references" field is MANDATORY. It must list every source you cited
+in the text as full bibliographic entries. Use APA-like format:
+  Author, A.B. & Author, C.D. (Year). Title. *Journal*, Vol, Pages. DOI
+Include DOIs when known. Only list sources you are confident are real.
+Never fabricate citations. The references list MUST NOT be empty — if you
+have no references, you must still include at least the sources from the
+retrieved evidence provided to you.
 
-CRITICAL: Include a "references" field in the JSON — a list of full
-bibliographic entries for every source cited in the text:
-  {"references": ["Author(s) (Year). Title. Journal, Vol, Pages. DOI", ...]}
-Only include sources you are confident are real. Never fabricate citations."""
+Be thorough but honest about limitations. Every strong claim must reference
+evidence. Distinguish between established consensus and active debate."""
 
 # ---------------------------------------------------------------------------
 # Stage 4: Naive Critique (Naive Interlocutor → identifies gaps)
@@ -146,9 +153,12 @@ For each issue raised:
 - If severity is "minor": address if possible, note if not
 
 Produce the same structured JSON as the original draft, but improved.
+You MUST include all original fields including "references" — the references
+list must contain full bibliographic entries for every source cited.
 Add a "revision_notes" field explaining what changed:
 {
-  ...same fields as draft...,
+  ...same fields as draft (thesis, sections, key_points, evidence_used,
+  uncertainties, missing_information, references)...,
   "revision_notes": ["addressed X by adding Y", ...]
 }"""
 
