@@ -16,15 +16,12 @@ import json
 import logging
 import os
 import re
-import sys
 import time
 import uuid
-from typing import Optional
 
 import threading
-from concurrent.futures import ThreadPoolExecutor, Future
 
-from .classifier import ClassificationResult, classify_complexity
+from .classifier import classify_complexity
 from .prompts import (
     BETA_EXPERT_SYSTEM,
     BETA_NAIVE_SYSTEM,
@@ -38,18 +35,13 @@ from .prompts import (
 )
 from .judge import judge_answer
 from .memory import (
-    extract_memories_from_protocol,
     is_memory_enabled,
     memory_read_stage,
     memory_write_stage,
-    recall,
-    record_policy_signal,
-    should_write,
 )
 from .tracing import (
     record_llm_call,
     trace_protocol,
-    trace_retrieval_source,
     trace_stage,
 )
 
@@ -900,12 +892,10 @@ def _run_protocol_inner(
         # --- DiDAL mode: full dialectical loop ---
 
         # Memory read: recall relevant context before framing
-        memory_context = []
         if is_memory_enabled():
             _emit_progress("Memory", "recalling relevant context")
             with trace_stage("memory.read", tctx, agent_role="system") as sctx:
                 with memory_read_stage(prompt, classification) as mctx:
-                    memory_context = mctx.get("memories", [])
                     sctx["recall_count"] = mctx.get("recall_count", 0)
                     stages.append({
                         "stage": "memory.read",

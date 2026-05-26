@@ -894,7 +894,7 @@ def _search_github(query: str, limit: int = 5) -> list[dict]:
 
 def _search_scientific(query: str, limit: int = 5) -> list[dict]:
     """Search scientific literature APIs (OpenAlex, Semantic Scholar, GBIF, Entrez)."""
-    from .retrieval import retrieve_literature, evidence_to_dict
+    from .retrieval import retrieve_literature
     try:
         lit = retrieve_literature(query=query, tier="A", max_per_source=max(2, limit // 3))
         sources = lit.get("sources", [])[:limit]
