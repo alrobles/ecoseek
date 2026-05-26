@@ -148,7 +148,7 @@ PORT_GATEWAY="$PORT_GATEWAY" PORT_OLLAMA="$PORT_OLLAMA" PORT_API="$PORT_API" \
 MOCK_PID=$!
 
 # Wait for "ready"
-for i in $(seq 1 30); do
+for _i in $(seq 1 30); do
   if grep -q ready "$WORK/server.log" 2>/dev/null; then break; fi
   sleep 0.2
 done
