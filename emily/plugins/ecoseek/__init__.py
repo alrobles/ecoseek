@@ -9,6 +9,8 @@ Provides tools for the dual-agent architecture (Alpha↔Beta):
   ``dialectical_exchange``   — legacy DiDAL structured debate
   ``hermes_status``          — check Hermes remote availability and loaded tools
   ``literature_search``      — search local literature cache (litdb)
+  ``classify_literature``    — LACS domain-specific literature relevance scoring
+  ``train_lacs_model``       — train new LACS domain model on HPC cluster
 
 Emily (Alpha, local) uses these tools to delegate heavy computation to
 Hermes (Beta, remote) on reumanlab.  Communication goes directly to
@@ -836,6 +838,129 @@ ECOAGENT_QUERY_SCHEMA = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Tool: classify_literature — LACS domain-specific relevance scoring
+# ---------------------------------------------------------------------------
+
+CLASSIFY_LITERATURE_SCHEMA = {
+    "name": "classify_literature",
+    "description": (
+        "Score scientific abstracts by domain relevance using LACS "
+        "(Literature Abstract Classification System). Uses PU-learning "
+        "(Positive-Unlabeled) models trained on domain-specific corpora. "
+        "Available domains: host-parasite (GMPD+ZOVER), niche-modeling, biodiversity. "
+        "Returns a relevance score (0-1) for each abstract. "
+        "Use this to filter/rank papers before including them in a synthesis, "
+        "or to help the user identify relevant literature for their research."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "abstracts": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of abstract texts to classify.",
+            },
+            "domain": {
+                "type": "string",
+                "enum": ["host-parasite", "niche-modeling", "biodiversity"],
+                "description": "Domain model to use (default: host-parasite).",
+            },
+        },
+        "required": ["abstracts"],
+    },
+}
+
+
+def classify_literature_tool(
+    abstracts: list,
+    domain: str = "host-parasite",
+    task_id: Optional[str] = None,
+) -> str:
+    """Score abstracts by domain relevance using LACS."""
+    from .lacs_classifier import classify_abstracts, AVAILABLE_DOMAINS
+
+    if not abstracts:
+        return json.dumps({"success": False, "error": "No abstracts provided"})
+
+    results = classify_abstracts(
+        abstracts=[str(a) for a in abstracts],
+        domain=domain,
+    )
+
+    n_relevant = sum(1 for r in results if r["relevant"])
+
+    return json.dumps({
+        "success": True,
+        "results": results,
+        "summary": {
+            "total": len(results),
+            "relevant": n_relevant,
+            "irrelevant": len(results) - n_relevant,
+            "domain": domain,
+            "domain_description": AVAILABLE_DOMAINS.get(domain, ""),
+        },
+    }, ensure_ascii=False)
+
+
+TRAIN_LACS_MODEL_SCHEMA = {
+    "name": "train_lacs_model",
+    "description": (
+        "Train a new LACS domain model on the HPC cluster using user-provided "
+        "positive papers. The model learns to distinguish domain-relevant papers "
+        "from random literature using PU-learning (PLUS algorithm). "
+        "Requires at least 10 positive abstracts. Random negatives are sampled "
+        "from the PubMed FTS5 index (~36M papers). "
+        "The trained model is saved on the cluster and can be used with "
+        "classify_literature for future scoring."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "domain": {
+                "type": "string",
+                "description": "Name for the new domain model (e.g., 'coral-bleaching').",
+            },
+            "positive_papers": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "doi": {"type": "string"},
+                        "title": {"type": "string"},
+                        "abstract": {"type": "string"},
+                    },
+                    "required": ["abstract"],
+                },
+                "description": "Known-positive papers for the domain.",
+            },
+            "random_sample_size": {
+                "type": "integer",
+                "description": "Number of random abstracts for unlabeled class (default: 5000).",
+            },
+        },
+        "required": ["domain", "positive_papers"],
+    },
+}
+
+
+def train_lacs_model_tool(
+    domain: str,
+    positive_papers: list,
+    random_sample_size: int = 5000,
+    task_id: Optional[str] = None,
+) -> str:
+    """Train a new LACS model on the cluster."""
+    from .lacs_classifier import train_lacs_model
+
+    result = train_lacs_model(
+        domain=domain,
+        positive_abstracts=positive_papers,
+        random_sample_size=random_sample_size,
+    )
+    return json.dumps(result, ensure_ascii=False)
+
+
 DIALECTICAL_EXCHANGE_SCHEMA = {
     "name": "dialectical_exchange",
     "description": (
@@ -1176,9 +1301,35 @@ def register(ctx) -> None:
         check_fn=_is_configured,
     )
 
-    n = 13 if _is_configured() else 8
+    # LACS tools — domain-specific literature classification
+    ctx.register_tool(
+        name="classify_literature",
+        toolset="ecoseek",
+        schema=CLASSIFY_LITERATURE_SCHEMA,
+        handler=lambda args, **kw: classify_literature_tool(
+            abstracts=args.get("abstracts", []),
+            domain=args.get("domain", "host-parasite"),
+            task_id=kw.get("task_id"),
+        ),
+        check_fn=lambda: True,
+    )
+
+    ctx.register_tool(
+        name="train_lacs_model",
+        toolset="ecoseek",
+        schema=TRAIN_LACS_MODEL_SCHEMA,
+        handler=lambda args, **kw: train_lacs_model_tool(
+            domain=args.get("domain", ""),
+            positive_papers=args.get("positive_papers", []),
+            random_sample_size=args.get("random_sample_size", 5000),
+            task_id=kw.get("task_id"),
+        ),
+        check_fn=_is_configured,
+    )
+
+    n = 15 if _is_configured() else 10
     logger.info(
-        "ecoseek plugin registered: %d tools, remote=%s configured=%s didal=v2 ecoagent=true r_workspace=true niche=true pdf=true artifacts=true",
+        "ecoseek plugin registered: %d tools, remote=%s configured=%s didal=v2 ecoagent=true r_workspace=true niche=true pdf=true artifacts=true lacs=true",
         n, _REMOTE_URL, _is_configured(),
     )
 
@@ -1325,6 +1476,31 @@ try:
             cluster_path=args.get("cluster_path", ""),
             artifact_name=args.get("artifact_name", ""),
             session_id=args.get("session_id", ""),
+            task_id=kw.get("task_id"),
+        ),
+        check_fn=_is_configured,
+        requires_env=[],
+    )
+    registry.register(
+        name="classify_literature",
+        toolset="ecoseek",
+        schema=CLASSIFY_LITERATURE_SCHEMA,
+        handler=lambda args, **kw: classify_literature_tool(
+            abstracts=args.get("abstracts", []),
+            domain=args.get("domain", "host-parasite"),
+            task_id=kw.get("task_id"),
+        ),
+        check_fn=lambda: True,
+        requires_env=[],
+    )
+    registry.register(
+        name="train_lacs_model",
+        toolset="ecoseek",
+        schema=TRAIN_LACS_MODEL_SCHEMA,
+        handler=lambda args, **kw: train_lacs_model_tool(
+            domain=args.get("domain", ""),
+            positive_papers=args.get("positive_papers", []),
+            random_sample_size=args.get("random_sample_size", 5000),
             task_id=kw.get("task_id"),
         ),
         check_fn=_is_configured,
