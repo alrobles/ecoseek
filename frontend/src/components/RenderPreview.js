@@ -4,6 +4,22 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 
+/**
+ * Normalize LaTeX notation so remarkMath/KaTeX can parse it.
+ * LLMs often return \[...\] and \(...\) which remarkMath doesn't handle.
+ * Also handles bare [ ... ] display math (single line starting with [).
+ */
+function normalizeMath(text) {
+  if (!text) return text;
+  // \[...\] → $$...$$  (display math)
+  let out = text.replace(/\\\[([\s\S]*?)\\\]/g, (_, body) => `$$${body.trim()}$$`);
+  // \(...\) → $...$  (inline math)
+  out = out.replace(/\\\(([\s\S]*?)\\\)/g, (_, body) => `$${body.trim()}$`);
+  // Bare [ ... ] on its own line containing LaTeX commands → $$...$$
+  out = out.replace(/^\[\s*((?:[^[\]]*\\[a-zA-Z]+[^[\]]*)+)\s*\]$/gm, (_, body) => `$$${body.trim()}$$`);
+  return out;
+}
+
 function downloadPdf(contentEl) {
   if (!contentEl) return;
   const printWin = window.open("", "_blank", "width=800,height=600");
@@ -40,13 +56,18 @@ export function RenderPreview({ messages, streamingContent = "", isLoading = fal
   const contentRef = useRef(null);
 
   const latestAgentContent = useMemo(() => {
-    if (isLoading && streamingContent) return streamingContent;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].type === "agent" && messages[i].content) {
-        return messages[i].content;
+    let raw = "";
+    if (isLoading && streamingContent) {
+      raw = streamingContent;
+    } else {
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].type === "agent" && messages[i].content) {
+          raw = messages[i].content;
+          break;
+        }
       }
     }
-    return "";
+    return normalizeMath(raw);
   }, [messages, streamingContent, isLoading]);
 
   const handleDownloadPdf = useCallback(() => {

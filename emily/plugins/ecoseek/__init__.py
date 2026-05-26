@@ -45,10 +45,10 @@ _REMOTE_URL = os.environ.get(
     "HERMES_REMOTE_URL", "https://hermes.ecoseek.org"
 ).rstrip("/")
 _API_KEY = os.environ.get("HERMES_ECOSEEK_API_KEY", "")
-_MODEL = os.environ.get("HERMES_REMOTE_MODEL", "hermes-agent")
+_MODEL = os.environ.get("HERMES_REMOTE_MODEL", "hermes-fast")
 _MODEL_FAST = os.environ.get("HERMES_FAST_MODEL", "hermes-fast")
 _MODEL_REASONER = os.environ.get("HERMES_REASONER_MODEL", "hermes-reasoner")
-_TIMEOUT = int(os.environ.get("HERMES_REMOTE_TIMEOUT", "300"))
+_TIMEOUT = int(os.environ.get("HERMES_REMOTE_TIMEOUT", "60"))
 _MAX_TURNS = int(os.environ.get("DIDAL_MAX_TURNS", "12"))
 _STUCK_THRESHOLD = int(os.environ.get("DIDAL_STUCK_THRESHOLD", "3"))
 
@@ -151,7 +151,7 @@ _REASONING_MODE_MAP = {
 _REASONING_MODEL_MAP = {
     "fast": _MODEL_FAST,         # hermes-fast: bypass agent loop, sub-second TTFT
     "deep": _MODEL_REASONER,     # hermes-reasoner: bypass + thinking mode
-    # "auto" / None → _MODEL (hermes-agent: full agentic loop)
+    # "auto" / None → _MODEL_FAST (each stage picks its own model)
 }
 
 
@@ -188,7 +188,8 @@ def didal_protocol_tool(
     effective_mode = mode or _REASONING_MODE_MAP.get(frontend_mode or "", "") or None
 
     # Select Hermes model based on reasoning mode
-    effective_model = _REASONING_MODEL_MAP.get(frontend_mode or "", _MODEL)
+    # In auto mode, pass None so each protocol stage picks its optimal model
+    effective_model = _REASONING_MODEL_MAP.get(frontend_mode or "") if frontend_mode else None
 
     from .protocol import run_didal_protocol
     return run_didal_protocol(
@@ -821,6 +822,51 @@ R_WORKSPACE_STATUS_SCHEMA = {
     "parameters": {"type": "object", "properties": {}},
 }
 
+RUN_NICHE_MODEL_SCHEMA = {
+    "name": "run_niche_model",
+    "description": (
+        "Run the ellipsoidal niche modeling pipeline for a species. "
+        "10-step algorithm: (1) Get GBIF occurrences, (2) filter unique, "
+        "(3) remove outliers (IQR), (4) extract CHELSA bioclim, "
+        "(5) deduplicate coords, (6) fit nicher ellipsoid (presence_only), "
+        "(7) build M mask from ecoregions (>5% threshold), "
+        "(8) crop bioclim with M mask, (9) project ellipse, "
+        "(10) write suitability GeoTIFF. "
+        "Uses nicher package with CHELSA bioclim and WWF ecoregions. "
+        "Data sources: GBIF parquet (cluster) or GBIF API."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "species": {
+                "type": "string",
+                "description": "Scientific name (e.g., 'Panthera onca').",
+            },
+            "num_starts": {
+                "type": "integer",
+                "description": "Multi-start optimization restarts (default: 20).",
+            },
+            "iqr_factor": {
+                "type": "number",
+                "description": "IQR multiplier for outlier removal (default: 1.5).",
+            },
+            "ecoregion_pct": {
+                "type": "number",
+                "description": "Min fraction of points to keep ecoregion (default: 0.05).",
+            },
+            "bioclim_vars": {
+                "type": "string",
+                "description": "Comma-separated bioclim vars (default: bio01-bio19).",
+            },
+            "use_gbif_api": {
+                "type": "boolean",
+                "description": "Query GBIF API instead of local parquet (default: false).",
+            },
+        },
+        "required": ["species"],
+    },
+}
+
 
 # ---------------------------------------------------------------------------
 # register(ctx) — Plugin system entry point
@@ -911,7 +957,9 @@ def register(ctx) -> None:
     )
 
     # R Workspace tools (available when r-workspace container is running)
-    from .r_executor import execute_r_code, list_r_packages, r_workspace_status
+    from .r_executor import (
+        execute_r_code, list_r_packages, r_workspace_status, run_niche_model,
+    )
 
     ctx.register_tool(
         name="execute_r_code",
@@ -942,9 +990,25 @@ def register(ctx) -> None:
         check_fn=lambda: True,
     )
 
-    n = 10 if _is_configured() else 6
+    ctx.register_tool(
+        name="run_niche_model",
+        toolset="ecoseek",
+        schema=RUN_NICHE_MODEL_SCHEMA,
+        handler=lambda args, **kw: run_niche_model(
+            species=args.get("species", ""),
+            num_starts=args.get("num_starts", 20),
+            iqr_factor=args.get("iqr_factor", 1.5),
+            ecoregion_pct=args.get("ecoregion_pct", 0.05),
+            bioclim_vars=args.get("bioclim_vars", "bio01,bio02,bio03,bio04,bio05,bio06,bio07,bio08,bio09,bio10,bio11,bio12,bio13,bio14,bio15,bio16,bio17,bio18,bio19"),
+            use_gbif_api=args.get("use_gbif_api", False),
+            task_id=kw.get("task_id"),
+        ),
+        check_fn=lambda: True,
+    )
+
+    n = 11 if _is_configured() else 7
     logger.info(
-        "ecoseek plugin registered: %d tools, remote=%s configured=%s didal=v2 ecoagent=true r_workspace=true",
+        "ecoseek plugin registered: %d tools, remote=%s configured=%s didal=v2 ecoagent=true r_workspace=true niche=true",
         n, _REMOTE_URL, _is_configured(),
     )
 
