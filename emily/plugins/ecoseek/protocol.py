@@ -587,18 +587,32 @@ def _assemble_report(
             draft = reparsed
             sections = draft.get("sections", {})
         else:
-            # Last resort: return cleaned raw text (strip markdown fences)
+            # Raw text fallback — still append references from evidence/inline
             raw = draft["raw_response"]
             raw = re.sub(r"^```(?:json)?\s*\n", "", raw.strip())
             raw = re.sub(r"\n```\s*$", "", raw)
+            # Extract inline citations from the raw text and append bibliography
+            inline_refs = _extract_inline_citations(raw)
+            refs_text = _build_references(inline_refs, evidence)
+            if refs_text:
+                raw += f"\n\n## References\n{refs_text}\n"
             return raw
 
     title = task_object.get("task_type", "Ecological Analysis").replace("_", " ").title()
     question = task_object.get("user_question", prompt)
 
     # Build references: combine LLM-generated refs with API-retrieved sources
+    # Also extract inline citations (e.g. "Author et al., 2020") from all text
     llm_refs = draft.get("references", [])
-    refs_text = _build_references(llm_refs, evidence)
+    if not llm_refs:
+        # LLM didn't include a references field — extract from evidence_used
+        llm_refs = draft.get("evidence_used", [])
+    # Also scan section text for inline citations the LLM mentioned but didn't list
+    all_section_text = " ".join(str(v) for v in sections.values())
+    all_section_text += " " + draft.get("thesis", "")
+    inline_refs = _extract_inline_citations(all_section_text)
+    combined_refs = list(llm_refs or []) + inline_refs
+    refs_text = _build_references(combined_refs, evidence)
 
     try:
         report = MINI_REPORT_TEMPLATE.format(
@@ -636,20 +650,63 @@ def _assemble_report(
     return report
 
 
+def _extract_inline_citations(text: str) -> list[str]:
+    """Extract inline citations like 'Author et al. (2020)' or '(Smith & Jones, 2019)' from text.
+
+    Returns a deduplicated list of citation strings found in the text.
+    These are best-effort extractions — not full bibliographic entries,
+    but they help _build_references match against API sources.
+    """
+    if not text:
+        return []
+
+    patterns = [
+        # (Author et al., 2020) or (Author & Co, 2019)
+        r"\(([A-Z][a-z]+(?:\s+(?:et\s+al\.?|&\s+[A-Z][a-z]+))?(?:,?\s*\d{4}))\)",
+        # Author et al. (2020) — freestanding
+        r"([A-Z][a-z]+\s+et\s+al\.?\s*(?:\(?\d{4}\)?))",
+    ]
+    found: list[str] = []
+    seen: set[str] = set()
+    for pat in patterns:
+        for m in re.finditer(pat, text):
+            cite = m.group(1).strip().rstrip(".")
+            key = cite.lower()
+            if key not in seen and len(cite) > 8:
+                seen.add(key)
+                found.append(cite)
+    return found
+
+
 def _build_references(llm_refs: list, evidence: dict | None) -> str:
-    """Combine LLM-generated references with API-retrieved sources."""
-    lines: list[str] = []
+    """Combine LLM-generated references with API-retrieved sources.
+
+    Priority: full LLM bibliographic entries first, then API-retrieved sources.
+    Short inline citations (e.g. 'Larson 1997') are dropped in favour of the
+    full API entries that match by author surname + year.
+    """
+    full_entries: list[str] = []
+    short_cites: list[str] = []
     seen_lower: set[str] = set()
 
-    # 1) LLM-generated references (from the "references" field in draft JSON)
+    # Split LLM refs into full entries vs short inline citations
     for ref in (llm_refs or []):
-        if isinstance(ref, str) and ref.strip():
-            key = ref.strip().lower()[:80]
+        if not isinstance(ref, str) or not ref.strip():
+            continue
+        entry = ref.strip()
+        # A "full" entry has >= 40 chars or contains a period after a year
+        is_full = len(entry) > 40 or re.search(r"\d{4}\)", entry) and "." in entry[entry.find(")") + 1:] if ")" in entry else False
+        if is_full:
+            key = entry.lower()[:80]
             if key not in seen_lower:
                 seen_lower.add(key)
-                lines.append(ref.strip())
+                full_entries.append(entry)
+        else:
+            short_cites.append(entry)
 
-    # 2) API-retrieved sources (from literature retrieval stage)
+    # Build API source entries
+    api_entries: list[str] = []
+    api_author_years: set[str] = set()
     if evidence and isinstance(evidence, dict):
         for src in evidence.get("sources", []):
             title = src.get("title", "").strip()
@@ -668,8 +725,29 @@ def _build_references(llm_refs: list, evidence: dict | None) -> str:
                 entry += f" DOI: [{doi}](https://doi.org/{doi})"
             elif url:
                 entry += f" [{url}]({url})"
-            lines.append(entry)
+            api_entries.append(entry)
+            # Track author-year combos for dedup against short cites
+            surname = authors.split(",")[0].split(" ")[0].lower().strip()
+            if surname and year:
+                api_author_years.add(f"{surname} {year}")
 
+    # Only add short citations that aren't already covered by API sources
+    for cite in short_cites:
+        cite_lower = cite.lower()
+        # Check if any API source shares the same surname and year
+        already_covered = False
+        for ay in api_author_years:
+            surname, year = ay.rsplit(" ", 1)
+            if surname in cite_lower and year in cite_lower:
+                already_covered = True
+                break
+        if not already_covered:
+            key = cite_lower[:80]
+            if key not in seen_lower:
+                seen_lower.add(key)
+                full_entries.append(cite)
+
+    lines = full_entries + api_entries
     if not lines:
         return ""
 
@@ -912,9 +990,9 @@ def _run_protocol_inner(
             task_object = frame_result["task_object"]
             sctx["tokens_used"] = frame_result.get("usage", {}).get("total_tokens", 0)
 
-        # Stage 2: Retrieve evidence (only for didal_literature)
+        # Stage 2: Retrieve evidence (all didal modes need references)
         evidence = None
-        if mode == "didal_literature":
+        if mode in ("didal", "didal_literature"):
             _check_timeout("retrieve")
             _emit_progress("Retrieving", "searching literature databases")
             with trace_stage("backend.retrieve", tctx, agent_role="backend_expert",
