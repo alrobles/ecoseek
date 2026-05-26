@@ -1,28 +1,9 @@
 import React, { useState } from "react";
-import katex from "katex";
-import "katex/dist/katex.min.css";
-
-function renderKatex(tex, displayMode) {
-  try {
-    return katex.renderToString(tex, {
-      displayMode,
-      throwOnError: false,
-      trust: true,
-      strict: false,
-    });
-  } catch {
-    return null;
-  }
-}
+import { MathJax } from "better-react-mathjax";
 
 export function MathInline({ value }) {
   const [showCopy, setShowCopy] = useState(false);
   const [copied, setCopied] = useState(false);
-  const html = renderKatex(value, false);
-
-  if (!html) {
-    return <code>{value}</code>;
-  }
 
   const handleCopy = async (e) => {
     e.stopPropagation();
@@ -46,14 +27,14 @@ export function MathInline({ value }) {
       onMouseEnter={() => setShowCopy(true)}
       onMouseLeave={() => { setShowCopy(false); setCopied(false); }}
     >
-      <span dangerouslySetInnerHTML={{ __html: html }} />
+      <MathJax inline>{`\\(${value}\\)`}</MathJax>
       {showCopy && (
         <button
           className={`math-copy-button inline ${copied ? "copied" : ""}`}
           onClick={handleCopy}
           title="Copy LaTeX"
         >
-          {copied ? "✓" : "TeX"}
+          {copied ? "\u2713" : "TeX"}
         </button>
       )}
     </span>
@@ -62,15 +43,6 @@ export function MathInline({ value }) {
 
 export function MathBlock({ value }) {
   const [copied, setCopied] = useState(false);
-  const html = renderKatex(value, true);
-
-  if (!html) {
-    return (
-      <pre className="math-fallback">
-        <code>{value}</code>
-      </pre>
-    );
-  }
 
   const handleCopy = async () => {
     try {
@@ -89,7 +61,9 @@ export function MathBlock({ value }) {
 
   return (
     <div className="math-block-wrapper">
-      <div className="math-block-content" dangerouslySetInnerHTML={{ __html: html }} />
+      <div className="math-block-content">
+        <MathJax>{`\\[${value}\\]`}</MathJax>
+      </div>
       <button
         className={`math-copy-button block ${copied ? "copied" : ""}`}
         onClick={handleCopy}
