@@ -773,6 +773,56 @@ DIALECTICAL_EXCHANGE_SCHEMA = {
 
 
 # ---------------------------------------------------------------------------
+# R Workspace tool schemas
+# ---------------------------------------------------------------------------
+
+EXECUTE_R_CODE_SCHEMA = {
+    "name": "execute_r_code",
+    "description": (
+        "Execute R code in the rocker/geospatial workspace container. "
+        "Pre-installed packages: sf, terra, raster, dismo, vegan, ape, "
+        "picante, phytools, rgbif, taxize, ENMeval, spocc, CoordinateCleaner, "
+        "biomod2, rnaturalearth, geodata, sdm, tidyverse, ggplot2, and more. "
+        "Use this for: species distribution modeling, GBIF data queries, "
+        "biodiversity analysis, spatial analysis, phylogenetic analysis, "
+        "statistical modeling, and generating plots. "
+        "Code runs in /workspace/jobs/<job_id>/ — output files (plots, CSVs) "
+        "are saved there and returned in the response."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "code": {
+                "type": "string",
+                "description": "R code to execute. Use library() for packages.",
+            },
+            "timeout": {
+                "type": "integer",
+                "description": "Max execution time in seconds (default: 300).",
+            },
+            "job_id": {
+                "type": "string",
+                "description": "Optional job identifier for tracking.",
+            },
+        },
+        "required": ["code"],
+    },
+}
+
+LIST_R_PACKAGES_SCHEMA = {
+    "name": "list_r_packages",
+    "description": "List all R packages installed in the geospatial workspace.",
+    "parameters": {"type": "object", "properties": {}},
+}
+
+R_WORKSPACE_STATUS_SCHEMA = {
+    "name": "r_workspace_status",
+    "description": "Check if the R geospatial workspace container is running and available.",
+    "parameters": {"type": "object", "properties": {}},
+}
+
+
+# ---------------------------------------------------------------------------
 # register(ctx) — Plugin system entry point
 # ---------------------------------------------------------------------------
 
@@ -860,9 +910,41 @@ def register(ctx) -> None:
         check_fn=_is_configured,
     )
 
-    n = 7 if _is_configured() else 3
+    # R Workspace tools (available when r-workspace container is running)
+    from .r_executor import execute_r_code, list_r_packages, r_workspace_status
+
+    ctx.register_tool(
+        name="execute_r_code",
+        toolset="ecoseek",
+        schema=EXECUTE_R_CODE_SCHEMA,
+        handler=lambda args, **kw: execute_r_code(
+            code=args.get("code", ""),
+            timeout=args.get("timeout"),
+            job_id=args.get("job_id"),
+            task_id=kw.get("task_id"),
+        ),
+        check_fn=lambda: True,
+    )
+
+    ctx.register_tool(
+        name="list_r_packages",
+        toolset="ecoseek",
+        schema=LIST_R_PACKAGES_SCHEMA,
+        handler=lambda args, **kw: list_r_packages(task_id=kw.get("task_id")),
+        check_fn=lambda: True,
+    )
+
+    ctx.register_tool(
+        name="r_workspace_status",
+        toolset="ecoseek",
+        schema=R_WORKSPACE_STATUS_SCHEMA,
+        handler=lambda args, **kw: r_workspace_status(task_id=kw.get("task_id")),
+        check_fn=lambda: True,
+    )
+
+    n = 10 if _is_configured() else 6
     logger.info(
-        "ecoseek plugin registered: %d tools, remote=%s configured=%s didal=v2 ecoagent=true",
+        "ecoseek plugin registered: %d tools, remote=%s configured=%s didal=v2 ecoagent=true r_workspace=true",
         n, _REMOTE_URL, _is_configured(),
     )
 
@@ -954,6 +1036,37 @@ try:
             task_id=kw.get("task_id"),
         ),
         check_fn=_is_configured,
+        requires_env=[],
+    )
+    from .r_executor import execute_r_code, list_r_packages, r_workspace_status
+
+    registry.register(
+        name="execute_r_code",
+        toolset="ecoseek",
+        schema=EXECUTE_R_CODE_SCHEMA,
+        handler=lambda args, **kw: execute_r_code(
+            code=args.get("code", ""),
+            timeout=args.get("timeout"),
+            job_id=args.get("job_id"),
+            task_id=kw.get("task_id"),
+        ),
+        check_fn=lambda: True,
+        requires_env=[],
+    )
+    registry.register(
+        name="list_r_packages",
+        toolset="ecoseek",
+        schema=LIST_R_PACKAGES_SCHEMA,
+        handler=lambda args, **kw: list_r_packages(task_id=kw.get("task_id")),
+        check_fn=lambda: True,
+        requires_env=[],
+    )
+    registry.register(
+        name="r_workspace_status",
+        toolset="ecoseek",
+        schema=R_WORKSPACE_STATUS_SCHEMA,
+        handler=lambda args, **kw: r_workspace_status(task_id=kw.get("task_id")),
+        check_fn=lambda: True,
         requires_env=[],
     )
 except ImportError:
