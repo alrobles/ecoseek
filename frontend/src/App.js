@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
-import "katex/dist/katex.min.css";
+import { MathJax } from "better-react-mathjax";
 import "./App.css";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { ResizableLayout } from "./components/ResizableLayout";
@@ -15,15 +13,6 @@ import emilyThinking from "./emily-avatar-thinking.gif";
 import { useAuth } from "./contexts/AuthContext";
 import { chatCompletionStream, checkHealth, checkRemoteHealth, BROKER_URL, CHAT_URL, IS_LOCAL_EMILY, HERMES_REMOTE_URL } from "./api/broker";
 import { ToolCallsContainer } from "./components/ToolCallCard";
-
-/** Normalize LaTeX: \[...\] → $$...$$, \(...\) → $...$, bare [LaTeX] → $$...$$ */
-function normalizeMath(text) {
-  if (!text) return text;
-  let out = text.replace(/\\\[([\s\S]*?)\\\]/g, (_, b) => `$$${b.trim()}$$`);
-  out = out.replace(/\\\(([\s\S]*?)\\\)/g, (_, b) => `$${b.trim()}$`);
-  out = out.replace(/^\[\s*((?:[^[\]]*\\[a-zA-Z]+[^[\]]*)+)\s*\]$/gm, (_, b) => `$$${b.trim()}$$`);
-  return out;
-}
 
 function LoginScreen({ onLogin }) {
   return (
@@ -444,24 +433,24 @@ function App() {
                       <ToolCallsContainer toolCalls={msg.toolCalls} status="done" />
                     )}
                     <div className="message-content">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkMath]}
-                        rehypePlugins={[rehypeKatex]}
-                        components={{
-                          code({ node, inline, className, children, ...props }) {
-                            if (inline) {
-                              return <code className="inline-code" {...props}>{children}</code>;
-                            }
-                            return (
-                              <CodeBlock className={className} theme={currentTheme}>
-                                {children}
-                              </CodeBlock>
-                            );
-                          },
-                        }}
-                      >
-                        {normalizeMath(msg.content)}
-                      </ReactMarkdown>
+                      <MathJax>
+                        <ReactMarkdown
+                          components={{
+                            code({ node, inline, className, children, ...props }) {
+                              if (inline) {
+                                return <code className="inline-code" {...props}>{children}</code>;
+                              }
+                              return (
+                                <CodeBlock className={className} theme={currentTheme}>
+                                  {children}
+                                </CodeBlock>
+                              );
+                            },
+                          }}
+                        >
+                          {msg.content}
+                        </ReactMarkdown>
+                      </MathJax>
                     </div>
                   </div>
                 ))
@@ -485,24 +474,24 @@ function App() {
                   )}
                   {streamingContent && (
                     <div className="message-content">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkMath]}
-                        rehypePlugins={[rehypeKatex]}
-                        components={{
-                          code({ node, inline, className, children, ...props }) {
-                            if (inline) {
-                              return <code className="inline-code" {...props}>{children}</code>;
-                            }
-                            return (
-                              <CodeBlock className={className} theme={currentTheme}>
-                                {children}
-                              </CodeBlock>
-                            );
-                          },
-                        }}
-                      >
-                        {normalizeMath(streamingContent)}
-                      </ReactMarkdown>
+                      <MathJax>
+                        <ReactMarkdown
+                          components={{
+                            code({ node, inline, className, children, ...props }) {
+                              if (inline) {
+                                return <code className="inline-code" {...props}>{children}</code>;
+                              }
+                              return (
+                                <CodeBlock className={className} theme={currentTheme}>
+                                  {children}
+                                </CodeBlock>
+                              );
+                            },
+                          }}
+                        >
+                          {streamingContent}
+                        </ReactMarkdown>
+                      </MathJax>
                     </div>
                   )}
                 </div>
