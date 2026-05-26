@@ -654,70 +654,55 @@ def retrieve_literature(
     # Build a minimal trace context for retrieval spans
     _tctx: dict = {"protocol_id": "retrieval"}
 
-    # --- Source 1: OpenAlex (always, primary) ---
+    # --- Parallel retrieval of all sources (ThreadPoolExecutor) ---
+    # Previously sequential (~14s). Now concurrent (~3-4s, limited by slowest).
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _search_source(name: str, fn, q: str, max_r: int) -> tuple[str, list[Evidence], str | None]:
+        """Wrapper that returns (source_name, results, error_or_None)."""
+        try:
+            return (name, fn(q, max_results=max_r), None)
+        except Exception as exc:
+            return (name, [], str(exc)[:200])
+
+    # Build list of search tasks
+    search_tasks: list[tuple[str, object, str, int]] = []
+
+    # Source 1: OpenAlex (always, primary) — submit for each query variant
     for q in queries[:2]:
-        with trace_retrieval_source("openalex", _tctx, q) as src_ctx:
-            try:
-                results = search_openalex(q, max_results=max_per_source)
-                all_evidence.extend(results)
-                provider_stats["openalex"] = provider_stats.get("openalex", 0) + len(results)
-                src_ctx["results_count"] = len(results)
-            except Exception as exc:
-                errors.append(f"openalex: {exc}")
-                src_ctx["error"] = str(exc)[:200]
-                logger.warning("OpenAlex search failed: %s", exc)
+        search_tasks.append(("openalex", search_openalex, q, max_per_source))
 
-    # --- Source 2: Semantic Scholar (Tier B only) ---
+    # Source 2-4: Tier B sources
     if tier == "B":
-        with trace_retrieval_source("semantic_scholar", _tctx, query) as src_ctx:
-            try:
-                results = search_semantic_scholar(query, max_results=max_per_source)
-                all_evidence.extend(results)
-                provider_stats["semantic_scholar"] = len(results)
-                src_ctx["results_count"] = len(results)
-            except Exception as exc:
-                errors.append(f"semantic_scholar: {exc}")
-                src_ctx["error"] = str(exc)[:200]
-                logger.warning("Semantic Scholar search failed: %s", exc)
+        search_tasks.append(("semantic_scholar", search_semantic_scholar, query, max_per_source))
+        if _GBIF_LIT_ENABLED:
+            search_tasks.append(("gbif", search_gbif_literature, query, max_per_source))
+        search_tasks.append(("entrez", search_entrez, query, max_per_source))
 
-    # --- Source 3: GBIF Literature (Tier B, ecology-specific) ---
-    if tier == "B" and _GBIF_LIT_ENABLED:
-        with trace_retrieval_source("gbif", _tctx, query) as src_ctx:
-            try:
-                results = search_gbif_literature(query, max_results=max_per_source)
-                all_evidence.extend(results)
-                provider_stats["gbif"] = len(results)
-                src_ctx["results_count"] = len(results)
-            except Exception as exc:
-                errors.append(f"gbif: {exc}")
-                src_ctx["error"] = str(exc)[:200]
-                logger.warning("GBIF Literature search failed: %s", exc)
-
-    # --- Source 4: Entrez/PubMed (Tier B, works without API key) ---
-    if tier == "B":
-        with trace_retrieval_source("entrez", _tctx, query) as src_ctx:
-            try:
-                results = search_entrez(query, max_results=max_per_source)
-                all_evidence.extend(results)
-                provider_stats["entrez"] = len(results)
-                src_ctx["results_count"] = len(results)
-            except Exception as exc:
-                errors.append(f"entrez: {exc}")
-                src_ctx["error"] = str(exc)[:200]
-                logger.warning("Entrez search failed: %s", exc)
-
-    # --- Source 5: EcoAgent RAG on reumanlab (via Hermes) ---
+    # Source 5: EcoAgent RAG (via Hermes)
     if _ecoagent_available():
-        with trace_retrieval_source("ecoagent", _tctx, query) as src_ctx:
+        search_tasks.append(("ecoagent", search_ecoagent_literature, query, max_per_source))
+
+    # Execute all searches in parallel (max 10s total timeout)
+    with ThreadPoolExecutor(max_workers=min(len(search_tasks), 6)) as pool:
+        futures = {
+            pool.submit(_search_source, name, fn, q, max_r): name
+            for name, fn, q, max_r in search_tasks
+        }
+        for future in as_completed(futures, timeout=15):
+            source_name = futures[future]
             try:
-                results = search_ecoagent_literature(query, max_results=max_per_source)
-                all_evidence.extend(results)
-                provider_stats["ecoagent"] = len(results)
-                src_ctx["results_count"] = len(results)
+                name, results, err = future.result()
+                if err:
+                    errors.append(f"{name}: {err}")
+                    logger.warning("%s search failed: %s", name, err)
+                elif results:
+                    all_evidence.extend(results)
+                    provider_stats[name] = provider_stats.get(name, 0) + len(results)
+                    logger.info("%s returned %d results", name, len(results))
             except Exception as exc:
-                errors.append(f"ecoagent: {exc}")
-                src_ctx["error"] = str(exc)[:200]
-                logger.warning("EcoAgent search failed: %s", exc)
+                errors.append(f"{source_name}: {exc}")
+                logger.warning("%s future failed: %s", source_name, exc)
 
     # --- Deduplicate by DOI ---
     seen_dois: set[str] = set()
