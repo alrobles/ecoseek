@@ -16,6 +16,15 @@ import { useAuth } from "./contexts/AuthContext";
 import { chatCompletionStream, checkHealth, checkRemoteHealth, BROKER_URL, CHAT_URL, IS_LOCAL_EMILY, HERMES_REMOTE_URL } from "./api/broker";
 import { ToolCallsContainer } from "./components/ToolCallCard";
 
+/** Normalize LaTeX: \[...\] → $$...$$, \(...\) → $...$, bare [LaTeX] → $$...$$ */
+function normalizeMath(text) {
+  if (!text) return text;
+  let out = text.replace(/\\\[([\s\S]*?)\\\]/g, (_, b) => `$$${b.trim()}$$`);
+  out = out.replace(/\\\(([\s\S]*?)\\\)/g, (_, b) => `$${b.trim()}$`);
+  out = out.replace(/^\[\s*((?:[^[\]]*\\[a-zA-Z]+[^[\]]*)+)\s*\]$/gm, (_, b) => `$$${b.trim()}$$`);
+  return out;
+}
+
 function LoginScreen({ onLogin }) {
   return (
     <div className="login-screen">
@@ -451,7 +460,7 @@ function App() {
                           },
                         }}
                       >
-                        {msg.content}
+                        {normalizeMath(msg.content)}
                       </ReactMarkdown>
                     </div>
                   </div>
@@ -492,7 +501,7 @@ function App() {
                           },
                         }}
                       >
-                        {streamingContent}
+                        {normalizeMath(streamingContent)}
                       </ReactMarkdown>
                     </div>
                   )}
