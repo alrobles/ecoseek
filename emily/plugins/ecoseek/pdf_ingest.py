@@ -8,6 +8,7 @@ Dependencies:
     pdfplumber (preferred) or PyMuPDF (fitz) — added to Emily Dockerfile.
     Falls back to a no-op if neither is available.
 """
+
 from __future__ import annotations
 
 import logging

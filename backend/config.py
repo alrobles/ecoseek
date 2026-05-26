@@ -44,10 +44,16 @@ from dotenv import load_dotenv
 load_dotenv()  # loads .env if present (dev only; prod uses docker env)
 
 # ── AgenticPlug (internal docker network) ─────────────────────────────────
-AGENTICPLUG_URL: str = os.getenv("AGENTICPLUG_URL", "http://agenticplug:8080").rstrip("/")
+AGENTICPLUG_URL: str = os.getenv("AGENTICPLUG_URL", "http://agenticplug:8080").rstrip(
+    "/"
+)
 
 # Hermes orchestration service (optional; disabled by default).
-HERMES_ENABLED: bool = os.getenv("HERMES_ENABLED", "false").lower() in ("1", "true", "yes")
+HERMES_ENABLED: bool = os.getenv("HERMES_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 HERMES_URL: str = os.getenv("HERMES_URL", "").rstrip("/")
 HERMES_API_KEY: str = os.getenv("HERMES_API_KEY", "")
 
@@ -62,6 +68,10 @@ LOCAL_LLM_API_KEY: str = os.getenv("LOCAL_LLM_API_KEY", "")
 BACKEND_PORT: int = int(os.getenv("BACKEND_PORT", "3000"))
 
 # ── Phoenix observability (tracing disabled by default) ───────────────────
-PHOENIX_ENABLED: bool = os.getenv("PHOENIX_ENABLED", "false").lower() in ("1", "true", "yes")
+PHOENIX_ENABLED: bool = os.getenv("PHOENIX_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 PHOENIX_ENDPOINT: str = os.getenv("PHOENIX_ENDPOINT", "http://phoenix:6006/v1/traces")
 PHOENIX_PROJECT_NAME: str = os.getenv("PHOENIX_PROJECT_NAME", "ecoseek")
