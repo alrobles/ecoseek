@@ -2,8 +2,8 @@
 
 The agent calls ``query_gbif_cluster(...)``; the function POSTs the
 ``gbif.query`` capability to AgenticPlug, which routes it to the reumanlab
-connector, which executes ``gbif_query.R`` on KU-HPC and ships the cleaned
-Parquet result back base64-encoded. We decode it into a ``pandas.DataFrame``.
+connector, which executes ``gbif_query.R`` on KU-HPC and returns the cleaned
+occurrence data as a JSON list-of-lists envelope.
 
 The laptop client never holds cluster credentials — all auth lives in
 AgenticPlug (ADR-001, ADR-005). Risk class: ``read``. No approval required.
@@ -13,8 +13,6 @@ Contract: see https://github.com/alrobles/ecoseek/issues/71
 
 from __future__ import annotations
 
-import base64
-import io
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -25,7 +23,7 @@ logger = logging.getLogger("ecoseek.tools.gbif_cluster")
 # ── Constants from the capability contract (issue #71) ────────────────────
 CAPABILITY_NAME: str = "gbif.query"
 MAX_LIMIT: int = 100_000
-SPECIES_NAME_MAX_LEN: int = 200
+SPECIES_NAME_MAX_LEN: int = 128
 YEAR_MIN: int = 1700
 YEAR_MAX: int = 2100
 TAXON_KEY_MAX: int = 2_000_000_000
@@ -65,17 +63,12 @@ def _validate_args(
     year_range: Optional[Tuple[int, int]],
     limit: int,
 ) -> Dict[str, Any]:
-    """Validate inputs and return a JSON-safe dict for the capability payload.
-
-    Raises ``GbifClusterError("invalid_spec", ...)`` on any violation so the
-    bad call is rejected locally without burning a cluster round-trip.
-    """
+    """Validate inputs and return a JSON-safe dict for the capability payload."""
     if not isinstance(species_name, str) or len(species_name) > SPECIES_NAME_MAX_LEN:
         raise GbifClusterError(
             "invalid_spec",
             f"species_name must be a string of length <= {SPECIES_NAME_MAX_LEN}",
         )
-    # shell-meta guard mirrors connector/reumanlab/sanitize.js
     if any(ch in species_name for ch in ";|&$`><\n\x00"):
         raise GbifClusterError("invalid_spec", "species_name contains forbidden characters")
 
@@ -111,6 +104,13 @@ def _validate_args(
             f"limit must be an integer in [1, {MAX_LIMIT}]",
         )
 
+    # At least one filter required (no full-table scans)
+    if not species_name and taxon_key is None and bbox is None:
+        raise GbifClusterError(
+            "invalid_spec",
+            "at least one of species_name, taxon_key, or bbox is required",
+        )
+
     args: Dict[str, Any] = {"limit": limit}
     if species_name:
         args["species_name"] = species_name
@@ -123,26 +123,22 @@ def _validate_args(
     return args
 
 
-# ── Parquet decode ────────────────────────────────────────────────────────
+def _rows_to_dataframe(rows: List[list], schema: List[str]) -> Any:
+    """Convert list-of-lists rows into a pandas DataFrame.
 
-def _decode_parquet(b64_data: str) -> "Any":  # returns pd.DataFrame
-    """Decode base64+Parquet bytes into a pandas DataFrame.
-
-    Imported lazily so the backend can boot without pyarrow/pandas installed
+    Imported lazily so the backend can boot without pandas installed
     until the tool is actually called.
     """
     try:
-        import pyarrow.parquet as pq  # type: ignore[import-untyped]
-    except ImportError as exc:  # pragma: no cover — environment failure
+        import pandas as pd  # type: ignore[import-untyped]
+    except ImportError as exc:
         raise GbifClusterError(
             "missing_dep",
-            "pyarrow is required to decode gbif.query responses; "
-            "install ecoseek backend with the 'pyarrow' extra",
+            "pandas is required to decode gbif.query responses",
         ) from exc
 
-    raw = base64.b64decode(b64_data, validate=True)
-    table = pq.read_table(io.BytesIO(raw))
-    return table.to_pandas()
+    columns = schema if schema else list(EXPECTED_COLUMNS)
+    return pd.DataFrame(rows, columns=columns)
 
 
 # ── Public API ────────────────────────────────────────────────────────────
@@ -158,7 +154,7 @@ async def query_gbif_cluster(
     limit: int = 50_000,
     timeout_s: float = 180.0,
     http_client: Optional[httpx.AsyncClient] = None,
-) -> "Any":  # returns pd.DataFrame
+) -> Any:  # returns pd.DataFrame
     """Query the GBIF Parquet mirror on KU-HPC via AgenticPlug.
 
     Parameters
@@ -178,10 +174,9 @@ async def query_gbif_cluster(
     limit
         Maximum rows returned (capped at ``MAX_LIMIT`` = 100k per call).
     timeout_s
-        HTTP timeout for the whole round-trip (default 180s — cluster R + scp).
+        HTTP timeout for the whole round-trip (default 180s — cluster R + SSH).
     http_client
-        Optional ``httpx.AsyncClient`` to reuse a connection pool. Useful for
-        tests (inject a transport mock) and for tools that batch many calls.
+        Optional ``httpx.AsyncClient`` to reuse a connection pool.
 
     Returns
     -------
@@ -196,8 +191,8 @@ async def query_gbif_cluster(
         the response cannot be decoded.
     """
     args = _validate_args(species_name, taxon_key, bbox, year_range, limit)
-    payload = {"capability": CAPABILITY_NAME, "args": args}
-    url = f"{agenticplug_url.rstrip('/')}/v1/capabilities"
+    payload = {"capability": CAPABILITY_NAME, "payload": args}
+    url = f"{agenticplug_url.rstrip('/')}/v1/tasks"
     headers = {
         "Authorization": f"Bearer {session_id}",
         "Content-Type": "application/json",
@@ -223,53 +218,37 @@ async def query_gbif_cluster(
             "cluster_unreachable",
             f"AgenticPlug returned {response.status_code}",
         )
-    if response.status_code != 200:
-        raise GbifClusterError(
-            "bad_response",
-            f"AgenticPlug returned {response.status_code}",
-        )
 
     body = response.json()
 
-    # Connector error envelope: {"error": true, "code": "...", "message": "..."}
+    # Connector error envelope
     if isinstance(body, dict) and body.get("error"):
-        raise GbifClusterError(
-            str(body.get("code", "unknown_error")),
-            str(body.get("message", "")),
-            payload=body,
-        )
+        error_obj = body["error"]
+        if isinstance(error_obj, dict):
+            raise GbifClusterError(
+                str(error_obj.get("code", "unknown_error")),
+                str(error_obj.get("error", "")),
+                payload=body,
+            )
+        raise GbifClusterError("unknown_error", str(error_obj), payload=body)
 
-    if body.get("status") != "ok":
+    if body.get("status") != "completed":
         raise GbifClusterError(
             "bad_response",
             f"unexpected status={body.get('status')!r}",
             payload=body,
         )
 
-    if body.get("encoding") != "parquet+base64":
-        raise GbifClusterError(
-            "bad_response",
-            f"unsupported encoding={body.get('encoding')!r}",
-            payload=body,
-        )
+    result = body.get("result", {})
+    rows = result.get("data", [])
+    schema = result.get("schema", list(EXPECTED_COLUMNS))
+    row_count = result.get("row_count", len(rows))
 
-    data_b64 = body.get("data")
-    if not isinstance(data_b64, str) or not data_b64:
-        raise GbifClusterError("bad_response", "missing data field")
-
-    df = _decode_parquet(data_b64)
-
-    schema: List[str] = list(body.get("schema") or [])
-    if schema and tuple(schema) != EXPECTED_COLUMNS:
-        logger.warning(
-            "gbif.query schema mismatch: got %s expected %s",
-            schema, EXPECTED_COLUMNS,
-        )
+    df = _rows_to_dataframe(rows, schema)
 
     logger.info(
-        "gbif.query ← rows=%d job_id=%s bytes=%d",
-        body.get("row_count", len(df)),
-        body.get("job_id", "?"),
-        len(data_b64),
+        "gbif.query ← rows=%d task_id=%s",
+        row_count,
+        body.get("task_id", "?"),
     )
     return df
