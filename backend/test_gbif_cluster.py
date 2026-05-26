@@ -28,17 +28,21 @@ from tools.gbif_cluster import (
 
 def _fixture_parquet_b64(rows: int = 3) -> str:
     """Build a tiny in-memory Parquet payload that matches the contract schema."""
-    df = pd.DataFrame({
-        "decimalLatitude":  [54.1, 55.2, 56.3][:rows],
-        "decimalLongitude": [-3.1, -2.2, -1.3][:rows],
-        "species":          ["Caligus elongatus"] * rows,
-        "taxonKey":         [2227682] * rows,
-        "year":             [2018, 2019, 2020][:rows],
-        "month":            [5, 6, 7][:rows],
-        "basisOfRecord":    ["HUMAN_OBSERVATION"] * rows,
-    })
+    df = pd.DataFrame(
+        {
+            "decimalLatitude": [54.1, 55.2, 56.3][:rows],
+            "decimalLongitude": [-3.1, -2.2, -1.3][:rows],
+            "species": ["Caligus elongatus"] * rows,
+            "taxonKey": [2227682] * rows,
+            "year": [2018, 2019, 2020][:rows],
+            "month": [5, 6, 7][:rows],
+            "basisOfRecord": ["HUMAN_OBSERVATION"] * rows,
+        }
+    )
     buf = io.BytesIO()
-    pq.write_table(pa.Table.from_pandas(df, preserve_index=False), buf, compression="zstd")
+    pq.write_table(
+        pa.Table.from_pandas(df, preserve_index=False), buf, compression="zstd"
+    )
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
@@ -86,6 +90,7 @@ class HappyPath(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(received["url"], "http://broker/v1/capabilities")
         self.assertIn("Bearer sess-xyz", received["headers"]["authorization"])
         import json as _json
+
         body_obj = _json.loads(received["body"])
         self.assertEqual(body_obj["capability"], "gbif.query")
         self.assertEqual(body_obj["args"]["species_name"], "Caligus elongatus")
@@ -95,6 +100,7 @@ class HappyPath(unittest.IsolatedAsyncioTestCase):
 
         def handler(request: httpx.Request) -> httpx.Response:
             import json
+
             seen_args.update(json.loads(request.read())["args"])
             return httpx.Response(200, json=_ok_envelope(rows=1))
 
@@ -140,10 +146,14 @@ class ClientSideValidation(unittest.IsolatedAsyncioTestCase):
         return ctx.exception.code
 
     async def test_species_name_with_shell_meta_rejected(self):
-        self.assertEqual(await self._fails_with(species_name="evil; rm -rf /"), "invalid_spec")
+        self.assertEqual(
+            await self._fails_with(species_name="evil; rm -rf /"), "invalid_spec"
+        )
 
     async def test_species_name_too_long_rejected(self):
-        self.assertEqual(await self._fails_with(species_name="x" * 1000), "invalid_spec")
+        self.assertEqual(
+            await self._fails_with(species_name="x" * 1000), "invalid_spec"
+        )
 
     async def test_taxon_key_out_of_range_rejected(self):
         self.assertEqual(await self._fails_with(taxon_key=-1), "invalid_spec")
@@ -155,10 +165,14 @@ class ClientSideValidation(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_year_range_unordered_rejected(self):
-        self.assertEqual(await self._fails_with(year_range=(2023, 2010)), "invalid_spec")
+        self.assertEqual(
+            await self._fails_with(year_range=(2023, 2010)), "invalid_spec"
+        )
 
     async def test_year_range_out_of_bounds_rejected(self):
-        self.assertEqual(await self._fails_with(year_range=(1500, 1600)), "invalid_spec")
+        self.assertEqual(
+            await self._fails_with(year_range=(1500, 1600)), "invalid_spec"
+        )
 
     async def test_limit_too_big_rejected(self):
         self.assertEqual(await self._fails_with(limit=200_000), "invalid_spec")
@@ -171,7 +185,9 @@ class ClientSideValidation(unittest.IsolatedAsyncioTestCase):
 
 
 class ConnectorErrorEnvelopes(unittest.IsolatedAsyncioTestCase):
-    async def _connector_returns(self, body: dict, status: int = 200) -> GbifClusterError:
+    async def _connector_returns(
+        self, body: dict, status: int = 200
+    ) -> GbifClusterError:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(status, json=body)
 
@@ -227,6 +243,7 @@ class Defaults(unittest.IsolatedAsyncioTestCase):
 
         def handler(request: httpx.Request) -> httpx.Response:
             import json
+
             seen.update(json.loads(request.read())["args"])
             return httpx.Response(200, json=_ok_envelope(rows=1))
 

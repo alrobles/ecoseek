@@ -26,6 +26,7 @@ Environment variables:
     PHOENIX_COLLECTOR_ENDPOINT  — e.g. http://localhost:6006/v1/traces
     PHOENIX_PROJECT_NAME        — project name in Phoenix UI (default: ecoseek-didal)
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -67,11 +68,13 @@ def _get_tracer():
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-        resource = Resource.create({
-            "service.name": "ecoseek-emily",
-            "service.version": "1.0.0",
-            "phoenix.project.name": _PROJECT,
-        })
+        resource = Resource.create(
+            {
+                "service.name": "ecoseek-emily",
+                "service.version": "1.0.0",
+                "phoenix.project.name": _PROJECT,
+            }
+        )
 
         exporter = OTLPSpanExporter(endpoint=_ENDPOINT)
         processor = BatchSpanProcessor(exporter)
@@ -116,6 +119,7 @@ def shutdown():
 # Span helpers
 # ---------------------------------------------------------------------------
 
+
 def _prompt_hash(text: str) -> str:
     """Short hash of the prompt for trace correlation."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
@@ -128,6 +132,7 @@ def _set_span_attrs(span, attrs: dict[str, Any]):
             continue
         if isinstance(val, (list, dict)):
             import json
+
             span.set_attribute(key, json.dumps(val, ensure_ascii=False, default=str))
         elif isinstance(val, float):
             span.set_attribute(key, round(val, 4))
@@ -175,21 +180,29 @@ def trace_protocol(
     ) as root_span:
         ctx["root_span"] = root_span
         span_context = root_span.get_span_context()
-        ctx["trace_id"] = format(span_context.trace_id, "032x") if span_context else None
+        ctx["trace_id"] = (
+            format(span_context.trace_id, "032x") if span_context else None
+        )
 
-        _set_span_attrs(root_span, {
-            "didal.protocol_id": protocol_id,
-            "didal.mode": mode,
-            "didal.prompt_hash": ctx["prompt_hash"],
-            "input.value": prompt[:500],
-            "phoenix.project.name": _PROJECT,
-        })
+        _set_span_attrs(
+            root_span,
+            {
+                "didal.protocol_id": protocol_id,
+                "didal.mode": mode,
+                "didal.prompt_hash": ctx["prompt_hash"],
+                "input.value": prompt[:500],
+                "phoenix.project.name": _PROJECT,
+            },
+        )
         if classification:
-            _set_span_attrs(root_span, {
-                "didal.complexity_score": classification.get("complexity_score"),
-                "didal.reasons": classification.get("reasons"),
-                "didal.expected_depth": classification.get("expected_depth"),
-            })
+            _set_span_attrs(
+                root_span,
+                {
+                    "didal.complexity_score": classification.get("complexity_score"),
+                    "didal.reasons": classification.get("reasons"),
+                    "didal.expected_depth": classification.get("expected_depth"),
+                },
+            )
 
         try:
             yield ctx
@@ -199,11 +212,14 @@ def trace_protocol(
             raise
         finally:
             elapsed = round(time.time() - ctx["start_time"], 1)
-            _set_span_attrs(root_span, {
-                "didal.elapsed_seconds": elapsed,
-                "didal.critique_rounds": ctx.get("critique_rounds", 0),
-                "didal.total_sources": ctx.get("total_sources", 0),
-            })
+            _set_span_attrs(
+                root_span,
+                {
+                    "didal.elapsed_seconds": elapsed,
+                    "didal.critique_rounds": ctx.get("critique_rounds", 0),
+                    "didal.total_sources": ctx.get("total_sources", 0),
+                },
+            )
 
 
 @contextmanager
@@ -244,19 +260,24 @@ def trace_stage(
         try:
             yield stage_ctx
         finally:
-            stage_ctx["latency_ms"] = round((time.time() - stage_ctx["start_time"]) * 1000)
+            stage_ctx["latency_ms"] = round(
+                (time.time() - stage_ctx["start_time"]) * 1000
+            )
         return
 
     from opentelemetry import trace as otel_trace
 
     with tracer.start_as_current_span(stage_name) as span:
-        _set_span_attrs(span, {
-            "didal.stage": stage_name,
-            "didal.agent_role": agent_role,
-            "didal.protocol_id": ctx.get("protocol_id"),
-            "didal.prompt_hash": ctx.get("prompt_hash"),
-            "didal.round_index": round_index,
-        })
+        _set_span_attrs(
+            span,
+            {
+                "didal.stage": stage_name,
+                "didal.agent_role": agent_role,
+                "didal.protocol_id": ctx.get("protocol_id"),
+                "didal.prompt_hash": ctx.get("prompt_hash"),
+                "didal.round_index": round_index,
+            },
+        )
         _set_span_attrs(span, extra_attrs)
 
         try:
@@ -271,9 +292,16 @@ def trace_stage(
             _set_span_attrs(span, {"didal.latency_ms": latency})
 
             # Record stage-specific results
-            for key in ("tokens_used", "retrieved_sources", "evidence_used",
-                        "confidence", "quality", "requires_revision",
-                        "provider", "error"):
+            for key in (
+                "tokens_used",
+                "retrieved_sources",
+                "evidence_used",
+                "confidence",
+                "quality",
+                "requires_revision",
+                "provider",
+                "error",
+            ):
                 if key in stage_ctx:
                     _set_span_attrs(span, {f"didal.{key}": stage_ctx[key]})
 
@@ -305,12 +333,15 @@ def trace_retrieval_source(
     from opentelemetry import trace as otel_trace
 
     with tracer.start_as_current_span(f"retrieve.{provider}") as span:
-        _set_span_attrs(span, {
-            "didal.stage": "retrieve",
-            "didal.retrieval.provider": provider,
-            "didal.retrieval.query": query[:200],
-            "didal.protocol_id": ctx.get("protocol_id"),
-        })
+        _set_span_attrs(
+            span,
+            {
+                "didal.stage": "retrieve",
+                "didal.retrieval.provider": provider,
+                "didal.retrieval.query": query[:200],
+                "didal.protocol_id": ctx.get("protocol_id"),
+            },
+        )
         try:
             yield src_ctx
         except Exception as exc:
@@ -320,11 +351,14 @@ def trace_retrieval_source(
             raise
         finally:
             latency = round((time.time() - src_ctx["start_time"]) * 1000)
-            _set_span_attrs(span, {
-                "didal.latency_ms": latency,
-                "didal.retrieval.results_count": src_ctx.get("results_count", 0),
-                "didal.retrieval.error": src_ctx.get("error"),
-            })
+            _set_span_attrs(
+                span,
+                {
+                    "didal.latency_ms": latency,
+                    "didal.retrieval.results_count": src_ctx.get("results_count", 0),
+                    "didal.retrieval.error": src_ctx.get("error"),
+                },
+            )
 
 
 def record_llm_call(
@@ -339,11 +373,15 @@ def record_llm_call(
         return
 
     from opentelemetry import trace as otel_trace
+
     span = otel_trace.get_current_span()
     if span and span.is_recording():
-        _set_span_attrs(span, {
-            "llm.model_name": model,
-            "llm.token_count.prompt": usage.get("prompt_tokens", 0),
-            "llm.token_count.completion": usage.get("completion_tokens", 0),
-            "llm.token_count.total": usage.get("total_tokens", 0),
-        })
+        _set_span_attrs(
+            span,
+            {
+                "llm.model_name": model,
+                "llm.token_count.prompt": usage.get("prompt_tokens", 0),
+                "llm.token_count.completion": usage.get("completion_tokens", 0),
+                "llm.token_count.total": usage.get("total_tokens", 0),
+            },
+        )

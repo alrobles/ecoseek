@@ -9,6 +9,7 @@ stage-specific system prompts, then assembles the final mini-report.
 Progress logging: each stage emits a logger.info message with a stage tag
 so that gateway/CLI consumers can show real-time progress.
 """
+
 from __future__ import annotations
 
 import contextvars
@@ -51,9 +52,9 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ---------------------------------------------------------------------------
 
-_REMOTE_URL = os.environ.get(
-    "HERMES_REMOTE_URL", "https://hermes.ecoseek.org"
-).rstrip("/")
+_REMOTE_URL = os.environ.get("HERMES_REMOTE_URL", "https://hermes.ecoseek.org").rstrip(
+    "/"
+)
 _API_KEY = os.environ.get("HERMES_ECOSEEK_API_KEY", "")
 _MODEL = os.environ.get("HERMES_REMOTE_MODEL", "hermes-fast")
 _TIMEOUT = int(os.environ.get("HERMES_REMOTE_TIMEOUT", "30"))
@@ -88,6 +89,7 @@ def _hermes_is_healthy() -> bool:
         return _health_cache["ok"]
     try:
         from .http_client import http_get_json
+
         resp = http_get_json(f"{_REMOTE_URL}/v1/models", timeout=5)
         ok = resp is not None
     except Exception:
@@ -117,6 +119,7 @@ def _emit_progress(stage: str, detail: str = "") -> None:
 # ---------------------------------------------------------------------------
 # HTTP helper
 # ---------------------------------------------------------------------------
+
 
 def _beta_call(
     system_prompt: str,
@@ -261,7 +264,9 @@ def _beta_call_stream(
                             on_token(text)
                         # Emit progress every ~50 tokens so the user sees text building
                         if token_count % 50 == 0:
-                            _emit_progress("Drafting", f"{token_count} tokens generated")
+                            _emit_progress(
+                                "Drafting", f"{token_count} tokens generated"
+                            )
 
     except urllib.error.HTTPError as exc:
         err_body = ""
@@ -270,13 +275,25 @@ def _beta_call_stream(
         except Exception:
             pass
         if exc.code == 403 and ("1010" in err_body or "cloudflare" in err_body.lower()):
-            logger.info("Streaming blocked by Cloudflare, falling back to non-streaming")
-            return _beta_call(system_prompt, user_content, context_messages, timeout, model, trace)
-        logger.warning("Streaming request failed (HTTP %d): %s", exc.code, err_body[:200])
-        return _beta_call(system_prompt, user_content, context_messages, timeout, model, trace)
+            logger.info(
+                "Streaming blocked by Cloudflare, falling back to non-streaming"
+            )
+            return _beta_call(
+                system_prompt, user_content, context_messages, timeout, model, trace
+            )
+        logger.warning(
+            "Streaming request failed (HTTP %d): %s", exc.code, err_body[:200]
+        )
+        return _beta_call(
+            system_prompt, user_content, context_messages, timeout, model, trace
+        )
     except Exception as exc:
-        logger.warning("Streaming request failed: %s, falling back to non-streaming", exc)
-        return _beta_call(system_prompt, user_content, context_messages, timeout, model, trace)
+        logger.warning(
+            "Streaming request failed: %s, falling back to non-streaming", exc
+        )
+        return _beta_call(
+            system_prompt, user_content, context_messages, timeout, model, trace
+        )
 
     record_llm_call({}, resp_model, usage, stage="beta_call_stream")
     return {
@@ -284,7 +301,9 @@ def _beta_call_stream(
         "usage": usage,
         "model": resp_model,
         "hermes_trace": None,
-        "cached_tokens": (usage.get("prompt_tokens_details") or {}).get("cached_tokens"),
+        "cached_tokens": (usage.get("prompt_tokens_details") or {}).get(
+            "cached_tokens"
+        ),
         "streamed": True,
         "tokens_generated": token_count,
     }
@@ -320,7 +339,7 @@ def _parse_json_response(content: str) -> dict | None:
     brace_end = content.rfind("}")
     if brace_start >= 0 and brace_end > brace_start:
         try:
-            return json.loads(content[brace_start:brace_end + 1])
+            return json.loads(content[brace_start : brace_end + 1])
         except (json.JSONDecodeError, ValueError):
             pass
 
@@ -330,6 +349,7 @@ def _parse_json_response(content: str) -> dict | None:
 # ---------------------------------------------------------------------------
 # Stage implementations
 # ---------------------------------------------------------------------------
+
 
 def _stage_classify(prompt: str) -> dict:
     """Stage 0: Run the complexity classifier."""
@@ -355,7 +375,9 @@ def _stage_frame_task(prompt: str, classification: dict) -> dict:
         f"score={classification['complexity_score']}"
     )
     try:
-        result = _beta_call(FRAME_TASK_PROMPT, context, model=_FAST_MODEL, timeout=_STAGE_TIMEOUT)
+        result = _beta_call(
+            FRAME_TASK_PROMPT, context, model=_FAST_MODEL, timeout=_STAGE_TIMEOUT
+        )
         task_obj = _parse_json_response(result["content"])
         return {
             "stage": "frame_task",
@@ -420,7 +442,9 @@ def _stage_retrieve(task_object: dict, classification: dict) -> dict:
         }
     else:
         # Fallback: ask Beta to identify sources from its knowledge
-        context = f"Structured task:\n{json.dumps(task_object, indent=2, ensure_ascii=False)}"
+        context = (
+            f"Structured task:\n{json.dumps(task_object, indent=2, ensure_ascii=False)}"
+        )
         try:
             result = _beta_call(
                 f"{BETA_EXPERT_SYSTEM}\n\n{RETRIEVE_EVIDENCE_PROMPT}",
@@ -439,7 +463,10 @@ def _stage_retrieve(task_object: dict, classification: dict) -> dict:
             logger.warning("retrieve_evidence fallback failed: %s", exc)
             return {
                 "stage": "retrieve_evidence",
-                "evidence": {"sources": [], "retrieval_notes": f"All retrieval failed: {exc}"},
+                "evidence": {
+                    "sources": [],
+                    "retrieval_notes": f"All retrieval failed: {exc}",
+                },
                 "error": str(exc)[:200],
             }
 
@@ -450,13 +477,21 @@ def _stage_expert_draft(task_object: dict, evidence: dict | None) -> dict:
     Uses streaming when available so the user sees tokens arriving in real-time
     instead of waiting 15-30s for the full response.
     """
-    context_parts = [f"Structured task:\n{json.dumps(task_object, indent=2, ensure_ascii=False)}"]
+    context_parts = [
+        f"Structured task:\n{json.dumps(task_object, indent=2, ensure_ascii=False)}"
+    ]
     if evidence and evidence.get("sources"):
-        context_parts.append(f"\nRetrieved evidence:\n{json.dumps(evidence, indent=2, ensure_ascii=False)}")
+        context_parts.append(
+            f"\nRetrieved evidence:\n{json.dumps(evidence, indent=2, ensure_ascii=False)}"
+        )
 
     # Use streaming for the draft stage — this is the longest single call
     # and the user benefits most from seeing tokens arrive progressively.
-    stream_enabled = os.environ.get("DIDAL_STREAM_DRAFT", "true").lower() in ("true", "1", "yes")
+    stream_enabled = os.environ.get("DIDAL_STREAM_DRAFT", "true").lower() in (
+        "true",
+        "1",
+        "yes",
+    )
 
     try:
         call_fn = _beta_call_stream if stream_enabled else _beta_call
@@ -549,7 +584,9 @@ def _stage_revise(draft: dict, critique: dict, task_object: dict) -> dict:
 def _stage_direct(prompt: str) -> dict:
     """Direct mode: simple one-shot answer without dialectical loop."""
     try:
-        result = _beta_call(DIRECT_MODE_PROMPT, prompt, model=_FAST_MODEL, timeout=_STAGE_TIMEOUT)
+        result = _beta_call(
+            DIRECT_MODE_PROMPT, prompt, model=_FAST_MODEL, timeout=_STAGE_TIMEOUT
+        )
         return {
             "stage": "direct_answer",
             "content": result["content"],
@@ -568,6 +605,7 @@ def _stage_direct(prompt: str) -> dict:
 # ---------------------------------------------------------------------------
 # Report assembly
 # ---------------------------------------------------------------------------
+
 
 def _assemble_report(
     prompt: str,
@@ -598,7 +636,9 @@ def _assemble_report(
                 raw += f"\n\n## References\n{refs_text}\n"
             return raw
 
-    title = task_object.get("task_type", "Ecological Analysis").replace("_", " ").title()
+    title = (
+        task_object.get("task_type", "Ecological Analysis").replace("_", " ").title()
+    )
     question = task_object.get("user_question", prompt)
 
     # Build references: combine LLM-generated refs with API-retrieved sources
@@ -619,15 +659,27 @@ def _assemble_report(
             title=title,
             question_and_scope=f"**Question:** {question}\n**Scope:** {task_object.get('scope', 'ecology')}",
             short_answer=draft.get("thesis", "See synthesis below."),
-            definition=sections.get("definition", "*Not applicable for this question type.*"),
-            historical_development=sections.get("historical_development", "*Not covered in this analysis.*"),
+            definition=sections.get(
+                "definition", "*Not applicable for this question type.*"
+            ),
+            historical_development=sections.get(
+                "historical_development", "*Not covered in this analysis.*"
+            ),
             key_distinctions=sections.get("key_distinctions", "*Not applicable.*"),
-            evidence_and_references=sections.get("evidence_and_references", "*No specific references retrieved.*"),
-            competing_views=sections.get("competing_views", "*No competing views identified.*"),
+            evidence_and_references=sections.get(
+                "evidence_and_references", "*No specific references retrieved.*"
+            ),
+            competing_views=sections.get(
+                "competing_views", "*No competing views identified.*"
+            ),
             synthesis=sections.get("synthesis", draft.get("thesis", "")),
             open_questions="\n".join(
-                f"- {q}" for q in draft.get("missing_information", draft.get("uncertainties", []))
-            ) or "*None identified.*",
+                f"- {q}"
+                for q in draft.get(
+                    "missing_information", draft.get("uncertainties", [])
+                )
+            )
+            or "*None identified.*",
             references=refs_text or "*No references available.*",
             complexity_score=classification.get("complexity_score", "?"),
             mode=classification.get("mode", "?"),
@@ -641,9 +693,17 @@ def _assemble_report(
         for key, val in sections.items():
             report += f"## {key.replace('_', ' ').title()}\n{val}\n\n"
         if draft.get("key_points"):
-            report += "## Key Points\n" + "\n".join(f"- {p}" for p in draft["key_points"]) + "\n\n"
+            report += (
+                "## Key Points\n"
+                + "\n".join(f"- {p}" for p in draft["key_points"])
+                + "\n\n"
+            )
         if draft.get("uncertainties"):
-            report += "## Uncertainties\n" + "\n".join(f"- {u}" for u in draft["uncertainties"]) + "\n"
+            report += (
+                "## Uncertainties\n"
+                + "\n".join(f"- {u}" for u in draft["uncertainties"])
+                + "\n"
+            )
         if refs_text:
             report += f"\n## References\n{refs_text}\n"
 
@@ -690,12 +750,18 @@ def _build_references(llm_refs: list, evidence: dict | None) -> str:
     seen_lower: set[str] = set()
 
     # Split LLM refs into full entries vs short inline citations
-    for ref in (llm_refs or []):
+    for ref in llm_refs or []:
         if not isinstance(ref, str) or not ref.strip():
             continue
         entry = ref.strip()
         # A "full" entry has >= 40 chars or contains a period after a year
-        is_full = len(entry) > 40 or re.search(r"\d{4}\)", entry) and "." in entry[entry.find(")") + 1:] if ")" in entry else False
+        is_full = (
+            len(entry) > 40
+            or re.search(r"\d{4}\)", entry)
+            and "." in entry[entry.find(")") + 1 :]
+            if ")" in entry
+            else False
+        )
         if is_full:
             key = entry.lower()[:80]
             if key not in seen_lower:
@@ -793,6 +859,7 @@ def _format_citations(evidence: dict | None) -> str:
 # Main orchestrator
 # ---------------------------------------------------------------------------
 
+
 def run_didal_protocol(
     prompt: str,
     force_mode: str | None = None,
@@ -821,19 +888,25 @@ def run_didal_protocol(
         JSON string with protocol results.
     """
     if not _is_configured():
-        return json.dumps({
-            "success": False,
-            "error": "hermes_not_configured",
-            "message": "DiDAL protocol requires HERMES_ECOSEEK_API_KEY.",
-        })
+        return json.dumps(
+            {
+                "success": False,
+                "error": "hermes_not_configured",
+                "message": "DiDAL protocol requires HERMES_ECOSEEK_API_KEY.",
+            }
+        )
 
     # Fast-fail if Hermes is unreachable (cached 30s)
     if not _hermes_is_healthy():
-        return json.dumps({
-            "success": False,
-            "error": "hermes_unreachable",
-            "message": "Hermes at {} is not responding. Check Cloudflare tunnel.".format(_REMOTE_URL),
-        })
+        return json.dumps(
+            {
+                "success": False,
+                "error": "hermes_unreachable",
+                "message": "Hermes at {} is not responding. Check Cloudflare tunnel.".format(
+                    _REMOTE_URL
+                ),
+            }
+        )
 
     if not _DIDAL_ENABLED and force_mode != "direct":
         # Feature flag off — fallback to direct
@@ -845,36 +918,46 @@ def run_didal_protocol(
 
     try:
         return _run_protocol_inner(
-            prompt, force_mode, effective_max_rounds,
-            protocol_id, model_override, start_time,
+            prompt,
+            force_mode,
+            effective_max_rounds,
+            protocol_id,
+            model_override,
+            start_time,
         )
     except _ProtocolTimeoutError as exc:
         elapsed = round(time.time() - start_time, 1)
         logger.warning("didal[%s] protocol timeout: %s", protocol_id, exc)
         _emit_progress("Timeout", f"protocol exceeded {_PROTOCOL_TIMEOUT}s budget")
-        return json.dumps({
-            "success": False,
-            "protocol_id": protocol_id,
-            "error": "protocol_timeout",
-            "message": (
-                f"DiDAL protocol timed out after {elapsed}s "
-                f"(budget: {_PROTOCOL_TIMEOUT}s). "
-                "Try 'fast' mode for quicker answers, or increase "
-                "DIDAL_PROTOCOL_TIMEOUT."
-            ),
-            "elapsed_seconds": elapsed,
-        }, ensure_ascii=False)
+        return json.dumps(
+            {
+                "success": False,
+                "protocol_id": protocol_id,
+                "error": "protocol_timeout",
+                "message": (
+                    f"DiDAL protocol timed out after {elapsed}s "
+                    f"(budget: {_PROTOCOL_TIMEOUT}s). "
+                    "Try 'fast' mode for quicker answers, or increase "
+                    "DIDAL_PROTOCOL_TIMEOUT."
+                ),
+                "elapsed_seconds": elapsed,
+            },
+            ensure_ascii=False,
+        )
     except Exception as exc:
         elapsed = round(time.time() - start_time, 1)
         logger.error("didal[%s] protocol crashed: %s", protocol_id, exc, exc_info=True)
         _emit_progress("Error", f"protocol failed after {elapsed}s")
-        return json.dumps({
-            "success": False,
-            "protocol_id": protocol_id,
-            "error": "protocol_exception",
-            "message": f"DiDAL protocol error: {str(exc)[:300]}",
-            "elapsed_seconds": elapsed,
-        }, ensure_ascii=False)
+        return json.dumps(
+            {
+                "success": False,
+                "protocol_id": protocol_id,
+                "error": "protocol_exception",
+                "message": f"DiDAL protocol error: {str(exc)[:300]}",
+                "elapsed_seconds": elapsed,
+            },
+            ensure_ascii=False,
+        )
 
 
 class _ProtocolTimeoutError(Exception):
@@ -916,7 +999,6 @@ def _run_protocol_inner(
 
     # --- Stage 0: Classify ---
     with trace_protocol(protocol_id, prompt, force_mode or "auto") as tctx:
-
         _emit_progress("Classifying", "analyzing question complexity")
         with trace_stage("classification", tctx, agent_role="system") as sctx:
             classify_result = _stage_classify(prompt)
@@ -935,18 +1017,24 @@ def _run_protocol_inner(
         )
         logger.info(
             "didal[%s] classified: mode=%s score=%.2f reasons=%s",
-            protocol_id, mode, classification["complexity_score"],
+            protocol_id,
+            mode,
+            classification["complexity_score"],
             classification["reasons"][:2],
         )
 
         # --- Direct mode: skip dialectical loop ---
         if mode == "direct":
             _emit_progress("Direct", "fast answer mode")
-            with trace_stage("direct_answer", tctx, agent_role="backend_expert") as sctx:
+            with trace_stage(
+                "direct_answer", tctx, agent_role="backend_expert"
+            ) as sctx:
                 direct_result = _stage_direct(prompt)
                 stages.append(direct_result)
                 _track_usage(direct_result)
-                sctx["tokens_used"] = direct_result.get("usage", {}).get("total_tokens", 0)
+                sctx["tokens_used"] = direct_result.get("usage", {}).get(
+                    "total_tokens", 0
+                )
 
             _request_model.reset(_model_token)
             elapsed = round(time.time() - start_time, 1)
@@ -975,15 +1063,19 @@ def _run_protocol_inner(
             with trace_stage("memory.read", tctx, agent_role="system") as sctx:
                 with memory_read_stage(prompt, classification) as mctx:
                     sctx["recall_count"] = mctx.get("recall_count", 0)
-                    stages.append({
-                        "stage": "memory.read",
-                        "recall_count": mctx.get("recall_count", 0),
-                    })
+                    stages.append(
+                        {
+                            "stage": "memory.read",
+                            "recall_count": mctx.get("recall_count", 0),
+                        }
+                    )
 
         # Stage 1: Frame task
         _check_timeout("frame_task")
         _emit_progress("Framing", "structuring the research question")
-        with trace_stage("frontend.frame_task", tctx, agent_role="frontend_naive") as sctx:
+        with trace_stage(
+            "frontend.frame_task", tctx, agent_role="frontend_naive"
+        ) as sctx:
             frame_result = _stage_frame_task(prompt, classification)
             stages.append(frame_result)
             _track_usage(frame_result)
@@ -995,13 +1087,21 @@ def _run_protocol_inner(
         if mode in ("didal", "didal_literature"):
             _check_timeout("retrieve")
             _emit_progress("Retrieving", "searching literature databases")
-            with trace_stage("backend.retrieve", tctx, agent_role="backend_expert",
-                             question_type=task_object.get("task_type", "unknown")) as sctx:
+            with trace_stage(
+                "backend.retrieve",
+                tctx,
+                agent_role="backend_expert",
+                question_type=task_object.get("task_type", "unknown"),
+            ) as sctx:
                 retrieve_result = _stage_retrieve(task_object, classification)
                 stages.append(retrieve_result)
                 _track_usage(retrieve_result)
                 evidence = retrieve_result["evidence"]
-                n_sources = len(evidence.get("sources", [])) if isinstance(evidence, dict) else 0
+                n_sources = (
+                    len(evidence.get("sources", []))
+                    if isinstance(evidence, dict)
+                    else 0
+                )
                 sctx["retrieved_sources"] = n_sources
                 tctx["total_sources"] = n_sources
                 _emit_progress("Retrieved", f"{n_sources} sources found")
@@ -1009,29 +1109,49 @@ def _run_protocol_inner(
         # Stage 3: Expert draft (streaming — tokens arrive in real-time)
         _check_timeout("expert_draft")
         _emit_progress("Drafting", "writing expert synthesis (streaming)")
-        with trace_stage("backend.synthesize_draft", tctx, agent_role="backend_expert") as sctx:
+        with trace_stage(
+            "backend.synthesize_draft", tctx, agent_role="backend_expert"
+        ) as sctx:
             draft_result = _stage_expert_draft(task_object, evidence)
             stages.append(draft_result)
             _track_usage(draft_result)
             current_draft = draft_result["draft"]
             sctx["tokens_used"] = draft_result.get("usage", {}).get("total_tokens", 0)
-            sctx["evidence_used"] = len(current_draft.get("evidence", [])) if isinstance(current_draft, dict) else 0
+            sctx["evidence_used"] = (
+                len(current_draft.get("evidence", []))
+                if isinstance(current_draft, dict)
+                else 0
+            )
             if draft_result.get("streamed"):
                 sctx["streamed"] = True
                 sctx["tokens_generated"] = draft_result.get("tokens_generated", 0)
-                _emit_progress("Drafted", f"{draft_result.get('tokens_generated', 0)} tokens (streamed)")
+                _emit_progress(
+                    "Drafted",
+                    f"{draft_result.get('tokens_generated', 0)} tokens (streamed)",
+                )
 
         # Stage 4-5: Critique-Revise loop (bounded, with early termination)
         rounds = 0
 
         # Quick quality pre-check: skip critique if draft is already substantial
-        draft_text = current_draft if isinstance(current_draft, str) else json.dumps(current_draft, ensure_ascii=False)
+        draft_text = (
+            current_draft
+            if isinstance(current_draft, str)
+            else json.dumps(current_draft, ensure_ascii=False)
+        )
         draft_has_structure = draft_text.count("#") >= 2 and len(draft_text) > 800
-        draft_has_evidence = any(w in draft_text.lower() for w in ["et al", "doi", "http", "reference"])
-        skip_critique = draft_has_structure and draft_has_evidence and mode != "didal_literature"
+        draft_has_evidence = any(
+            w in draft_text.lower() for w in ["et al", "doi", "http", "reference"]
+        )
+        skip_critique = (
+            draft_has_structure and draft_has_evidence and mode != "didal_literature"
+        )
 
         if skip_critique:
-            logger.info("didal[%s] draft quality pre-check passed — skipping critique", protocol_id)
+            logger.info(
+                "didal[%s] draft quality pre-check passed — skipping critique",
+                protocol_id,
+            )
             _emit_progress("Skipping critique", "draft already meets quality threshold")
 
         for round_idx in range(effective_max_rounds):
@@ -1042,14 +1162,20 @@ def _run_protocol_inner(
             try:
                 _check_timeout("critique_revise")
             except _ProtocolTimeoutError:
-                logger.info("didal[%s] skipping critique — protocol timeout", protocol_id)
+                logger.info(
+                    "didal[%s] skipping critique — protocol timeout", protocol_id
+                )
                 _emit_progress("Skipping critique", "time budget reached")
                 break
 
             # Stage 4: Naive critique
             _emit_progress("Critiquing", f"peer review round {round_idx + 1}")
-            with trace_stage("frontend.critique", tctx, agent_role="frontend_naive",
-                             round_index=round_idx + 1) as sctx:
+            with trace_stage(
+                "frontend.critique",
+                tctx,
+                agent_role="frontend_naive",
+                round_index=round_idx + 1,
+            ) as sctx:
                 critique_result = _stage_critique(current_draft, task_object)
                 stages.append(critique_result)
                 _track_usage(critique_result)
@@ -1064,19 +1190,29 @@ def _run_protocol_inner(
             overall_quality = critique.get("overall_quality", "adequate")
 
             if not requires_revision or overall_quality in ("good", "excellent"):
-                logger.info("didal[%s] critique round %d: quality=%s, no revision needed",
-                           protocol_id, rounds, overall_quality)
+                logger.info(
+                    "didal[%s] critique round %d: quality=%s, no revision needed",
+                    protocol_id,
+                    rounds,
+                    overall_quality,
+                )
                 break
 
             # Stage 5: Revision
             _emit_progress("Revising", f"improving draft (round {round_idx + 1})")
-            with trace_stage("backend.revise", tctx, agent_role="backend_expert",
-                             round_index=round_idx + 1) as sctx:
+            with trace_stage(
+                "backend.revise",
+                tctx,
+                agent_role="backend_expert",
+                round_index=round_idx + 1,
+            ) as sctx:
                 revision_result = _stage_revise(current_draft, critique, task_object)
                 stages.append(revision_result)
                 _track_usage(revision_result)
                 current_draft = revision_result["revised_draft"]
-                sctx["tokens_used"] = revision_result.get("usage", {}).get("total_tokens", 0)
+                sctx["tokens_used"] = revision_result.get("usage", {}).get(
+                    "total_tokens", 0
+                )
 
             logger.info("didal[%s] revision round %d complete", protocol_id, rounds)
 
@@ -1086,7 +1222,12 @@ def _run_protocol_inner(
         _emit_progress("Finalizing", "assembling mini-report")
         with trace_stage("finalize_report", tctx, agent_role="system") as sctx:
             report = _assemble_report(
-                prompt, classification, task_object, current_draft, evidence, rounds,
+                prompt,
+                classification,
+                task_object,
+                current_draft,
+                evidence,
+                rounds,
             )
 
         # Stage 7: Judge + Memory — run async (don't block response)
@@ -1113,7 +1254,11 @@ def _run_protocol_inner(
                 )
             except Exception as exc:
                 logger.warning("Background judge failed: %s", exc)
-                judge_result = {"overall_score": 0.0, "verdict": "error", "error": str(exc)[:200]}
+                judge_result = {
+                    "overall_score": 0.0,
+                    "verdict": "error",
+                    "error": str(exc)[:200],
+                }
 
             if is_memory_enabled():
                 try:
@@ -1137,7 +1282,9 @@ def _run_protocol_inner(
                     ) as mctx:
                         logger.info(
                             "didal[%s] memory: written=%d fitness=%s",
-                            protocol_id, mctx.get("written", 0), mctx.get("fitness"),
+                            protocol_id,
+                            mctx.get("written", 0),
+                            mctx.get("fitness"),
                         )
                 except Exception as exc:
                     logger.warning("Background memory write failed: %s", exc)
