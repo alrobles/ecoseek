@@ -11,6 +11,7 @@ import { RenderPreview, DiDALPanel } from "./components/RenderPreview";
 import { FilesPanel } from "./components/FilesPanel";
 import { ReactComponent as EcoSeekLogo } from "./ecoseek-logo.svg";
 import emilyAvatar from "./emily-avatar.png";
+import emilyThinking from "./emily-avatar-thinking.gif";
 import { useAuth } from "./contexts/AuthContext";
 import { chatCompletionStream, checkHealth, checkRemoteHealth, BROKER_URL, CHAT_URL, IS_LOCAL_EMILY, HERMES_REMOTE_URL } from "./api/broker";
 import { ToolCallsContainer } from "./components/ToolCallCard";
@@ -62,10 +63,31 @@ function App() {
   const [lastJudgeResult, setLastJudgeResult] = useState(null);
   const [lastHermesTrace, setLastHermesTrace] = useState(null);
   const [reasoningMode, setReasoningMode] = useState("auto"); // "fast" | "deep" | "auto"
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const messagesEndRef = useRef(null);
   const abortRef = useRef(null);
+  const timerRef = useRef(null);
 
   const currentTheme = document.documentElement.getAttribute("data-theme") || "dark";
+
+  // Elapsed timer — ticks every second while loading
+  useEffect(() => {
+    if (isLoading) {
+      setElapsedSeconds(0);
+      timerRef.current = setInterval(() => setElapsedSeconds(s => s + 1), 1000);
+    } else {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    return () => clearInterval(timerRef.current);
+  }, [isLoading]);
+
+  const formatElapsed = (s) => {
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m}m ${sec}s`;
+  };
 
   // Handle OAuth callback
   useEffect(() => {
@@ -418,13 +440,14 @@ function App() {
               {isLoading && (streamingContent || streamingReasoning || activeToolCalls.length > 0) && (
                 <div className="message agent-message streaming-message">
                   <div className="message-header">
-                    <img src={emilyAvatar} alt="Emily" className="emily-avatar" />
+                    <img src={emilyThinking} alt="Emily" className="emily-avatar emily-avatar-thinking" />
                     <span className="agent-name">Emily</span>
                     <span className="streaming-indicator">
                       <span className="streaming-dot" />
                       <span className="streaming-dot" />
                       <span className="streaming-dot" />
                     </span>
+                    <span className="elapsed-timer">{formatElapsed(elapsedSeconds)}</span>
                   </div>
                   {activeToolCalls.length > 0 && (
                     <ToolCallsContainer toolCalls={activeToolCalls} status="running" />
@@ -459,18 +482,21 @@ function App() {
 
             {isLoading && !streamingContent && (
               <div className="loading-animation">
-                <img src={emilyAvatar} alt="Emily" className="emily-avatar" />
-                {toolProgress && toolProgress.status === "running" ? (
-                  <span className="tool-progress-label">
-                    {toolProgress.emoji || "🔧"} {toolProgress.label || toolProgress.tool}
-                  </span>
-                ) : activeToolCalls.length > 0 ? (
-                  <span className="tool-progress-label">
-                    🔧 {activeToolCalls[activeToolCalls.length - 1]?.name || "Working"}...
-                  </span>
-                ) : (
-                  "Emily is thinking..."
-                )}
+                <img src={emilyThinking} alt="Emily" className="emily-avatar-loading" />
+                <div className="loading-info">
+                  {toolProgress && toolProgress.status === "running" ? (
+                    <span className="tool-progress-label">
+                      {toolProgress.emoji || "🔧"} {toolProgress.label || toolProgress.tool}
+                    </span>
+                  ) : activeToolCalls.length > 0 ? (
+                    <span className="tool-progress-label">
+                      🔧 {activeToolCalls[activeToolCalls.length - 1]?.name || "Working"}...
+                    </span>
+                  ) : (
+                    <span className="tool-progress-label">Emily is thinking...</span>
+                  )}
+                  <span className="elapsed-timer">{formatElapsed(elapsedSeconds)}</span>
+                </div>
               </div>
             )}
 

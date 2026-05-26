@@ -505,11 +505,29 @@ body {
 }
 
 .emily-avatar {
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   object-fit: cover;
   flex-shrink: 0;
+}
+
+.emily-avatar-thinking {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 4px rgba(16, 185, 129, 0.4));
+}
+
+.emily-avatar-loading {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 6px rgba(16, 185, 129, 0.5));
 }
 
 .agent-name {
@@ -547,18 +565,31 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
+  gap: 0.75rem;
   color: var(--muted-foreground);
-  padding: 0.75rem;
-  font-size: 0.875rem;
+  padding: 1rem 0.75rem;
+  font-size: 0.9rem;
   border-top: 1px solid var(--border);
   flex-shrink: 0;
+}
+
+.loading-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 
 .tool-progress-label {
   animation: pulse-fade 1.5s ease-in-out infinite;
   font-weight: 500;
   color: var(--primary);
+}
+
+.elapsed-timer {
+  font-size: 0.7rem;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
 }
 
 @keyframes pulse-fade {
