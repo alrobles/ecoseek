@@ -92,7 +92,12 @@ Your draft MUST include these structured fields (as JSON):
 }
 
 Be thorough but honest about limitations. Every strong claim must reference
-evidence. Distinguish between established consensus and active debate."""
+evidence. Distinguish between established consensus and active debate.
+
+CRITICAL: Include a "references" field in the JSON — a list of full
+bibliographic entries for every source cited in the text:
+  {"references": ["Author(s) (Year). Title. Journal, Vol, Pages. DOI", ...]}
+Only include sources you are confident are real. Never fabricate citations."""
 
 # ---------------------------------------------------------------------------
 # Stage 4: Naive Critique (Naive Interlocutor → identifies gaps)
@@ -181,6 +186,9 @@ MINI_REPORT_TEMPLATE = """\
 ## Open Questions
 {open_questions}
 
+## References
+{references}
+
 ---
 *Generated via DiDAL Protocol — Alpha↔Beta dialectical synthesis*
 *Complexity: {complexity_score} | Mode: {mode} | Rounds: {rounds}*"""
@@ -202,7 +210,10 @@ STRICT RULES:
 - NEVER make jokes, puns, or humorous asides.
 - End your response cleanly after the scientific answer.
 - Do not add extra commentary, humor, or tangential content.
-- Your response should read like a scientific reference."""
+- Your response should read like a scientific reference.
+- ALWAYS end with a ## References section listing every source you cited.
+  Format: Author(s) (Year). Title. *Journal*, Volume, Pages. DOI if known.
+  Only include sources you actually cited in the text. Never fabricate citations."""
 
 
 # ---------------------------------------------------------------------------

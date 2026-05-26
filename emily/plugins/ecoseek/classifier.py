@@ -109,6 +109,17 @@ _OPERATIONAL_PATTERNS = [
     r"\bpassword\b", r"\bkey\b", r"\bcredential\b",
 ]
 
+# Patterns that indicate an execution/action task (not a question).
+# These should be routed to escalate_remote, not didal_protocol.
+_EXECUTION_PATTERNS = [
+    r"\bcrea\b", r"\bcreate\b", r"\bcorr[ea]\b", r"\brun\b",
+    r"\bejecutar?\b", r"\bexecute\b", r"\bsubmit\b", r"\benviar?\b",
+    r"\bsbatch\b", r"\bslurm\b", r"\bjob\b", r"\bscript\b",
+    r"\bdownload\b", r"\bdescargar?\b", r"\bbaja\b",
+    r"\bsleep\b", r"\binstalar?\b",
+    r"\bcluster\b", r"\bhpc\b", r"\bgpu\b",
+]
+
 
 # ---------------------------------------------------------------------------
 # Classification result
@@ -120,6 +131,7 @@ class ClassificationResult(NamedTuple):
     reasons: list[str]
     needs_clarification: bool
     expected_depth: str      # "low" | "medium" | "high"
+    is_execution: bool = False  # True → route to escalate_remote, not didal
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +164,16 @@ def _is_operational(text: str) -> bool:
     return hits >= 2
 
 
+def _is_execution(text: str) -> bool:
+    """True if the prompt asks to DO something (create, run, submit, download).
+
+    These should route to escalate_remote, not didal_protocol.
+    """
+    lower = text.lower()
+    hits = sum(1 for p in _EXECUTION_PATTERNS if re.search(p, lower))
+    return hits >= 2
+
+
 # ---------------------------------------------------------------------------
 # Main classifier
 # ---------------------------------------------------------------------------
@@ -167,6 +189,7 @@ def classify_complexity(prompt: str) -> ClassificationResult:
     n_tokens = len(tokens)
     reasons: list[str] = []
     score = 0.0
+    execution = _is_execution(prompt)
 
     # --- Operational shortcut: always direct ---
     if _is_operational(prompt):
@@ -176,6 +199,18 @@ def classify_complexity(prompt: str) -> ClassificationResult:
             reasons=["operational_or_setup_question"],
             needs_clarification=False,
             expected_depth="low",
+            is_execution=execution,
+        )
+
+    # --- Execution task: direct mode + flag for escalate_remote ---
+    if execution:
+        return ClassificationResult(
+            mode="direct",
+            complexity_score=0.0,
+            reasons=["execution_task_use_escalate_remote"],
+            needs_clarification=False,
+            expected_depth="low",
+            is_execution=True,
         )
 
     # --- Scoring heuristics (from protocol spec) ---
