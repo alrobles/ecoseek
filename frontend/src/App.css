@@ -1618,28 +1618,21 @@ body {
   font-weight: 600;
 }
 
-/* KaTeX overrides for theme compatibility */
-.katex {
-  font-size: 1.1em;
-}
-
-.katex .base {
-  color: var(--foreground);
-}
-
-/* Display math blocks ($$...$$) */
-.katex-display {
-  margin: 0.75em 0;
-  padding: 0.5em 0;
+/* MathJax overrides for theme compatibility */
+mjx-container {
+  color: var(--foreground) !important;
   overflow-x: auto;
 }
 
-.katex-display > .katex {
-  font-size: 1.2em;
+/* Display math blocks */
+mjx-container[display="true"] {
+  margin: 0.75em 0 !important;
+  padding: 0.5em 0;
+  font-size: 1.15em;
 }
 
 /* Inline math spacing */
-.message-content .katex {
+.message-content mjx-container:not([display="true"]) {
   padding: 0 0.1em;
 }
 
@@ -1808,7 +1801,7 @@ body {
   background: var(--card);
 }
 
-.output-markdown .katex-display {
+.output-markdown mjx-container[display="true"] {
   margin: 1em 0;
   overflow-x: auto;
 }
