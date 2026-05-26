@@ -1,0 +1,44 @@
+# CI-only compose override: replaces external-repo services (agenticplug, ecoagent)
+# with lightweight nginx mock containers so ecoseek-api can start and pass
+# healthchecks in GitHub Actions without cloning private external repos.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait
+
+services:
+  agenticplug:
+    image: nginx:alpine
+    container_name: agenticplug
+    ports:
+      - "127.0.0.1:${AGENTICPLUG_PORT:-8080}:8080"
+    volumes:
+      - ./docker/ci/agenticplug-healthz.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      ecoagent:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+    networks:
+      - ecoseek-net
+
+  ecoagent:
+    image: nginx:alpine
+    container_name: ecoagent
+    ports:
+      - "127.0.0.1:${ECOAGENT_PORT:-8000}:8000"
+    volumes:
+      - ./docker/ci/ecoagent-mock.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/v1/tools"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+    networks:
+      - ecoseek-net
