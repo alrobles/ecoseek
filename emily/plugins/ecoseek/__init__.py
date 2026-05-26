@@ -582,13 +582,94 @@ ESCALATE_REMOTE_SCHEMA = {
     },
 }
 
+UPLOAD_DOCUMENT_SCHEMA = {
+    "name": "upload_document",
+    "description": (
+        "Upload and index a document (PDF or text) for the user's personal "
+        "knowledge base. Once indexed, the document's content will be "
+        "automatically searched during DiDAL literature retrieval (highest priority). "
+        "Use this when the user provides a PDF or pastes text from a paper."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "file_path": {
+                "type": "string",
+                "description": "Path to the PDF or text file to ingest.",
+            },
+            "text": {
+                "type": "string",
+                "description": (
+                    "Raw text to index directly (use when user pastes text "
+                    "instead of providing a file). Either file_path or text is required."
+                ),
+            },
+            "title": {
+                "type": "string",
+                "description": "Optional paper title (auto-detected if not provided).",
+            },
+            "authors": {
+                "type": "string",
+                "description": "Optional authors string.",
+            },
+        },
+        "required": [],
+    },
+}
+
+
+def upload_document_tool(
+    file_path: str = "",
+    text: str = "",
+    title: str = "",
+    authors: str = "",
+    task_id: Optional[str] = None,
+) -> str:
+    """Ingest a PDF or text into the user's personal knowledge base."""
+    if file_path:
+        from .pdf_ingest import ingest_pdf
+        result = ingest_pdf(file_path)
+    elif text:
+        from .pdf_ingest import ingest_text
+        result = ingest_text(text, filename=title or "pasted_text.txt")
+    else:
+        result = {"success": False, "error": "Provide either file_path or text."}
+
+    # Override title/authors if user provided them
+    if result.get("success") and (title or authors):
+        try:
+            from .litdb import _connect
+            with _connect() as conn:
+                doc_id = result.get("id")
+                if doc_id:
+                    updates = []
+                    params = []
+                    if title:
+                        updates.append("title = ?")
+                        params.append(title)
+                    if authors:
+                        updates.append("authors = ?")
+                        params.append(authors)
+                    if updates:
+                        params.append(doc_id)
+                        conn.execute(
+                            f"UPDATE user_papers SET {', '.join(updates)} WHERE id = ?",
+                            params,
+                        )
+        except Exception:
+            pass
+
+    return json.dumps(result, ensure_ascii=False)
+
+
 LITERATURE_SEARCH_SCHEMA = {
     "name": "literature_search",
     "description": (
         "Search the local literature database for scientific papers. "
         "Returns cached papers from OpenAlex, GBIF Literature, Semantic Scholar, "
-        "and Entrez/PubMed. Use this for quick reference lookups without running "
-        "the full DiDAL protocol."
+        "Entrez/PubMed, and user-uploaded documents. Also searches cluster FTS5 "
+        "indices (36M PubMed + 61K GBIF Literature) via Hermes. Use this for "
+        "quick reference lookups without running the full DiDAL protocol."
     ),
     "parameters": {
         "type": "object",
@@ -612,9 +693,17 @@ def literature_search_tool(
     limit: int = 10,
     task_id: Optional[str] = None,
 ) -> str:
-    """Search the local literature cache and optionally fetch from APIs."""
-    from .litdb import search as litdb_search, get_stats
+    """Search local literature cache, user papers, and optionally APIs."""
+    from .litdb import search as litdb_search, get_stats, search_user_papers, get_user_paper_stats
 
+    # Search user-uploaded documents first (highest priority)
+    user_results = []
+    try:
+        user_results = search_user_papers(query, limit=min(limit, 5))
+    except Exception:
+        pass
+
+    # Search the litdb cache
     results = litdb_search(query, limit=limit)
 
     # If no cache results, try a quick API fetch
@@ -622,24 +711,29 @@ def literature_search_tool(
         try:
             from .retrieval import retrieve_literature
             lit = retrieve_literature(query=query, tier="A", max_per_source=3)
-            # After retrieve_literature, results should be cached now
             results = litdb_search(query, limit=limit)
             if not results:
-                # Convert directly from API results
                 results = lit.get("sources", [])[:limit]
         except Exception as exc:
             logger.warning("literature_search API fallback failed: %s", exc)
 
+    # Merge: user papers first, then cache results
+    all_results = user_results + results
+
     stats = {}
     try:
         stats = get_stats()
+        user_stats = get_user_paper_stats()
+        stats["user_documents"] = user_stats.get("total_documents", 0)
+        stats["user_tokens"] = user_stats.get("total_tokens", 0)
     except Exception:
         pass
 
     return json.dumps({
         "success": True,
-        "results": results,
-        "count": len(results),
+        "results": all_results[:limit],
+        "count": len(all_results[:limit]),
+        "user_papers_found": len(user_results),
         "cache_stats": stats,
     }, ensure_ascii=False)
 
@@ -945,6 +1039,20 @@ def register(ctx) -> None:
     )
 
     ctx.register_tool(
+        name="upload_document",
+        toolset="ecoseek",
+        schema=UPLOAD_DOCUMENT_SCHEMA,
+        handler=lambda args, **kw: upload_document_tool(
+            file_path=args.get("file_path", ""),
+            text=args.get("text", ""),
+            title=args.get("title", ""),
+            authors=args.get("authors", ""),
+            task_id=kw.get("task_id"),
+        ),
+        check_fn=lambda: True,
+    )
+
+    ctx.register_tool(
         name="ecoagent_query",
         toolset="ecoseek",
         schema=ECOAGENT_QUERY_SCHEMA,
@@ -1006,9 +1114,9 @@ def register(ctx) -> None:
         check_fn=lambda: True,
     )
 
-    n = 11 if _is_configured() else 7
+    n = 12 if _is_configured() else 8
     logger.info(
-        "ecoseek plugin registered: %d tools, remote=%s configured=%s didal=v2 ecoagent=true r_workspace=true niche=true",
+        "ecoseek plugin registered: %d tools, remote=%s configured=%s didal=v2 ecoagent=true r_workspace=true niche=true pdf=true",
         n, _REMOTE_URL, _is_configured(),
     )
 
@@ -1085,6 +1193,20 @@ try:
         handler=lambda args, **kw: literature_search_tool(
             query=args.get("query", ""),
             limit=args.get("limit", 10),
+            task_id=kw.get("task_id"),
+        ),
+        check_fn=lambda: True,
+        requires_env=[],
+    )
+    registry.register(
+        name="upload_document",
+        toolset="ecoseek",
+        schema=UPLOAD_DOCUMENT_SCHEMA,
+        handler=lambda args, **kw: upload_document_tool(
+            file_path=args.get("file_path", ""),
+            text=args.get("text", ""),
+            title=args.get("title", ""),
+            authors=args.get("authors", ""),
             task_id=kw.get("task_id"),
         ),
         check_fn=lambda: True,
