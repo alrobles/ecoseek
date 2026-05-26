@@ -15,8 +15,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import urllib.error
-import urllib.request
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -138,26 +136,26 @@ def judge_answer(
         judge_input += f"Reasons: {', '.join(classification.get('reasons', []))}\n"
 
     try:
-        req_body = json.dumps({
+        from .http_client import http_post_json
+
+        payload = {
             "model": _MODEL,
             "messages": [
                 {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
                 {"role": "user", "content": judge_input},
             ],
             "temperature": 0.1,
-        }).encode("utf-8")
+        }
+        headers = {}
+        if _API_KEY:
+            headers["Authorization"] = f"Bearer {_API_KEY}"
 
-        req = urllib.request.Request(
+        data = http_post_json(
             f"{_REMOTE_URL}/v1/chat/completions",
-            data=req_body,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {_API_KEY}",
-            },
-            method="POST",
+            payload=payload,
+            headers=headers,
+            timeout=_TIMEOUT,
         )
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
 
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
 
