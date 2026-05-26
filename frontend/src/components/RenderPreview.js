@@ -1,14 +1,46 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useRef, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 
-export function RenderPreview({ messages, streamingContent = "", isLoading = false }) {
+function downloadPdf(contentEl) {
+  if (!contentEl) return;
+  const printWin = window.open("", "_blank", "width=800,height=600");
+  if (!printWin) return;
+  // Gather KaTeX stylesheet links from the host page
+  const katexLinks = Array.from(document.querySelectorAll('link[href*="katex"]'))
+    .map((l) => l.outerHTML)
+    .join("\n");
+  printWin.document.write(`<!DOCTYPE html><html><head>
+    <meta charset="utf-8"/>
+    <title>EcoSeek Report</title>
+    ${katexLinks}
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 2rem; max-width: 800px; margin: 0 auto; color: #1e293b; line-height: 1.7; }
+      h1 { font-size: 1.6rem; border-bottom: 2px solid #10b981; padding-bottom: 0.4rem; }
+      h2 { font-size: 1.3rem; color: #334155; margin-top: 1.5rem; }
+      h3 { font-size: 1.1rem; }
+      pre { background: #f1f5f9; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; }
+      code { font-family: "Fira Code", "Cascadia Code", monospace; }
+      table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+      th, td { border: 1px solid #cbd5e1; padding: 0.5rem 0.75rem; text-align: left; }
+      th { background: #f1f5f9; font-weight: 600; }
+      blockquote { border-left: 3px solid #10b981; padding-left: 1rem; color: #64748b; }
+      .output-code-lang { font-size: 0.7rem; color: #64748b; padding: 0.25rem 0.5rem; background: #e2e8f0; display: inline-block; border-radius: 3px 3px 0 0; }
+      @media print { body { padding: 0; } }
+    </style>
+  </head><body>${contentEl.innerHTML}
+    <scr${""}ipt>window.onload=function(){window.print();window.close();}</scr${""}ipt>
+  </body></html>`);
+  printWin.document.close();
+}
+
+export function RenderPreview({ messages, streamingContent = "", isLoading = false, didalStages = [] }) {
+  const contentRef = useRef(null);
+
   const latestAgentContent = useMemo(() => {
-    // Show streaming content while loading
     if (isLoading && streamingContent) return streamingContent;
-    // Otherwise show the last agent message
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].type === "agent" && messages[i].content) {
         return messages[i].content;
@@ -17,12 +49,41 @@ export function RenderPreview({ messages, streamingContent = "", isLoading = fal
     return "";
   }, [messages, streamingContent, isLoading]);
 
+  const handleDownloadPdf = useCallback(() => {
+    downloadPdf(contentRef.current);
+  }, []);
+
   return (
     <div className="render-preview">
-      <div className="output-content">
-        {!latestAgentContent ? (
+      {latestAgentContent && !isLoading && (
+        <div className="output-toolbar">
+          <button className="output-download-btn" onClick={handleDownloadPdf} title="Download as PDF">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            PDF
+          </button>
+        </div>
+      )}
+      <div className="output-content" ref={contentRef}>
+        {!latestAgentContent && !isLoading ? (
           <div className="preview-empty">
             <p>Emily's formatted output will appear here — markdown, equations, code, and results rendered for easy reading.</p>
+          </div>
+        ) : !latestAgentContent && isLoading && didalStages.length > 0 ? (
+          <div className="output-didal-progress">
+            <h4>DiDAL Protocol Running...</h4>
+            <div className="output-stage-list">
+              {didalStages.map((s, i) => (
+                <div key={i} className={`output-stage-item ${s.status}`}>
+                  <span className="output-stage-icon">{s.status === "active" ? "◉" : "✓"}</span>
+                  <span className="output-stage-name">{s.name}</span>
+                  {s.detail && <span className="output-stage-detail">{s.detail}</span>}
+                </div>
+              ))}
+            </div>
           </div>
         ) : (
           <div className="output-markdown">

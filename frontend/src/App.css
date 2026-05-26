@@ -597,6 +597,122 @@ body {
   50% { opacity: 0.5; }
 }
 
+/* DiDAL progress pipeline in loading bar */
+.didal-progress-pipeline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.didal-pip-stage {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.didal-pip-stage.done {
+  color: #10b981;
+  opacity: 0.7;
+}
+
+.didal-pip-stage.active {
+  color: #f59e0b;
+  font-weight: 600;
+  animation: pulse-fade 1.5s ease-in-out infinite;
+}
+
+/* Output panel toolbar */
+.output-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.output-download-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: var(--secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--foreground);
+  padding: 0.3rem 0.6rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.output-download-btn:hover {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+/* DiDAL stage progress in Output panel */
+.output-didal-progress {
+  padding: 1.5rem;
+}
+
+.output-didal-progress h4 {
+  margin: 0 0 1rem;
+  color: var(--foreground);
+  font-size: 0.9rem;
+}
+
+.output-stage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.output-stage-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-size: 0.8rem;
+  transition: all 0.3s ease;
+}
+
+.output-stage-item.done {
+  border-color: #10b981;
+  background: rgba(16, 185, 129, 0.05);
+}
+
+.output-stage-item.active {
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.08);
+  animation: pulse-fade 1.5s ease-in-out infinite;
+}
+
+.output-stage-icon {
+  flex-shrink: 0;
+  font-size: 0.85rem;
+}
+
+.output-stage-item.done .output-stage-icon {
+  color: #10b981;
+}
+
+.output-stage-item.active .output-stage-icon {
+  color: #f59e0b;
+}
+
+.output-stage-name {
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.output-stage-detail {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
 .input-form {
   display: flex;
   align-items: center;
