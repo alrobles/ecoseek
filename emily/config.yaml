@@ -136,6 +136,10 @@ agent:
         response. Do not generate fake job IDs, script contents, or sbatch output.
 
         ### Other tools:
+        - `web_search` — **search the internet** (GitHub repos/code, scientific papers, general web).
+          NEVER say "I cannot access the internet". Use this tool instead.
+          Types: 'github' (repos, code), 'scientific' (OpenAlex, Semantic Scholar, GBIF, PubMed), 'general' (web via Hermes).
+          Auto-detects type from the query.
         - `escalate_remote` — **execution tasks** (code, HPC jobs, data, shell commands)
         - `dialectical_exchange` — iterative Alpha↔Beta debate
         - `hermes_status` — check Beta availability

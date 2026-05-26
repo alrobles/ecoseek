@@ -9,6 +9,7 @@ Provides tools for the dual-agent architecture (Alpha↔Beta):
   ``dialectical_exchange``   — legacy DiDAL structured debate
   ``hermes_status``          — check Hermes remote availability and loaded tools
   ``literature_search``      — search local literature cache (litdb)
+  ``web_search``             — search the internet (GitHub, scientific APIs, general web)
   ``classify_literature``    — LACS domain-specific literature relevance scoring
   ``train_lacs_model``       — train new LACS domain model on HPC cluster
 
@@ -31,8 +32,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from typing import Optional
@@ -138,6 +141,14 @@ def classify_prompt_tool(prompt: str, task_id: Optional[str] = None) -> str:
             "This is an EXECUTION task. Use escalate_remote to send it to "
             "Hermes Beta. Do NOT use didal_protocol — it only generates text "
             "and cannot execute commands, create jobs, or run code."
+        )
+    if result.is_web_search:
+        response["is_web_search"] = True
+        response["routing_hint"] = (
+            "This is a SEARCH task. Use web_search to find information online. "
+            "NEVER say 'I cannot access the internet'. The web_search tool "
+            "can search GitHub repos, scientific literature (OpenAlex, Semantic "
+            "Scholar, GBIF, PubMed), and the general web via Hermes."
         )
     return json.dumps(response, ensure_ascii=False)
 
@@ -751,6 +762,219 @@ def literature_search_tool(
 
 
 # ---------------------------------------------------------------------------
+# Tool: web_search — search GitHub, scientific APIs, and general web
+# ---------------------------------------------------------------------------
+
+WEB_SEARCH_SCHEMA = {
+    "name": "web_search",
+    "description": (
+        "Search the internet for information. Supports multiple search types: "
+        "'github' (search GitHub repositories, code, issues), "
+        "'scientific' (search OpenAlex, Semantic Scholar, GBIF, PubMed), "
+        "'general' (delegate to Hermes Beta for general web search via SearXNG). "
+        "Use this tool whenever the user asks to search, look up, or find information "
+        "online. NEVER say 'I cannot access the internet' — use this tool instead."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "The search query.",
+            },
+            "search_type": {
+                "type": "string",
+                "enum": ["github", "scientific", "general", "auto"],
+                "description": (
+                    "Type of search. 'auto' (default) detects automatically: "
+                    "github for repo/code queries, scientific for papers/species, "
+                    "general for everything else."
+                ),
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum number of results (default: 5).",
+            },
+        },
+        "required": ["query"],
+    },
+}
+
+
+def _detect_search_type(query: str) -> str:
+    """Auto-detect the best search type from the query."""
+    lower = query.lower()
+    github_signals = ["github", "repo", "repository", "repositorio", "code", "codigo",
+                      "pull request", "pr ", "issue", "commit", "branch", "fork",
+                      "alrobles/", "git "]
+    scientific_signals = ["paper", "papers", "articulo", "species", "especie",
+                          "niche", "ecology", "ecologia", "sdm", "gbif", "phylo",
+                          "pubmed", "doi", "abstract"]
+    if any(s in lower for s in github_signals):
+        return "github"
+    if any(s in lower for s in scientific_signals):
+        return "scientific"
+    return "general"
+
+
+def _search_github(query: str, limit: int = 5) -> list[dict]:
+    """Search GitHub repositories and code via the public API."""
+    results = []
+
+    # Search repositories
+    repo_url = (
+        "https://api.github.com/search/repositories?"
+        + urllib.parse.urlencode({"q": query, "per_page": min(limit, 10), "sort": "best match"})
+    )
+    try:
+        req = urllib.request.Request(repo_url, headers={
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "EcoSeek-Emily/1.0",
+        })
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        for item in data.get("items", [])[:limit]:
+            results.append({
+                "type": "repository",
+                "name": item.get("full_name", ""),
+                "description": item.get("description", "") or "",
+                "url": item.get("html_url", ""),
+                "stars": item.get("stargazers_count", 0),
+                "language": item.get("language", ""),
+                "updated": item.get("updated_at", ""),
+                "topics": item.get("topics", []),
+            })
+    except Exception as exc:
+        logger.warning("GitHub repo search failed: %s", exc)
+
+    # If looking for a specific repo (e.g., "alrobles/xsdm"), try direct fetch
+    repo_pattern = re.compile(r"(?:^|[\s/])([a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+)")
+    match = repo_pattern.search(query)
+    if match and not results:
+        repo_name = match.group(1)
+        direct_url = f"https://api.github.com/repos/{repo_name}"
+        try:
+            req = urllib.request.Request(direct_url, headers={
+                "Accept": "application/vnd.github.v3+json",
+                "User-Agent": "EcoSeek-Emily/1.0",
+            })
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                item = json.loads(resp.read().decode("utf-8"))
+            readme_text = ""
+            try:
+                readme_url = f"https://api.github.com/repos/{repo_name}/readme"
+                req2 = urllib.request.Request(readme_url, headers={
+                    "Accept": "application/vnd.github.v3+json",
+                    "User-Agent": "EcoSeek-Emily/1.0",
+                })
+                with urllib.request.urlopen(req2, timeout=10) as resp2:
+                    readme_data = json.loads(resp2.read().decode("utf-8"))
+                import base64
+                readme_text = base64.b64decode(readme_data.get("content", "")).decode("utf-8", errors="replace")[:2000]
+            except Exception:
+                pass
+            results.insert(0, {
+                "type": "repository_detail",
+                "name": item.get("full_name", ""),
+                "description": item.get("description", "") or "",
+                "url": item.get("html_url", ""),
+                "stars": item.get("stargazers_count", 0),
+                "forks": item.get("forks_count", 0),
+                "language": item.get("language", ""),
+                "updated": item.get("updated_at", ""),
+                "topics": item.get("topics", []),
+                "license": (item.get("license") or {}).get("spdx_id", ""),
+                "readme_excerpt": readme_text[:1500] if readme_text else "",
+            })
+        except Exception as exc:
+            logger.warning("GitHub direct repo fetch failed for %s: %s", repo_name, exc)
+
+    return results
+
+
+def _search_scientific(query: str, limit: int = 5) -> list[dict]:
+    """Search scientific literature APIs (OpenAlex, Semantic Scholar, GBIF, Entrez)."""
+    from .retrieval import retrieve_literature, evidence_to_dict
+    try:
+        lit = retrieve_literature(query=query, tier="A", max_per_source=max(2, limit // 3))
+        sources = lit.get("sources", [])[:limit]
+        return sources
+    except Exception as exc:
+        logger.warning("Scientific search failed: %s", exc)
+        return []
+
+
+def _search_general_via_hermes(query: str, limit: int = 5) -> list[dict]:
+    """Delegate general web search to Hermes Beta (has SearXNG/web access)."""
+    if not _is_configured():
+        return [{"type": "error", "message": "Hermes not configured for web search"}]
+
+    try:
+        data = _hermes_request(
+            "/v1/chat/completions",
+            payload={
+                "model": _MODEL_FAST,
+                "messages": [
+                    {"role": "system", "content": (
+                        "You are a web search assistant. Search the web for the query and "
+                        "return results as a JSON array of objects with fields: "
+                        "title, url, snippet, source. Return ONLY the JSON array, no markdown."
+                    )},
+                    {"role": "user", "content": f"Search the web for: {query}\nReturn up to {limit} results."},
+                ],
+            },
+            timeout=30,
+        )
+        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        try:
+            parsed = json.loads(content)
+            if isinstance(parsed, list):
+                return parsed[:limit]
+        except json.JSONDecodeError:
+            pass
+        return [{"type": "web_summary", "content": content[:2000]}]
+    except Exception as exc:
+        logger.warning("Hermes web search failed: %s", exc)
+        return [{"type": "error", "message": f"Web search failed: {exc}"}]
+
+
+def web_search_tool(
+    query: str,
+    search_type: str = "auto",
+    limit: int = 5,
+    task_id: Optional[str] = None,
+) -> str:
+    """Search GitHub, scientific APIs, or general web."""
+    if search_type == "auto":
+        search_type = _detect_search_type(query)
+
+    results: list[dict] = []
+
+    if search_type == "github":
+        results = _search_github(query, limit)
+        if not results and _is_configured():
+            results = _search_general_via_hermes(
+                f"Search GitHub for: {query}. Use gh CLI if available.", limit,
+            )
+            if results:
+                search_type = "github_via_hermes"
+    elif search_type == "scientific":
+        results = _search_scientific(query, limit)
+    elif search_type == "general":
+        results = _search_general_via_hermes(query, limit)
+    else:
+        results = _search_general_via_hermes(query, limit)
+
+    return json.dumps({
+        "success": True,
+        "search_type": search_type,
+        "query": query,
+        "results": results,
+        "count": len(results),
+    }, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
 # Tool: ecoagent_query — call EcoAgent tools on reumanlab via Hermes
 # ---------------------------------------------------------------------------
 
@@ -1223,6 +1447,19 @@ def register(ctx) -> None:
     )
 
     ctx.register_tool(
+        name="web_search",
+        toolset="ecoseek",
+        schema=WEB_SEARCH_SCHEMA,
+        handler=lambda args, **kw: web_search_tool(
+            query=args.get("query", ""),
+            search_type=args.get("search_type", "auto"),
+            limit=args.get("limit", 5),
+            task_id=kw.get("task_id"),
+        ),
+        check_fn=lambda: True,
+    )
+
+    ctx.register_tool(
         name="upload_document",
         toolset="ecoseek",
         schema=UPLOAD_DOCUMENT_SCHEMA,
@@ -1416,6 +1653,19 @@ try:
         handler=lambda args, **kw: literature_search_tool(
             query=args.get("query", ""),
             limit=args.get("limit", 10),
+            task_id=kw.get("task_id"),
+        ),
+        check_fn=lambda: True,
+        requires_env=[],
+    )
+    registry.register(
+        name="web_search",
+        toolset="ecoseek",
+        schema=WEB_SEARCH_SCHEMA,
+        handler=lambda args, **kw: web_search_tool(
+            query=args.get("query", ""),
+            search_type=args.get("search_type", "auto"),
+            limit=args.get("limit", 5),
             task_id=kw.get("task_id"),
         ),
         check_fn=lambda: True,
