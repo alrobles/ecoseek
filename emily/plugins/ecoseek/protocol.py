@@ -15,6 +15,7 @@ import contextvars
 import json
 import logging
 import os
+import re
 import sys
 import time
 import uuid
@@ -153,21 +154,40 @@ def _beta_call(
 
 
 def _parse_json_response(content: str) -> dict | None:
-    """Try to parse JSON from Beta's response, handling markdown wrapping."""
+    """Try to parse JSON from Beta's response, handling markdown wrapping.
+
+    Handles:
+      - Direct JSON: ``{"thesis": "..."}``
+      - Markdown fenced: ````` ```json\\n{...}\\n``` `````
+      - Preamble + fenced: ``Here is...\\n```json\\n{...}\\n``` ``
+      - Preamble + bare JSON: ``Here is the result:\\n{...}``
+    """
     content = content.strip()
-    # Strip markdown code fences
-    if content.startswith("```"):
-        lines = content.split("\n")
-        # Remove first and last line if they're fences
-        if lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        content = "\n".join(lines)
+
+    # Strategy 1: direct JSON parse
     try:
         return json.loads(content)
     except (json.JSONDecodeError, ValueError):
-        return None
+        pass
+
+    # Strategy 2: extract from markdown code fences (```json ... ```)
+    fence_match = re.search(r"```(?:json)?\s*\n(.*?)```", content, re.DOTALL)
+    if fence_match:
+        try:
+            return json.loads(fence_match.group(1).strip())
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Strategy 3: find the first { ... } block (greedy from first { to last })
+    brace_start = content.find("{")
+    brace_end = content.rfind("}")
+    if brace_start >= 0 and brace_end > brace_start:
+        try:
+            return json.loads(content[brace_start:brace_end + 1])
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -425,9 +445,18 @@ def _assemble_report(
     """Assemble the final mini-report from structured draft data."""
     sections = draft.get("sections", {})
 
-    # If draft is raw text (parsing failed), return it directly
-    if "raw_response" in draft:
-        return draft["raw_response"]
+    # If draft is raw text (parsing failed), try to re-parse it
+    if "raw_response" in draft and not sections:
+        reparsed = _parse_json_response(draft["raw_response"])
+        if reparsed and isinstance(reparsed, dict):
+            draft = reparsed
+            sections = draft.get("sections", {})
+        else:
+            # Last resort: return cleaned raw text (strip markdown fences)
+            raw = draft["raw_response"]
+            raw = re.sub(r"^```(?:json)?\s*\n", "", raw.strip())
+            raw = re.sub(r"\n```\s*$", "", raw)
+            return raw
 
     title = task_object.get("task_type", "Ecological Analysis").replace("_", " ").title()
     question = task_object.get("user_question", prompt)
@@ -450,7 +479,7 @@ def _assemble_report(
             mode=classification.get("mode", "?"),
             rounds=rounds,
         )
-    except (KeyError, TypeError):
+    except (KeyError, TypeError, ValueError, IndexError):
         # Fallback: render whatever we have
         report = f"# Analysis: {question}\n\n"
         if draft.get("thesis"):
@@ -462,7 +491,45 @@ def _assemble_report(
         if draft.get("uncertainties"):
             report += "## Uncertainties\n" + "\n".join(f"- {u}" for u in draft["uncertainties"]) + "\n"
 
+    # Append real literature citations from retrieval stage
+    report += _format_citations(evidence)
+
     return report
+
+
+def _format_citations(evidence: dict | None) -> str:
+    """Format retrieved literature sources as a references section."""
+    if not evidence:
+        return ""
+
+    sources = evidence.get("sources", [])
+    if not sources:
+        return ""
+
+    refs = "\n\n---\n## References (retrieved sources)\n\n"
+    seen_titles: set[str] = set()
+    for i, src in enumerate(sources, 1):
+        title = src.get("title", "").strip()
+        if not title or title.lower() in seen_titles:
+            continue
+        seen_titles.add(title.lower())
+
+        authors = src.get("authors", "Unknown")
+        year = src.get("year", "n.d.")
+        doi = src.get("doi", "")
+        url = src.get("url", "")
+        provider = src.get("provider", "")
+
+        ref_line = f"{i}. {authors} ({year}). **{title}**."
+        if doi:
+            ref_line += f" DOI: [{doi}](https://doi.org/{doi})"
+        elif url:
+            ref_line += f" [{url}]({url})"
+        if provider:
+            ref_line += f" _{provider}_"
+        refs += ref_line + "\n"
+
+    return refs if len(seen_titles) > 0 else ""
 
 
 # ---------------------------------------------------------------------------
@@ -509,10 +576,38 @@ def run_didal_protocol(
 
     protocol_id = task_id or str(uuid.uuid4())[:12]
     effective_max_rounds = max_rounds if max_rounds > 0 else _MAX_CRITIQUE_ROUNDS
+    start_time = time.time()
+
+    try:
+        return _run_protocol_inner(
+            prompt, force_mode, effective_max_rounds,
+            protocol_id, model_override, start_time,
+        )
+    except Exception as exc:
+        elapsed = round(time.time() - start_time, 1)
+        logger.error("didal[%s] protocol crashed: %s", protocol_id, exc, exc_info=True)
+        _emit_progress("Error", f"protocol failed after {elapsed}s")
+        return json.dumps({
+            "success": False,
+            "protocol_id": protocol_id,
+            "error": "protocol_exception",
+            "message": f"DiDAL protocol error: {str(exc)[:300]}",
+            "elapsed_seconds": elapsed,
+        }, ensure_ascii=False)
+
+
+def _run_protocol_inner(
+    prompt: str,
+    force_mode: str | None,
+    effective_max_rounds: int,
+    protocol_id: str,
+    model_override: str | None,
+    start_time: float,
+) -> str:
+    """Inner protocol logic, wrapped by run_didal_protocol for error safety."""
     stages: list[dict] = []
     total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     all_cached_tokens = 0
-    start_time = time.time()
 
     # Set per-request model override for all _beta_call invocations
     _model_token = _request_model.set(model_override)
@@ -729,7 +824,6 @@ def run_didal_protocol(
                         "fitness": mctx.get("fitness"),
                     })
 
-        _request_model.reset(_model_token)
         elapsed = round(time.time() - start_time, 1)
         _emit_progress("Complete", f"finished in {elapsed}s")
 
@@ -757,4 +851,6 @@ def run_didal_protocol(
         }
         if tctx.get("trace_id"):
             result["trace_id"] = tctx["trace_id"]
+
+        _request_model.reset(_model_token)
         return json.dumps(result, ensure_ascii=False)
