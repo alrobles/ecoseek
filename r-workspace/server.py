@@ -14,7 +14,6 @@ import json
 import logging
 import os
 import subprocess
-import tempfile
 import time
 import uuid
 from http.server import HTTPServer, BaseHTTPRequestHandler
