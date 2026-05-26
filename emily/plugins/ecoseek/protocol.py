@@ -622,6 +622,10 @@ def _assemble_report(
     title = task_object.get("task_type", "Ecological Analysis").replace("_", " ").title()
     question = task_object.get("user_question", prompt)
 
+    # Build references: combine LLM-generated refs with API-retrieved sources
+    llm_refs = draft.get("references", [])
+    refs_text = _build_references(llm_refs, evidence)
+
     try:
         report = MINI_REPORT_TEMPLATE.format(
             title=title,
@@ -636,6 +640,7 @@ def _assemble_report(
             open_questions="\n".join(
                 f"- {q}" for q in draft.get("missing_information", draft.get("uncertainties", []))
             ) or "*None identified.*",
+            references=refs_text or "*No references available.*",
             complexity_score=classification.get("complexity_score", "?"),
             mode=classification.get("mode", "?"),
             rounds=rounds,
@@ -651,15 +656,54 @@ def _assemble_report(
             report += "## Key Points\n" + "\n".join(f"- {p}" for p in draft["key_points"]) + "\n\n"
         if draft.get("uncertainties"):
             report += "## Uncertainties\n" + "\n".join(f"- {u}" for u in draft["uncertainties"]) + "\n"
-
-    # Append real literature citations from retrieval stage
-    report += _format_citations(evidence)
+        if refs_text:
+            report += f"\n## References\n{refs_text}\n"
 
     return report
 
 
+def _build_references(llm_refs: list, evidence: dict | None) -> str:
+    """Combine LLM-generated references with API-retrieved sources."""
+    lines: list[str] = []
+    seen_lower: set[str] = set()
+
+    # 1) LLM-generated references (from the "references" field in draft JSON)
+    for ref in (llm_refs or []):
+        if isinstance(ref, str) and ref.strip():
+            key = ref.strip().lower()[:80]
+            if key not in seen_lower:
+                seen_lower.add(key)
+                lines.append(ref.strip())
+
+    # 2) API-retrieved sources (from literature retrieval stage)
+    if evidence and isinstance(evidence, dict):
+        for src in evidence.get("sources", []):
+            title = src.get("title", "").strip()
+            if not title:
+                continue
+            key = title.lower()[:80]
+            if key in seen_lower:
+                continue
+            seen_lower.add(key)
+            authors = src.get("authors", "Unknown")
+            year = src.get("year", "n.d.")
+            doi = src.get("doi", "")
+            url = src.get("url", "")
+            entry = f"{authors} ({year}). {title}."
+            if doi:
+                entry += f" DOI: [{doi}](https://doi.org/{doi})"
+            elif url:
+                entry += f" [{url}]({url})"
+            lines.append(entry)
+
+    if not lines:
+        return ""
+
+    return "\n".join(f"{i}. {line}" for i, line in enumerate(lines, 1))
+
+
 def _format_citations(evidence: dict | None) -> str:
-    """Format retrieved literature sources as a references section."""
+    """Format retrieved literature sources as a references section (legacy)."""
     if not evidence:
         return ""
 
