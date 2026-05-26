@@ -124,14 +124,22 @@ def classify_prompt_tool(prompt: str, task_id: Optional[str] = None) -> str:
     """
     from .classifier import classify_complexity
     result = classify_complexity(prompt)
-    return json.dumps({
+    response = {
         "success": True,
         "mode": result.mode,
         "complexity_score": result.complexity_score,
         "reasons": result.reasons,
         "needs_clarification": result.needs_clarification,
         "expected_depth": result.expected_depth,
-    }, ensure_ascii=False)
+    }
+    if result.is_execution:
+        response["is_execution"] = True
+        response["routing_hint"] = (
+            "This is an EXECUTION task. Use escalate_remote to send it to "
+            "Hermes Beta. Do NOT use didal_protocol — it only generates text "
+            "and cannot execute commands, create jobs, or run code."
+        )
+    return json.dumps(response, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
@@ -501,7 +509,9 @@ CLASSIFY_PROMPT_SCHEMA = {
         "didal_protocol. ALWAYS call this first, then tell the user what mode "
         "was detected and what you will do, THEN call didal_protocol with the "
         "mode parameter. Returns: 'direct' (simple), 'didal' (conceptual), or "
-        "'didal_literature' (evidence-backed synthesis). This is fast (~1s) and "
+        "'didal_literature' (evidence-backed synthesis). If is_execution=true, "
+        "the task is an ACTION (create job, run code, etc.) — you MUST use "
+        "escalate_remote instead of didal_protocol. This is fast (~1s) and "
         "gives the user immediate feedback while you prepare the full response."
     ),
     "parameters": {
