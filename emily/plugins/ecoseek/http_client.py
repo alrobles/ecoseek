@@ -18,10 +18,14 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+import time
 import urllib.error
 import urllib.request
 
 logger = logging.getLogger(__name__)
+
+_MAX_RETRIES = 2
+_RETRY_DELAY = 3
 
 
 def http_post_json(
@@ -29,32 +33,64 @@ def http_post_json(
     payload: dict,
     headers: dict | None = None,
     timeout: int = 30,
+    retries: int = _MAX_RETRIES,
 ) -> dict:
-    """POST JSON and return parsed response. Falls back to curl on 403."""
+    """POST JSON and return parsed response. Falls back to curl on 403.
+
+    Retries on transient failures (empty responses, timeouts, 5xx errors).
+    """
     hdrs = {"Content-Type": "application/json", "Accept": "application/json"}
     if headers:
         hdrs.update(headers)
 
     body = json.dumps(payload).encode("utf-8")
 
+    last_exc: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            return _post_once(url, body, hdrs, payload, timeout)
+        except Exception as exc:
+            last_exc = exc
+            if attempt < retries:
+                logger.info(
+                    "http_post_json attempt %d/%d failed (%s), retrying in %ds",
+                    attempt, retries, exc, _RETRY_DELAY,
+                )
+                time.sleep(_RETRY_DELAY)
+
+    raise last_exc  # type: ignore[misc]
+
+
+def _post_once(
+    url: str,
+    body: bytes,
+    hdrs: dict,
+    payload: dict,
+    timeout: int,
+) -> dict:
+    """Single POST attempt: urllib first, curl fallback on Cloudflare 403."""
     # --- Attempt 1: urllib ---
     try:
         req = urllib.request.Request(url, data=body, headers=hdrs, method="POST")
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+            raw = resp.read().decode("utf-8")
+            if not raw.strip():
+                raise ValueError("Empty response body from server")
+            return json.loads(raw)
     except urllib.error.HTTPError as exc:
         if exc.code == 403:
             err_body = ""
             try:
-                err_body = exc.read().decode("utf-8", errors="replace")[:200]
+                err_body = exc.read().decode("utf-8", errors="replace")[:500]
             except Exception:
                 pass
             if "1010" in err_body or "cloudflare" in err_body.lower() or not err_body.strip():
                 logger.info("urllib blocked by Cloudflare (1010), falling back to curl")
                 return _curl_post(url, payload, hdrs, timeout)
         raise
-
-    return {}
+    except json.JSONDecodeError:
+        logger.info("urllib got non-JSON response, falling back to curl")
+        return _curl_post(url, payload, hdrs, timeout)
 
 
 def http_get_json(
@@ -76,7 +112,7 @@ def http_get_json(
         if exc.code == 403:
             err_body = ""
             try:
-                err_body = exc.read().decode("utf-8", errors="replace")[:200]
+                err_body = exc.read().decode("utf-8", errors="replace")[:500]
             except Exception:
                 pass
             if "1010" in err_body or "cloudflare" in err_body.lower() or not err_body.strip():
@@ -91,16 +127,39 @@ def http_get_json(
 
 
 def _curl_post(url: str, payload: dict, headers: dict, timeout: int) -> dict:
-    """POST via curl subprocess — bypasses Cloudflare TLS fingerprinting."""
-    cmd = ["curl", "-s", "--max-time", str(timeout)]
+    """POST via curl subprocess — bypasses Cloudflare TLS fingerprinting.
+
+    Uses -w to capture HTTP status code and validates response before parsing.
+    """
+    cmd = [
+        "curl", "-s",
+        "--max-time", str(timeout),
+        "-w", "\n%{http_code}",
+    ]
     for k, v in headers.items():
         cmd.extend(["-H", f"{k}: {v}"])
     cmd.extend(["-d", json.dumps(payload), url])
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 10)
     if result.returncode != 0:
         raise RuntimeError(f"curl POST failed (rc={result.returncode}): {result.stderr[:200]}")
-    return json.loads(result.stdout)
+
+    stdout = result.stdout.rstrip()
+    lines = stdout.rsplit("\n", 1)
+    body = lines[0] if len(lines) == 2 else stdout
+    status = int(lines[1]) if len(lines) == 2 and lines[1].isdigit() else 0
+
+    if status >= 500:
+        raise RuntimeError(f"curl POST got HTTP {status}: {body[:200]}")
+    if not body.strip():
+        raise ValueError(f"curl POST got empty body (HTTP {status})")
+
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"curl POST got non-JSON response (HTTP {status}): {body[:200]}"
+        ) from exc
 
 
 def _curl_get(url: str, headers: dict, timeout: int) -> dict | list | None:
@@ -110,7 +169,7 @@ def _curl_get(url: str, headers: dict, timeout: int) -> dict | list | None:
         cmd.extend(["-H", f"{k}: {v}"])
     cmd.append(url)
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 10)
     if result.returncode != 0:
         logger.warning("curl GET failed (rc=%d): %s", result.returncode, result.stderr[:200])
         return None
