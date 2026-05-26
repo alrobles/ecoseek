@@ -6,6 +6,7 @@ Two asymmetric roles:
   - **Expert Scientific Researcher** (Beta/Hermes): retrieves sources,
     contrasts definitions, generates synthesis, exposes uncertainty.
 """
+
 from __future__ import annotations
 
 # ---------------------------------------------------------------------------
