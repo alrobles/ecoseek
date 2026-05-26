@@ -924,17 +924,53 @@ def retrieve_literature(
     # Protocol spec: at least 1 contrast/critique source when available
     has_review = any(e.source_type == "review" for e in unique_evidence)
 
+    # --- LACS re-ranking: score evidence by domain relevance ---
+    sources_dicts = [evidence_to_dict(e) for e in unique_evidence]
+    lacs_applied = False
+    lacs_domain = ""
+    try:
+        from .lacs_classifier import rerank_evidence, _LACS_ENABLED
+        if _LACS_ENABLED and sources_dicts:
+            lacs_domain = _detect_domain(query)
+            sources_dicts = rerank_evidence(sources_dicts, domain=lacs_domain)
+            lacs_applied = True
+            provider_stats["lacs_rerank"] = len(sources_dicts)
+            logger.info("LACS re-ranked %d sources (domain=%s)", len(sources_dicts), lacs_domain)
+    except Exception as exc:
+        logger.debug("LACS re-ranking skipped: %s", exc)
+
     return {
-        "sources": [evidence_to_dict(e) for e in unique_evidence],
+        "sources": sources_dicts,
         "total_found": len(unique_evidence),
         "provider_stats": provider_stats,
         "has_review_source": has_review,
         "tier": tier,
         "queries_used": queries[:3],
         "errors": errors if errors else None,
+        "lacs_applied": lacs_applied,
+        "lacs_domain": lacs_domain,
         "retrieval_notes": (
             f"Retrieved {len(unique_evidence)} unique sources from "
             f"{', '.join(provider_stats.keys())}. "
+            f"{'LACS re-ranked by ' + lacs_domain + ' relevance. ' if lacs_applied else ''}"
             f"{'Includes review/meta-analysis.' if has_review else 'No review papers found — consider broadening search.'}"
         ),
     }
+
+
+def _detect_domain(query: str) -> str:
+    """Heuristic to detect the best LACS domain for a query."""
+    q = query.lower()
+    host_parasite_kw = {"host", "parasite", "pathogen", "virus", "zoonotic", "infection",
+                        "reservoir", "hantavirus", "spillover", "vector", "disease"}
+    niche_kw = {"niche", "distribution", "sdm", "maxent", "bioclim", "chelsa",
+                "occurrence", "suitability", "habitat", "climate"}
+
+    hp_hits = sum(1 for kw in host_parasite_kw if kw in q)
+    nm_hits = sum(1 for kw in niche_kw if kw in q)
+
+    if hp_hits > nm_hits:
+        return "host-parasite"
+    if nm_hits > hp_hits:
+        return "niche-modeling"
+    return "biodiversity"
