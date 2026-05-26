@@ -56,6 +56,7 @@ function App() {
   const [streamingReasoning, setStreamingReasoning] = useState("");
   const [activeToolCalls, setActiveToolCalls] = useState([]);
   const [toolProgress, setToolProgress] = useState(null); // {tool, emoji, label, status}
+  const [didalStages, setDidalStages] = useState([]); // live progress pipeline
   const [didalExchanges, setDidalExchanges] = useState([]);
   const [lastClassification, setLastClassification] = useState(null);
   const [lastProtocolStages, setLastProtocolStages] = useState(null);
@@ -135,6 +136,7 @@ function App() {
       setStreamingReasoning("");
       setActiveToolCalls([]);
       setToolProgress(null);
+      setDidalStages([]);
 
       const history = [...messages, userMsg]
         .filter((m) => m.type === "user" || m.type === "agent")
@@ -184,6 +186,26 @@ function App() {
             },
             onToolProgress: (info) => {
               setToolProgress(info);
+              // Parse DiDAL progress from label text like "[DiDAL] Classifying — analyzing question complexity"
+              const label = info.label || info.tool || "";
+              if (label.startsWith("[DiDAL]") || (info.tool && info.tool.includes("didal"))) {
+                const stageMatch = label.match(/\[DiDAL\]\s*(\w+)/);
+                if (stageMatch) {
+                  const stageName = stageMatch[1];
+                  const detail = label.replace(/\[DiDAL\]\s*\w+\s*[—–-]?\s*/, "").trim();
+                  setDidalStages((prev) => {
+                    const existing = prev.find((s) => s.name === stageName);
+                    if (existing) {
+                      return prev.map((s) => s.name === stageName ? { ...s, detail, status: "done" } : s);
+                    }
+                    // Mark previous as done, add new as active
+                    return [
+                      ...prev.map((s) => ({ ...s, status: "done" })),
+                      { name: stageName, detail, status: "active", time: Date.now() },
+                    ];
+                  });
+                }
+              }
               if (info.status === "completed") {
                 setTimeout(() => setToolProgress(null), 1500);
               }
@@ -496,6 +518,15 @@ function App() {
                     <span className="tool-progress-label">Emily is thinking...</span>
                   )}
                   <span className="elapsed-timer">{formatElapsed(elapsedSeconds)}</span>
+                  {didalStages.length > 0 && (
+                    <div className="didal-progress-pipeline">
+                      {didalStages.map((s, i) => (
+                        <span key={i} className={`didal-pip-stage ${s.status}`}>
+                          {s.status === "active" ? "◉" : "✓"} {s.name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -588,7 +619,7 @@ function App() {
             </div>
             <div className="content">
               {rightPanelTab === "output" && (
-                <RenderPreview messages={messages} streamingContent={streamingContent} isLoading={isLoading} />
+                <RenderPreview messages={messages} streamingContent={streamingContent} isLoading={isLoading} didalStages={didalStages} />
               )}
               {rightPanelTab === "terminal" && (
                 <div className="terminal-panel">
