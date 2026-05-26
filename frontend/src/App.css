@@ -791,6 +791,94 @@ body {
   background-color: #dc2626;
 }
 
+/* --- PDF Upload Button --- */
+
+.upload-btn {
+  background-color: transparent !important;
+  border: 2px dashed var(--muted-foreground) !important;
+  color: var(--muted-foreground) !important;
+  box-shadow: none !important;
+  transition: all 0.2s ease;
+}
+
+.upload-btn:hover:not(:disabled) {
+  border-color: var(--accent, #10b981) !important;
+  color: var(--accent, #10b981) !important;
+  background-color: rgba(16, 185, 129, 0.08) !important;
+  transform: translateY(-1px);
+}
+
+.upload-btn.uploading {
+  border-color: var(--accent, #10b981) !important;
+  animation: pulse-upload 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-upload {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+.upload-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--muted-foreground);
+  border-top-color: var(--accent, #10b981);
+  border-radius: 50%;
+  animation: spin-upload 0.8s linear infinite;
+}
+
+@keyframes spin-upload {
+  to { transform: rotate(360deg); }
+}
+
+/* Upload badge (shown below input when file is attached) */
+.upload-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.75rem;
+  margin-top: 0.4rem;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 12px;
+  font-size: 0.8rem;
+  color: var(--foreground);
+}
+
+.upload-badge-icon {
+  font-size: 1rem;
+}
+
+.upload-badge-name {
+  font-weight: 500;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-badge-pages {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.upload-badge-remove {
+  background: none;
+  border: none;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+  margin-left: auto;
+  transition: color 0.2s;
+}
+
+.upload-badge-remove:hover {
+  color: var(--destructive, #ef4444);
+}
+
 /* --- Reasoning Mode Toggle --- */
 .reasoning-toggle {
   display: flex;
