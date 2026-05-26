@@ -868,6 +868,55 @@ DIALECTICAL_EXCHANGE_SCHEMA = {
 
 
 # ---------------------------------------------------------------------------
+# Tool: upload_artifact — push large files to GitHub for download
+# ---------------------------------------------------------------------------
+
+UPLOAD_ARTIFACT_SCHEMA = {
+    "name": "upload_artifact",
+    "description": (
+        "Upload a large file from the cluster to the ecoseek-artifacts GitHub repo. "
+        "Use this when Hermes generates outputs (rasters, CSVs, plots) too large "
+        "to return inline. Returns a download URL via raw.githubusercontent.com. "
+        "For files <5MB, prefer returning them inline in the response."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "cluster_path": {
+                "type": "string",
+                "description": "Path to the file on the cluster (e.g., /home/a474r867/work/sdm/output.tif).",
+            },
+            "artifact_name": {
+                "type": "string",
+                "description": "Name for the artifact in the repo (e.g., ara_macao_sdm.tif).",
+            },
+            "session_id": {
+                "type": "string",
+                "description": "Optional session ID for organizing artifacts.",
+            },
+        },
+        "required": ["cluster_path", "artifact_name"],
+    },
+}
+
+
+def upload_artifact_tool(
+    cluster_path: str,
+    artifact_name: str,
+    session_id: str = "",
+    task_id: Optional[str] = None,
+) -> str:
+    """Upload a large file from the cluster to GitHub artifacts repo."""
+    from .artifacts import upload_artifact_via_hermes
+    result = upload_artifact_via_hermes(
+        local_path=cluster_path,
+        artifact_name=artifact_name,
+        session_id=session_id or task_id or "",
+    )
+    return json.dumps(result, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
 # R Workspace tool schemas
 # ---------------------------------------------------------------------------
 
@@ -1114,9 +1163,22 @@ def register(ctx) -> None:
         check_fn=lambda: True,
     )
 
-    n = 12 if _is_configured() else 8
+    ctx.register_tool(
+        name="upload_artifact",
+        toolset="ecoseek",
+        schema=UPLOAD_ARTIFACT_SCHEMA,
+        handler=lambda args, **kw: upload_artifact_tool(
+            cluster_path=args.get("cluster_path", ""),
+            artifact_name=args.get("artifact_name", ""),
+            session_id=args.get("session_id", ""),
+            task_id=kw.get("task_id"),
+        ),
+        check_fn=_is_configured,
+    )
+
+    n = 13 if _is_configured() else 8
     logger.info(
-        "ecoseek plugin registered: %d tools, remote=%s configured=%s didal=v2 ecoagent=true r_workspace=true niche=true pdf=true",
+        "ecoseek plugin registered: %d tools, remote=%s configured=%s didal=v2 ecoagent=true r_workspace=true niche=true pdf=true artifacts=true",
         n, _REMOTE_URL, _is_configured(),
     )
 
@@ -1253,6 +1315,19 @@ try:
         schema=R_WORKSPACE_STATUS_SCHEMA,
         handler=lambda args, **kw: r_workspace_status(task_id=kw.get("task_id")),
         check_fn=lambda: True,
+        requires_env=[],
+    )
+    registry.register(
+        name="upload_artifact",
+        toolset="ecoseek",
+        schema=UPLOAD_ARTIFACT_SCHEMA,
+        handler=lambda args, **kw: upload_artifact_tool(
+            cluster_path=args.get("cluster_path", ""),
+            artifact_name=args.get("artifact_name", ""),
+            session_id=args.get("session_id", ""),
+            task_id=kw.get("task_id"),
+        ),
+        check_fn=_is_configured,
         requires_env=[],
     )
 except ImportError:
