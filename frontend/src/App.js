@@ -65,7 +65,7 @@ function App() {
   const [reasoningMode, setReasoningMode] = useState("auto"); // "fast" | "deep" | "auto"
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [uploadingPdf, setUploadingPdf] = useState(false);
-  const [uploadedFile, setUploadedFile] = useState(null); // {name, text, pages}
+  const [uploadedFiles, setUploadedFiles] = useState([]); // [{name, text, pages}, ...]
   const messagesEndRef = useRef(null);
   const abortRef = useRef(null);
   const timerRef = useRef(null);
@@ -125,36 +125,49 @@ function App() {
   };
 
   // PDF upload handler — extracts text client-side, sends to Emily for LACS
+  // Supports multiple files in a single selection.
   const handlePdfUpload = useCallback(async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    // Reset file input so the same file can be re-uploaded
+    const fileList = Array.from(e.target.files || []);
+    if (fileList.length === 0) return;
+    // Reset file input so the same files can be re-uploaded
     e.target.value = "";
 
-    const validation = validatePdf(file);
-    if (!validation.ok) {
-      setError(validation.error);
-      return;
+    // Validate all files first
+    for (const file of fileList) {
+      const validation = validatePdf(file);
+      if (!validation.ok) {
+        setError(`${file.name}: ${validation.error}`);
+        return;
+      }
     }
 
     setUploadingPdf(true);
     setError(null);
 
     try {
-      const { text, pages } = await extractPdfText(file);
-      if (!text.trim()) {
-        setError("Could not extract text from PDF (might be image-based)");
-        setUploadingPdf(false);
-        return;
+      // Extract text from all PDFs
+      const extracted = [];
+      for (const file of fileList) {
+        const { text, pages } = await extractPdfText(file);
+        if (!text.trim()) {
+          setError(`${file.name}: Could not extract text (might be image-based)`);
+          setUploadingPdf(false);
+          return;
+        }
+        extracted.push({ name: file.name, text, pages });
       }
 
-      setUploadedFile({ name: file.name, text, pages });
+      setUploadedFiles(extracted);
 
-      // Truncate text preview for the user message (full text goes to Emily)
-      const preview = text.slice(0, 300).replace(/\s+/g, " ").trim();
+      // Build user-visible message
+      const fileList_ = extracted.map(f => `**${f.name}** (${f.pages} pages)`).join(", ");
+      const previews = extracted.map(f => {
+        const preview = f.text.slice(0, 200).replace(/\s+/g, " ").trim();
+        return `> **${f.name}:** ${preview}...`;
+      }).join("\n\n");
       const userMsg = {
         type: "user",
-        content: `I'm uploading a paper: **${file.name}** (${pages} pages).\n\nPlease ingest this document with upload_document, then classify it with LACS and find similar literature.\n\n> ${preview}...`,
+        content: `I'm uploading ${extracted.length} paper${extracted.length > 1 ? "s" : ""}: ${fileList_}.\n\nPlease ingest each document, classify with LACS, and find similar literature.\n\n${previews}`,
       };
       setMessages((prev) => [...prev, userMsg]);
       setIsLoading(true);
@@ -164,10 +177,15 @@ function App() {
       setToolProgress(null);
       setDidalStages([]);
 
+      // Build the full content for Emily — one block per paper
+      const paperBlocks = extracted.map((f, i) => (
+        `--- PAPER ${i + 1} of ${extracted.length}: ${f.name} (${f.pages} pages) ---\n\n${f.text}`
+      )).join("\n\n");
+
       const history = [
         {
           role: "user",
-          content: `[PDF Upload: ${file.name}, ${pages} pages]\n\nPlease do the following:\n1. Use upload_document to ingest this paper text into my knowledge base\n2. Use classify_literature to score its domain relevance with LACS\n3. Use literature_search to find similar papers\n\nHere is the full extracted text:\n\n${text}`,
+          content: `[PDF Upload: ${extracted.length} file${extracted.length > 1 ? "s" : ""}]\n\nPlease process each paper below:\n1. Use upload_document to ingest each paper's text (call it once per paper with the paper title and text)\n2. Use classify_literature to score domain relevance with LACS\n3. Use literature_search to find similar papers\n\n${paperBlocks}`,
         },
       ];
 
@@ -197,12 +215,12 @@ function App() {
             setIsLoading(false);
             setActiveToolCalls([]);
             setToolProgress(null);
-            setUploadedFile(null);
+            setUploadedFiles([]);
           },
           onError: (err) => {
             setError(err.message);
             setIsLoading(false);
-            setUploadedFile(null);
+            setUploadedFiles([]);
           },
           signal: abortController.signal,
         },
@@ -660,6 +678,7 @@ function App() {
                   ref={fileInputRef}
                   type="file"
                   accept=".pdf,application/pdf"
+                  multiple
                   style={{ display: "none" }}
                   onChange={handlePdfUpload}
                 />
@@ -669,7 +688,7 @@ function App() {
                   disabled={isLoading || uploadingPdf}
                   onClick={() => fileInputRef.current?.click()}
                   aria-label="Upload PDF paper"
-                  title="Upload a PDF paper for LACS classification"
+                  title="Upload PDF papers for LACS classification"
                 >
                   {uploadingPdf ? (
                     <span className="upload-spinner" />
@@ -702,16 +721,20 @@ function App() {
                   </svg>
                 </button>
               </div>
-              {uploadedFile && (
-                <div className="upload-badge">
-                  <span className="upload-badge-icon">&#128196;</span>
-                  <span className="upload-badge-name">{uploadedFile.name}</span>
-                  <span className="upload-badge-pages">({uploadedFile.pages} pages)</span>
-                  <button
-                    className="upload-badge-remove"
-                    onClick={() => setUploadedFile(null)}
-                    aria-label="Remove uploaded file"
-                  >&times;</button>
+              {uploadedFiles.length > 0 && (
+                <div className="upload-badges">
+                  {uploadedFiles.map((f, i) => (
+                    <div className="upload-badge" key={f.name + i}>
+                      <span className="upload-badge-icon">&#128196;</span>
+                      <span className="upload-badge-name">{f.name}</span>
+                      <span className="upload-badge-pages">({f.pages} pages)</span>
+                      <button
+                        className="upload-badge-remove"
+                        onClick={() => setUploadedFiles(prev => prev.filter((_, j) => j !== i))}
+                        aria-label={`Remove ${f.name}`}
+                      >&times;</button>
+                    </div>
+                  ))}
                 </div>
               )}
             </form>
