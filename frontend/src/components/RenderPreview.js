@@ -1,71 +1,56 @@
 import React, { useMemo } from "react";
-import katex from "katex";
+import ReactMarkdown from "react-markdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 
-function extractBlocks(messages) {
-  const blocks = [];
-  for (const msg of messages) {
-    if (msg.type !== "agent" || !msg.content) continue;
-    const content = msg.content;
-
-    const mathDisplay = /\$\$([\s\S]*?)\$\$/g;
-    let m;
-    while ((m = mathDisplay.exec(content)) !== null) {
-      blocks.push({ type: "math", value: m[1].trim(), display: true });
+export function RenderPreview({ messages, streamingContent = "", isLoading = false }) {
+  const latestAgentContent = useMemo(() => {
+    // Show streaming content while loading
+    if (isLoading && streamingContent) return streamingContent;
+    // Otherwise show the last agent message
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].type === "agent" && messages[i].content) {
+        return messages[i].content;
+      }
     }
-
-    const codeBlocks = /```(\w*)\n([\s\S]*?)```/g;
-    while ((m = codeBlocks.exec(content)) !== null) {
-      blocks.push({ type: "code", language: m[1] || "text", value: m[2].trim() });
-    }
-  }
-  return blocks;
-}
-
-function MathPreview({ value }) {
-  const html = useMemo(() => {
-    try {
-      return katex.renderToString(value, {
-        displayMode: true,
-        throwOnError: false,
-        trust: true,
-        strict: false,
-      });
-    } catch {
-      return null;
-    }
-  }, [value]);
-
-  if (!html) return <pre className="preview-fallback">{value}</pre>;
-  return <div className="preview-math" dangerouslySetInnerHTML={{ __html: html }} />;
-}
-
-export function RenderPreview({ messages }) {
-  const blocks = useMemo(() => extractBlocks(messages), [messages]);
-  const latestBlocks = blocks.slice(-10).reverse();
+    return "";
+  }, [messages, streamingContent, isLoading]);
 
   return (
     <div className="render-preview">
-      <div className="preview-content">
-        <div className="preview-blocks">
-          {latestBlocks.length === 0 ? (
-            <div className="preview-empty">
-              <p>Equations, code, and results from Emily's responses will appear here for easy reference.</p>
-            </div>
-          ) : (
-            latestBlocks.map((block, i) => (
-              <div key={i} className={`preview-block preview-${block.type}`}>
-                {block.type === "math" && <MathPreview value={block.value} />}
-                {block.type === "code" && (
-                  <div className="preview-code">
-                    <div className="preview-code-header">{block.language}</div>
-                    <pre><code>{block.value}</code></pre>
-                  </div>
-                )}
-              </div>
-            ))
-          )}
-        </div>
+      <div className="output-content">
+        {!latestAgentContent ? (
+          <div className="preview-empty">
+            <p>Emily's formatted output will appear here — markdown, equations, code, and results rendered for easy reading.</p>
+          </div>
+        ) : (
+          <div className="output-markdown">
+            <ReactMarkdown
+              remarkPlugins={[remarkMath]}
+              rehypePlugins={[rehypeKatex]}
+              components={{
+                code({ node, inline, className, children, ...props }) {
+                  if (inline) {
+                    return <code className="inline-code" {...props}>{children}</code>;
+                  }
+                  const lang = (className || "").replace("language-", "");
+                  return (
+                    <div className="output-code-block">
+                      {lang && <div className="output-code-lang">{lang}</div>}
+                      <pre><code className={className} {...props}>{children}</code></pre>
+                    </div>
+                  );
+                },
+                table({ children }) {
+                  return <div className="output-table-wrap"><table>{children}</table></div>;
+                },
+              }}
+            >
+              {latestAgentContent}
+            </ReactMarkdown>
+          </div>
+        )}
       </div>
     </div>
   );

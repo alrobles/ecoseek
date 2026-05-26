@@ -5,7 +5,7 @@ Sources (in priority order):
   1. OpenAlex  — 250M+ works, open, no auth required (default Tier A & B)
   2. Semantic Scholar — 200M+ papers, abstracts + citation context
   3. GBIF Literature — biodiversity-specific papers via api.gbif.org
-  4. NCBI Entrez / PubMed — BYOK via ENTREZ_API_KEY (optional)
+  4. NCBI Entrez / PubMed — works without API key (3 req/s); faster with ENTREZ_API_KEY (10 req/s)
   5. EcoAgent RAG — GBIF literature + cofid via Hermes → reumanlab tool_server
 
 Each source returns normalized Evidence objects that the protocol can
@@ -318,30 +318,29 @@ def search_gbif_literature(query: str, max_results: int = 5) -> list[Evidence]:
 
 
 # ---------------------------------------------------------------------------
-# NCBI Entrez / PubMed search (BYOK)
+# NCBI Entrez / PubMed search (works without API key)
 # ---------------------------------------------------------------------------
 
 def search_entrez(query: str, max_results: int = 5) -> list[Evidence]:
     """Search PubMed via NCBI Entrez E-utilities.
 
-    Requires ENTREZ_API_KEY env var (free from NCBI).
-    Without key: 3 req/s. With key: 10 req/s.
+    Works without API key (3 req/s). With ENTREZ_API_KEY: 10 req/s.
 
     Docs: https://www.ncbi.nlm.nih.gov/books/NBK25499/
     """
-    if not _ENTREZ_API_KEY:
-        return []
 
     # Step 1: ESearch to get PMIDs
-    search_params = urllib.parse.urlencode({
+    params = {
         "db": "pubmed",
         "term": query,
         "retmax": min(max_results, 20),
         "retmode": "json",
-        "api_key": _ENTREZ_API_KEY,
         "tool": "ecoseek",
         "email": _ENTREZ_EMAIL,
-    })
+    }
+    if _ENTREZ_API_KEY:
+        params["api_key"] = _ENTREZ_API_KEY
+    search_params = urllib.parse.urlencode(params)
     search_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?{search_params}"
     search_data = _http_get_json(search_url)
     if not search_data:
@@ -353,14 +352,16 @@ def search_entrez(query: str, max_results: int = 5) -> list[Evidence]:
 
     # Step 2: ESummary to get paper metadata
     ids = ",".join(id_list[:max_results])
-    summary_params = urllib.parse.urlencode({
+    sum_params = {
         "db": "pubmed",
         "id": ids,
         "retmode": "json",
-        "api_key": _ENTREZ_API_KEY,
         "tool": "ecoseek",
         "email": _ENTREZ_EMAIL,
-    })
+    }
+    if _ENTREZ_API_KEY:
+        sum_params["api_key"] = _ENTREZ_API_KEY
+    summary_params = urllib.parse.urlencode(sum_params)
     summary_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?{summary_params}"
     summary_data = _http_get_json(summary_url)
     if not summary_data:
@@ -692,8 +693,8 @@ def retrieve_literature(
                 src_ctx["error"] = str(exc)[:200]
                 logger.warning("GBIF Literature search failed: %s", exc)
 
-    # --- Source 4: Entrez/PubMed (Tier B, BYOK) ---
-    if tier == "B" and _ENTREZ_API_KEY:
+    # --- Source 4: Entrez/PubMed (Tier B, works without API key) ---
+    if tier == "B":
         with trace_retrieval_source("entrez", _tctx, query) as src_ctx:
             try:
                 results = search_entrez(query, max_results=max_per_source)

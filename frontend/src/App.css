@@ -1547,19 +1547,18 @@ body {
 }
 
 /* ============================================================
-   Render Preview Panel
+   Output Panel (rendered markdown from Emily's responses)
    ============================================================ */
 
 .render-preview {
   padding: 0;
+  height: 100%;
+  overflow-y: auto;
 }
 
-.preview-tabs {
-  display: none; /* tabs rendered by parent */
-}
-
-.preview-content {
-  padding: 1rem;
+.output-content {
+  padding: 1.25rem;
+  line-height: 1.7;
 }
 
 .preview-empty {
@@ -1569,29 +1568,57 @@ body {
   font-size: 0.85rem;
 }
 
-.preview-blocks {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+.output-markdown {
+  font-size: 0.92rem;
+  color: var(--foreground);
 }
 
-.preview-block {
+.output-markdown h1, .output-markdown h2, .output-markdown h3,
+.output-markdown h4, .output-markdown h5, .output-markdown h6 {
+  margin-top: 1.2em;
+  margin-bottom: 0.5em;
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.output-markdown h1 { font-size: 1.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
+.output-markdown h2 { font-size: 1.25rem; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+.output-markdown h3 { font-size: 1.1rem; }
+
+.output-markdown p { margin: 0.6em 0; }
+
+.output-markdown ul, .output-markdown ol {
+  padding-left: 1.5em;
+  margin: 0.5em 0;
+}
+
+.output-markdown li { margin: 0.25em 0; }
+
+.output-markdown blockquote {
+  border-left: 3px solid var(--accent);
+  margin: 0.75em 0;
+  padding: 0.5em 1em;
+  background: var(--card);
+  border-radius: 0 6px 6px 0;
+  color: var(--muted-foreground);
+}
+
+.output-markdown strong { color: var(--foreground); }
+
+.output-markdown a {
+  color: #10b981;
+  text-decoration: none;
+}
+.output-markdown a:hover { text-decoration: underline; }
+
+.output-code-block {
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
+  margin: 0.75em 0;
 }
 
-.preview-math {
-  padding: 1rem;
-  text-align: center;
-  overflow-x: auto;
-}
-
-.preview-code {
-  font-size: 0.85rem;
-}
-
-.preview-code-header {
+.output-code-lang {
   padding: 4px 10px;
   background: var(--accent);
   font-family: "SF Mono", "Fira Code", "Consolas", monospace;
@@ -1601,18 +1628,48 @@ body {
   letter-spacing: 0.05em;
 }
 
-.preview-code pre {
+.output-code-block pre {
   margin: 0;
   padding: 0.75rem;
   overflow-x: auto;
   font-size: 0.82rem;
 }
 
-.preview-fallback {
-  padding: 0.75rem;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
-  font-size: 0.82rem;
+.output-table-wrap {
   overflow-x: auto;
+  margin: 0.75em 0;
+}
+
+.output-markdown table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.85rem;
+}
+
+.output-markdown th, .output-markdown td {
+  border: 1px solid var(--border);
+  padding: 0.4em 0.7em;
+  text-align: left;
+}
+
+.output-markdown th {
+  background: var(--accent);
+  font-weight: 600;
+}
+
+.output-markdown tr:nth-child(even) {
+  background: var(--card);
+}
+
+.output-markdown .katex-display {
+  margin: 1em 0;
+  overflow-x: auto;
+}
+
+.output-markdown hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.2em 0;
 }
 
 /* ============================================================
