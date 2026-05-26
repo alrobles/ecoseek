@@ -1944,6 +1944,31 @@ mjx-container[display="true"] {
   color: var(--foreground);
 }
 
+.didal-tool-chip.tool-lacs {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: #10b981;
+}
+
+.didal-tool-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.didal-tool-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.didal-tool-section-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 /* ============================================================
    Terminal Panel
    ============================================================ */

@@ -126,6 +126,17 @@ const TOOL_LABELS = {
   classify_prompt: "Classify Prompt",
   eco_analyze: "Ecological Analysis",
   ku_hpc: "HPC Job",
+  literature_search: "Literature Search",
+  web_search: "Web Search",
+  upload_document: "Upload PDF",
+  ecoagent_query: "EcoAgent Query",
+  execute_r_code: "Execute R Code",
+  list_r_packages: "R Packages",
+  r_workspace_status: "R Workspace",
+  run_niche_model: "Niche Model",
+  upload_artifact: "Upload Artifact",
+  classify_literature: "LACS Classify",
+  train_lacs_model: "LACS Train",
 };
 
 const MODE_CONFIG = {
@@ -337,10 +348,39 @@ export function DiDALPanel({
       {remoteStatus && (
         <div className="didal-tools">
           <h4>Available Tools</h4>
-          <div className="didal-tool-grid">
-            {["didal_protocol", "classify_prompt", "escalate_remote", "dialectical_exchange", "eco_analyze", "ku_hpc"].map((tool) => (
-              <div key={tool} className="didal-tool-chip">{tool}</div>
-            ))}
+          <div className="didal-tool-sections">
+            <div className="didal-tool-section">
+              <span className="didal-tool-section-label">Core</span>
+              <div className="didal-tool-grid">
+                {["didal_protocol", "classify_prompt", "escalate_remote", "dialectical_exchange"].map((tool) => (
+                  <div key={tool} className="didal-tool-chip">{TOOL_LABELS[tool] || tool}</div>
+                ))}
+              </div>
+            </div>
+            <div className="didal-tool-section">
+              <span className="didal-tool-section-label">Literature & Search</span>
+              <div className="didal-tool-grid">
+                {["literature_search", "web_search", "classify_literature", "train_lacs_model"].map((tool) => (
+                  <div key={tool} className="didal-tool-chip tool-lacs">{TOOL_LABELS[tool] || tool}</div>
+                ))}
+              </div>
+            </div>
+            <div className="didal-tool-section">
+              <span className="didal-tool-section-label">Documents & Data</span>
+              <div className="didal-tool-grid">
+                {["upload_document", "upload_artifact", "eco_analyze", "ecoagent_query"].map((tool) => (
+                  <div key={tool} className="didal-tool-chip">{TOOL_LABELS[tool] || tool}</div>
+                ))}
+              </div>
+            </div>
+            <div className="didal-tool-section">
+              <span className="didal-tool-section-label">Compute</span>
+              <div className="didal-tool-grid">
+                {["execute_r_code", "run_niche_model", "r_workspace_status", "list_r_packages"].map((tool) => (
+                  <div key={tool} className="didal-tool-chip">{TOOL_LABELS[tool] || tool}</div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       )}
