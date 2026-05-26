@@ -21,6 +21,9 @@ import time
 import uuid
 from typing import Optional
 
+import threading
+from concurrent.futures import ThreadPoolExecutor, Future
+
 from .classifier import ClassificationResult, classify_complexity
 from .prompts import (
     BETA_EXPERT_SYSTEM,
@@ -78,6 +81,29 @@ _request_model: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 
 def _is_configured() -> bool:
     return bool(_REMOTE_URL and _API_KEY)
+
+
+# Cached Hermes health check (TTL 30s) to fail fast when remote is down
+_health_cache: dict = {"ok": None, "ts": 0.0}
+_HEALTH_TTL = 30.0
+
+
+def _hermes_is_healthy() -> bool:
+    """Check if Hermes is reachable. Cached for 30s to avoid hammering."""
+    now = time.time()
+    if now - _health_cache["ts"] < _HEALTH_TTL and _health_cache["ok"] is not None:
+        return _health_cache["ok"]
+    try:
+        from .http_client import http_get_json
+        resp = http_get_json(f"{_REMOTE_URL}/v1/models", timeout=5)
+        ok = resp is not None
+    except Exception:
+        ok = False
+    _health_cache["ok"] = ok
+    _health_cache["ts"] = now
+    if not ok:
+        logger.warning("Hermes health check failed — remote may be down")
+    return ok
 
 
 def _emit_progress(stage: str, detail: str = "") -> None:
@@ -585,6 +611,14 @@ def run_didal_protocol(
             "message": "DiDAL protocol requires HERMES_ECOSEEK_API_KEY.",
         })
 
+    # Fast-fail if Hermes is unreachable (cached 30s)
+    if not _hermes_is_healthy():
+        return json.dumps({
+            "success": False,
+            "error": "hermes_unreachable",
+            "message": "Hermes at {} is not responding. Check Cloudflare tunnel.".format(_REMOTE_URL),
+        })
+
     if not _DIDAL_ENABLED and force_mode != "direct":
         # Feature flag off — fallback to direct
         force_mode = "direct"
@@ -738,9 +772,23 @@ def _run_protocol_inner(
             sctx["tokens_used"] = draft_result.get("usage", {}).get("total_tokens", 0)
             sctx["evidence_used"] = len(current_draft.get("evidence", [])) if isinstance(current_draft, dict) else 0
 
-        # Stage 4-5: Critique-Revise loop (bounded)
+        # Stage 4-5: Critique-Revise loop (bounded, with early termination)
         rounds = 0
+
+        # Quick quality pre-check: skip critique if draft is already substantial
+        draft_text = current_draft if isinstance(current_draft, str) else json.dumps(current_draft, ensure_ascii=False)
+        draft_has_structure = draft_text.count("#") >= 2 and len(draft_text) > 800
+        draft_has_evidence = any(w in draft_text.lower() for w in ["et al", "doi", "http", "reference"])
+        skip_critique = draft_has_structure and draft_has_evidence and mode != "didal_literature"
+
+        if skip_critique:
+            logger.info("didal[%s] draft quality pre-check passed — skipping critique", protocol_id)
+            _emit_progress("Skipping critique", "draft already meets quality threshold")
+
         for round_idx in range(effective_max_rounds):
+            if skip_critique:
+                break
+
             # Stage 4: Naive critique
             _emit_progress("Critiquing", f"peer review round {round_idx + 1}")
             with trace_stage("frontend.critique", tctx, agent_role="frontend_naive",
@@ -784,10 +832,14 @@ def _run_protocol_inner(
                 prompt, classification, task_object, current_draft, evidence, rounds,
             )
 
-        # Stage 7: Judge — score the final answer
-        _emit_progress("Judging", "scoring answer quality")
-        judge_result = {"overall_score": 0.0, "verdict": "unknown"}
-        with trace_stage("judge.score", tctx, agent_role="judge") as sctx:
+        # Stage 7: Judge + Memory — run async (don't block response)
+        # The report is ready; judge and memory write happen in background.
+        _emit_progress("Finalizing", "scoring in background")
+        judge_result = {"overall_score": 0.0, "verdict": "pending"}
+
+        def _background_judge_and_memory():
+            """Run judge + memory write without blocking the user."""
+            nonlocal judge_result
             try:
                 judge_result = judge_answer(
                     prompt=prompt,
@@ -796,48 +848,50 @@ def _run_protocol_inner(
                     evidence=evidence,
                     classification=classification,
                 )
-                sctx["overall_score"] = judge_result.get("overall_score", 0)
-                sctx["verdict"] = judge_result.get("verdict", "unknown")
-                stages.append({
-                    "stage": "judge.score",
-                    "overall_score": judge_result.get("overall_score", 0),
-                    "verdict": judge_result.get("verdict", "unknown"),
-                    "scores": judge_result.get("scores", {}),
-                    "reasons": judge_result.get("reasons", []),
-                })
+                logger.info(
+                    "didal[%s] judge: score=%.2f verdict=%s",
+                    protocol_id,
+                    judge_result.get("overall_score", 0),
+                    judge_result.get("verdict", "unknown"),
+                )
             except Exception as exc:
-                logger.warning("Judge scoring failed: %s", exc)
-                sctx["error"] = str(exc)[:200]
+                logger.warning("Background judge failed: %s", exc)
+                judge_result = {"overall_score": 0.0, "verdict": "error", "error": str(exc)[:200]}
 
-        # Stage 8: Memory write — persist useful knowledge
-        if is_memory_enabled():
-            _emit_progress("Saving", "persisting to memory")
-            with trace_stage("memory.write", tctx, agent_role="system") as sctx:
-                elapsed_so_far = round(time.time() - start_time, 1)
-                write_result = {
-                    "success": True,
-                    "protocol_id": protocol_id,
-                    "mode": mode,
-                    "classification": classification,
-                    "content": report,
-                    "task_object": task_object,
-                    "final_draft": current_draft,
-                    "evidence": evidence,
-                    "critique_rounds": rounds,
-                    "elapsed_seconds": elapsed_so_far,
-                    "trace_id": tctx.get("trace_id", ""),
-                }
-                with memory_write_stage(
-                    write_result,
-                    judge_score=judge_result.get("overall_score", 0),
-                ) as mctx:
-                    sctx["written"] = mctx.get("written", 0)
-                    sctx["fitness"] = mctx.get("fitness")
-                    stages.append({
-                        "stage": "memory.write",
-                        "written": mctx.get("written", 0),
-                        "fitness": mctx.get("fitness"),
-                    })
+            if is_memory_enabled():
+                try:
+                    elapsed_so_far = round(time.time() - start_time, 1)
+                    write_data = {
+                        "success": True,
+                        "protocol_id": protocol_id,
+                        "mode": mode,
+                        "classification": classification,
+                        "content": report,
+                        "task_object": task_object,
+                        "final_draft": current_draft,
+                        "evidence": evidence,
+                        "critique_rounds": rounds,
+                        "elapsed_seconds": elapsed_so_far,
+                        "trace_id": tctx.get("trace_id", ""),
+                    }
+                    with memory_write_stage(
+                        write_data,
+                        judge_score=judge_result.get("overall_score", 0),
+                    ) as mctx:
+                        logger.info(
+                            "didal[%s] memory: written=%d fitness=%s",
+                            protocol_id, mctx.get("written", 0), mctx.get("fitness"),
+                        )
+                except Exception as exc:
+                    logger.warning("Background memory write failed: %s", exc)
+
+        # Fire judge+memory in a daemon thread (won't block response)
+        bg_thread = threading.Thread(
+            target=_background_judge_and_memory,
+            name=f"didal-judge-{protocol_id}",
+            daemon=True,
+        )
+        bg_thread.start()
 
         elapsed = round(time.time() - start_time, 1)
         _emit_progress("Complete", f"finished in {elapsed}s")
@@ -854,8 +908,9 @@ def _run_protocol_inner(
             "critique_rounds": rounds,
             "judge": {
                 "overall_score": judge_result.get("overall_score", 0),
-                "verdict": judge_result.get("verdict", "unknown"),
+                "verdict": judge_result.get("verdict", "pending"),
                 "scores": judge_result.get("scores", {}),
+                "async": True,
             },
             "stages": stages,
             "total_usage": total_usage,

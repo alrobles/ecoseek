@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import subprocess
 import time
 import urllib.error
@@ -24,8 +25,11 @@ import urllib.request
 
 logger = logging.getLogger(__name__)
 
-_MAX_RETRIES = 2
-_RETRY_DELAY = 3
+_MAX_RETRIES = 3
+_BASE_DELAY = 1.0  # exponential backoff: 1s, 2s, 4s + jitter
+
+# HTTP status codes that should NOT be retried
+_NO_RETRY_CODES = {401, 403, 404, 422}
 
 
 def http_post_json(
@@ -49,16 +53,23 @@ def http_post_json(
     for attempt in range(1, retries + 1):
         try:
             return _post_once(url, body, hdrs, payload, timeout)
+        except _NoRetryError:
+            raise
         except Exception as exc:
             last_exc = exc
             if attempt < retries:
+                delay = min(_BASE_DELAY * (2 ** (attempt - 1)) + random.uniform(0, 0.5), 8)
                 logger.info(
-                    "http_post_json attempt %d/%d failed (%s), retrying in %ds",
-                    attempt, retries, exc, _RETRY_DELAY,
+                    "http_post_json attempt %d/%d failed (%s), retrying in %.1fs",
+                    attempt, retries, exc, delay,
                 )
-                time.sleep(_RETRY_DELAY)
+                time.sleep(delay)
 
     raise last_exc  # type: ignore[misc]
+
+
+class _NoRetryError(Exception):
+    """Raised for errors that should not be retried (auth, not found)."""
 
 
 def _post_once(
@@ -83,16 +94,22 @@ def _post_once(
             err_body = exc.read().decode("utf-8", errors="replace")[:500]
         except Exception:
             pass
-        if exc.code == 401:
-            logger.error("HTTP 401 Unauthorized from %s: %s", url[:80], err_body[:200])
-            raise RuntimeError(
-                f"Authentication failed (HTTP 401). Check HERMES_ECOSEEK_API_KEY. "
+        if exc.code in (401, 422):
+            logger.error("HTTP %d from %s: %s", exc.code, url[:80], err_body[:200])
+            raise _NoRetryError(
+                f"Authentication failed (HTTP {exc.code}). Check HERMES_ECOSEEK_API_KEY. "
                 f"Server: {err_body[:100]}"
             ) from exc
         if exc.code == 403:
             if "1010" in err_body or "cloudflare" in err_body.lower() or not err_body.strip():
                 logger.info("urllib blocked by Cloudflare (1010), falling back to curl")
                 return _curl_post(url, payload, hdrs, timeout)
+            # Non-Cloudflare 403 is an auth error — don't retry
+            raise _NoRetryError(
+                f"Forbidden (HTTP 403). {err_body[:100]}"
+            ) from exc
+        if exc.code == 404:
+            raise _NoRetryError(f"Not found (HTTP 404): {url}") from exc
         raise
     except json.JSONDecodeError:
         logger.info("urllib got non-JSON response, falling back to curl")
