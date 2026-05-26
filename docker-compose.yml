@@ -466,6 +466,10 @@ services:
       HERMES_FAST_MODEL: "${HERMES_FAST_MODEL:-hermes-fast}"
       DIDAL_ENABLED: "${DIDAL_ENABLED:-true}"
       DIDAL_MAX_CRITIQUE_ROUNDS: "${DIDAL_MAX_CRITIQUE_ROUNDS:-1}"
+      DIDAL_STREAM_DRAFT: "${DIDAL_STREAM_DRAFT:-true}"
+      # GitHub artifacts pivot (large files from Hermes)
+      GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
+      ECOSEEK_ARTIFACTS_REPO: "${ECOSEEK_ARTIFACTS_REPO:-alrobles/ecoseek-artifacts}"
     volumes:
       - emily-data:/root/.hermes
       - r-workspace-data:/workspace
