@@ -582,6 +582,169 @@ def search_ecoagent_literature(query: str, max_results: int = 5) -> list[Evidenc
 
 
 # ---------------------------------------------------------------------------
+# Local-first search sources (user papers + cluster FTS5 via Hermes)
+# ---------------------------------------------------------------------------
+
+def search_user_papers(query: str, max_results: int = 5) -> list[Evidence]:
+    """Search user-uploaded documents in local litdb."""
+    try:
+        from .litdb import search_user_papers as _search_user
+        hits = _search_user(query, limit=max_results)
+        results = []
+        for h in hits:
+            results.append(Evidence(
+                source_type="user_upload",
+                title=h.get("title", h.get("filename", "")),
+                authors=h.get("authors", ""),
+                year=h.get("year"),
+                url="",
+                doi="",
+                abstract=h.get("snippet", "")[:500],
+                claim_used_for="",
+                confidence=0.95,
+                provider="user_upload",
+            ))
+        return results
+    except Exception as exc:
+        logger.debug("user_papers search failed: %s", exc)
+        return []
+
+
+def search_cluster_pubmed(query: str, max_results: int = 5) -> list[Evidence]:
+    """Search the PubMed FTS5 index on the cluster via Hermes.
+
+    The cluster has a local SQLite FTS5 index at
+    /home/a474r867/work/pubmed/index/ with ~36M articles.
+    We ask Hermes to run the search_pubmed.py script.
+    """
+    if not _HERMES_API_KEY:
+        return []
+
+    try:
+        from .http_client import http_post_json
+        resp = http_post_json(
+            f"{_HERMES_REMOTE_URL}/v1/chat/completions",
+            body={
+                "model": "hermes-agent",
+                "messages": [{
+                    "role": "user",
+                    "content": (
+                        f"Run this command and return ONLY the JSON output, no explanation:\n"
+                        f"python3 /home/a474r867/work/Github/ecoseek-litdump/scripts/search_pubmed.py "
+                        f"\"{query}\" --limit {max_results} --json"
+                    ),
+                }],
+            },
+            headers={"Authorization": f"Bearer {_HERMES_API_KEY}"},
+            timeout=20,
+        )
+        if not resp:
+            return []
+
+        content = ""
+        choices = resp.get("choices", [])
+        if choices:
+            content = choices[0].get("message", {}).get("content", "")
+
+        # Try to parse JSON from the response
+        results = _parse_cluster_results(content, "pubmed_local")
+        return results[:max_results]
+    except Exception as exc:
+        logger.debug("cluster pubmed search failed: %s", exc)
+        return []
+
+
+def search_cluster_gbif_lit(query: str, max_results: int = 5) -> list[Evidence]:
+    """Search the GBIF Literature FTS5 index on the cluster via Hermes."""
+    if not _HERMES_API_KEY:
+        return []
+
+    try:
+        from .http_client import http_post_json
+        resp = http_post_json(
+            f"{_HERMES_REMOTE_URL}/v1/chat/completions",
+            body={
+                "model": "hermes-agent",
+                "messages": [{
+                    "role": "user",
+                    "content": (
+                        f"Run this command and return ONLY the JSON output, no explanation:\n"
+                        f"python3 /home/a474r867/work/Github/ecoseek-litdump/scripts/search_gbif_literature.py "
+                        f"\"{query}\" --limit {max_results} --json"
+                    ),
+                }],
+            },
+            headers={"Authorization": f"Bearer {_HERMES_API_KEY}"},
+            timeout=20,
+        )
+        if not resp:
+            return []
+
+        content = ""
+        choices = resp.get("choices", [])
+        if choices:
+            content = choices[0].get("message", {}).get("content", "")
+
+        results = _parse_cluster_results(content, "gbif_lit_local")
+        return results[:max_results]
+    except Exception as exc:
+        logger.debug("cluster gbif_lit search failed: %s", exc)
+        return []
+
+
+def _parse_cluster_results(content: str, provider: str) -> list[Evidence]:
+    """Parse JSON results from cluster search scripts into Evidence list."""
+    if not content:
+        return []
+
+    # Try to extract JSON from the response (may be wrapped in markdown)
+    json_str = content
+    if "```" in content:
+        import re as _re
+        match = _re.search(r"```(?:json)?\s*\n?(.*?)\n?```", content, _re.DOTALL)
+        if match:
+            json_str = match.group(1)
+
+    try:
+        data = json.loads(json_str)
+    except json.JSONDecodeError:
+        # Try to find array in content
+        start = content.find("[")
+        end = content.rfind("]")
+        if start >= 0 and end > start:
+            try:
+                data = json.loads(content[start:end + 1])
+            except json.JSONDecodeError:
+                return []
+        else:
+            return []
+
+    if isinstance(data, dict):
+        data = data.get("results", data.get("papers", []))
+    if not isinstance(data, list):
+        return []
+
+    results = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        results.append(Evidence(
+            source_type="paper",
+            title=str(item.get("title", ""))[:200],
+            authors=str(item.get("authors", ""))[:200],
+            year=item.get("year"),
+            url=str(item.get("url", item.get("doi_url", "")))[:300],
+            doi=str(item.get("doi", ""))[:100],
+            abstract=str(item.get("abstract", ""))[:500],
+            claim_used_for="",
+            confidence=0.8,
+            provider=provider,
+        ))
+
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Multi-source retrieval orchestrator
 # ---------------------------------------------------------------------------
 
@@ -619,7 +782,17 @@ def retrieve_literature(
     provider_stats: dict[str, int] = {}
     errors: list[str] = []
 
-    # --- Check local literature cache first ---
+    # --- Priority 1: User-uploaded documents (highest priority, instant) ---
+    try:
+        user_hits = search_user_papers(query, max_results=max_per_source)
+        if user_hits:
+            all_evidence.extend(user_hits)
+            provider_stats["user_upload"] = len(user_hits)
+            logger.info("user_papers: %d results for '%s'", len(user_hits), query[:60])
+    except Exception as exc:
+        logger.debug("user_papers search error: %s", exc)
+
+    # --- Priority 2: Local literature cache (litdb) ---
     try:
         from .litdb import search as litdb_search
         cached = litdb_search(query, limit=max_per_source * 2)
@@ -682,6 +855,11 @@ def retrieve_literature(
     # Source 5: EcoAgent RAG (via Hermes)
     if _ecoagent_available():
         search_tasks.append(("ecoagent", search_ecoagent_literature, query, max_per_source))
+
+    # Source 6-7: Cluster FTS5 indices (PubMed ~36M + GBIF Lit ~61K)
+    if tier == "B" and _HERMES_API_KEY:
+        search_tasks.append(("pubmed_local", search_cluster_pubmed, query, max_per_source))
+        search_tasks.append(("gbif_lit_local", search_cluster_gbif_lit, query, max_per_source))
 
     # Execute all searches in parallel (max 10s total timeout)
     with ThreadPoolExecutor(max_workers=min(len(search_tasks), 6)) as pool:
