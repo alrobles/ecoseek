@@ -467,6 +467,9 @@ services:
       DIDAL_ENABLED: "${DIDAL_ENABLED:-true}"
       DIDAL_MAX_CRITIQUE_ROUNDS: "${DIDAL_MAX_CRITIQUE_ROUNDS:-1}"
       DIDAL_STREAM_DRAFT: "${DIDAL_STREAM_DRAFT:-true}"
+      # NCBI Entrez / PubMed (3 req/s without key, 10 req/s with key)
+      ENTREZ_API_KEY: "${ENTREZ_API_KEY:-}"
+      ENTREZ_EMAIL: "${ENTREZ_EMAIL:-ecoseek@ecoseek.org}"
       # GitHub artifacts pivot (large files from Hermes)
       GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
       ECOSEEK_ARTIFACTS_REPO: "${ECOSEEK_ARTIFACTS_REPO:-alrobles/ecoseek-artifacts}"
