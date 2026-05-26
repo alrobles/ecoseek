@@ -23,6 +23,9 @@
 #   - frontend        — EcoSeek React web UI (thin SPA, talks to broker)
 #                       docker compose --profile frontend up
 #                       Publishes frontend on 127.0.0.1:${FRONTEND_PORT:-4000}
+#   - r-workspace     — R geospatial workspace (rocker/geospatial + HTTP bridge)
+#                       docker compose --profile r-workspace up
+#                       Emily executes R code via POST /execute on port 8787
 #
 # All host port publications are bound to 127.0.0.1 so the stack is reachable
 # only from the local machine. If you need LAN/remote access, edit the
@@ -391,6 +394,43 @@ services:
     networks:
       - ecoseek-net
 
+  # ── R Workspace (rocker/geospatial + HTTP bridge) ────────────────────
+  # Full R geospatial environment for agentic R code execution.
+  # Emily generates R code → sends to r-workspace via HTTP → reads results.
+  #
+  #   docker compose --profile r-workspace up
+  #
+  # Pre-installed: sf, terra, raster, dismo, vegan, ape, rgbif, taxize,
+  # ENMeval, spocc, CoordinateCleaner, biomod2, rnaturalearth, tidyverse.
+  # Emily communicates via POST /execute on port 8787 (internal).
+  r-workspace:
+    build:
+      context: .
+      dockerfile: docker/r-workspace.Dockerfile
+    container_name: r-workspace
+    profiles: ["r-workspace"]
+    ports:
+      - "127.0.0.1:${R_WORKSPACE_PORT:-8787}:8787"
+    environment:
+      R_WORKSPACE_DIR: "/workspace"
+      R_WORKSPACE_PORT: "8787"
+      R_EXEC_TIMEOUT: "${R_EXEC_TIMEOUT:-300}"
+    volumes:
+      - r-workspace-data:/workspace
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python3 -c "import urllib.request;
+          urllib.request.urlopen('http://localhost:8787/health')" || exit 1
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - ecoseek-net
+
   # ── Emily Local Agent (Hermes fork with ecoseek plugin) ──────────────
   # Lightweight ecological AI assistant that runs locally and can escalate
   # heavy tasks to the remote Hermes on reumanlab via the broker.
@@ -416,8 +456,10 @@ services:
       OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-}"
       API_SERVER_KEY: "${EMILY_API_KEY:-emily-local-key}"
       API_SERVER_CORS_ORIGINS: "http://localhost:4000,http://localhost:3001,http://127.0.0.1:4000"
+      R_WORKSPACE_URL: "http://r-workspace:8787"
     volumes:
       - emily-data:/root/.hermes
+      - r-workspace-data:/workspace
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -435,6 +477,7 @@ volumes:
   ollama-data:
   redis-data:
   emily-data:
+  r-workspace-data:
 
 networks:
   ecoseek-net:
