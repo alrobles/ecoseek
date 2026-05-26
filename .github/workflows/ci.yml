@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Lint ──────────────────────────────────────────────────────────────
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Ruff check (Python lint)
+        run: ruff check backend/ emily/ r-workspace/ benchmarks/
+
+      - name: Ruff format check
+        run: ruff format --check backend/ emily/ r-workspace/ benchmarks/
+
+      - name: ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: "./scripts"
+          severity: warning
+
+  # ── Build ─────────────────────────────────────────────────────────────
+  build:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build ecoseek-api
+        run: docker build -t ecoseek-api ./backend
+
+      - name: Build emily
+        run: docker build -t emily-local ./emily
+
+      - name: Build frontend
+        run: docker build -t ecoseek-frontend ./frontend
+
+      - name: Build r-workspace
+        run: docker build -t r-workspace -f docker/r-workspace.Dockerfile .
+
+  # ── Compose smoke ─────────────────────────────────────────────────────
+  compose-smoke:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create CI .env
+        run: |
+          cat > .env << 'EOF'
+          ECOSEEK_API_PORT=3000
+          AGENTICPLUG_PORT=8080
+          ECOAGENT_PORT=8000
+          OLLAMA_PORT=11434
+          HERMES_ENABLED=false
+          BROKER_SESSION_STORE=memory
+          ECOAGENT_PROFILE=ci
+          COMPOSE_PROFILES=
+          SEARXNG_BASE_URL=http://localhost:8080/
+          EMILY_API_KEY=***
+          EOF
+
+      - name: Start stack with CI overrides
+        run: |
+          docker compose \
+            -f docker-compose.yml \
+            -f docker-compose.ci.yml \
+            up -d --wait --wait-timeout 120
+          docker compose \
+            -f docker-compose.yml \
+            -f docker-compose.ci.yml \
+            ps
+
+      - name: Verify ecoseek-api health
+        run: |
+          for i in $(seq 1 5); do
+            if curl -sf http://127.0.0.1:3000/; then
+              echo "ecoseek-api: OK"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "ecoseek-api: FAIL"
+          exit 1
+
+      - name: Verify agenticplug mock health
+        run: curl -sf http://127.0.0.1:8080/healthz
+
+      - name: Verify ecoagent mock health
+        run: curl -sf http://127.0.0.1:8000/v1/tools
+
+      - name: Verify redis health
+        run: docker compose exec redis valkey-cli ping
+
+      - name: Compose logs (on failure)
+        if: failure()
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --tail 150
+
+      - name: Tear down
+        if: always()
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v --remove-orphans
