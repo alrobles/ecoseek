@@ -467,6 +467,8 @@ services:
       DIDAL_ENABLED: "${DIDAL_ENABLED:-true}"
       DIDAL_MAX_CRITIQUE_ROUNDS: "${DIDAL_MAX_CRITIQUE_ROUNDS:-1}"
       DIDAL_STREAM_DRAFT: "${DIDAL_STREAM_DRAFT:-true}"
+      DIDAL_STAGE_TIMEOUT: "${DIDAL_STAGE_TIMEOUT:-30}"
+      DIDAL_PROTOCOL_TIMEOUT: "${DIDAL_PROTOCOL_TIMEOUT:-90}"
       # NCBI Entrez / PubMed (3 req/s without key, 10 req/s with key)
       ENTREZ_API_KEY: "${ENTREZ_API_KEY:-}"
       ENTREZ_EMAIL: "${ENTREZ_EMAIL:-ecoseek@ecoseek.org}"

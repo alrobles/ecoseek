@@ -64,14 +64,15 @@ _REMOTE_URL = os.environ.get(
 ).rstrip("/")
 _API_KEY = os.environ.get("HERMES_ECOSEEK_API_KEY", "")
 _MODEL = os.environ.get("HERMES_REMOTE_MODEL", "hermes-fast")
-_TIMEOUT = int(os.environ.get("HERMES_REMOTE_TIMEOUT", "60"))
+_TIMEOUT = int(os.environ.get("HERMES_REMOTE_TIMEOUT", "30"))
 _DIDAL_ENABLED = os.environ.get("DIDAL_ENABLED", "true").lower() in ("true", "1", "yes")
 _MAX_CRITIQUE_ROUNDS = int(os.environ.get("DIDAL_MAX_CRITIQUE_ROUNDS", "1"))
 
 # Model routing: hermes-fast for text generation, hermes-agent only when tools needed
 _FAST_MODEL = os.environ.get("HERMES_FAST_MODEL", "hermes-fast")
 _AGENT_MODEL = os.environ.get("HERMES_AGENT_MODEL", "hermes-agent")
-_STAGE_TIMEOUT = int(os.environ.get("DIDAL_STAGE_TIMEOUT", "45"))
+_STAGE_TIMEOUT = int(os.environ.get("DIDAL_STAGE_TIMEOUT", "30"))
+_PROTOCOL_TIMEOUT = int(os.environ.get("DIDAL_PROTOCOL_TIMEOUT", "90"))
 
 # Per-request model override (set by run_didal_protocol, read by _beta_call)
 _request_model: contextvars.ContextVar[str | None] = contextvars.ContextVar(
@@ -132,6 +133,7 @@ def _beta_call(
     timeout: int | None = None,
     model: str | None = None,
     trace: bool = True,
+    retries: int = 1,
 ) -> dict:
     """Send a chat completion to Hermes Beta with a specific system prompt.
 
@@ -144,6 +146,8 @@ def _beta_call(
         Override the Hermes model (hermes-fast, hermes-reasoner, hermes-agent).
     trace : bool
         Request hermes_trace telemetry (default True).
+    retries : int
+        Max HTTP retries (default 1 — retry once on transient error).
     """
     from .http_client import http_post_json
 
@@ -169,6 +173,7 @@ def _beta_call(
         payload=payload,
         headers=headers,
         timeout=timeout or _TIMEOUT,
+        retries=retries,
     )
 
     content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
@@ -406,43 +411,20 @@ def _stage_retrieve(task_object: dict, classification: dict) -> dict:
         logger.warning("literature retrieval failed: %s", exc)
         lit_results = {"sources": [], "retrieval_notes": f"API retrieval failed: {exc}"}
 
-    # Step 2: Ask Beta to analyze and map retrieved sources to subquestions
+    # Step 2: Return API results directly (skip LLM analysis to save ~3-5s)
+    # The expert_draft stage will synthesize the evidence with the draft.
     if lit_results.get("sources"):
-        context = (
-            f"Structured task:\n{json.dumps(task_object, indent=2, ensure_ascii=False)}\n\n"
-            f"Retrieved sources from literature APIs:\n"
-            f"{json.dumps(lit_results['sources'][:10], indent=2, ensure_ascii=False)}\n\n"
-            f"Map each source to the relevant subquestion(s) it helps answer. "
-            f"Assess which sources are most relevant and trustworthy. "
-            f"Identify any gaps where no good source was found."
-        )
-        try:
-            result = _beta_call(
-                f"{BETA_EXPERT_SYSTEM}\n\n{RETRIEVE_EVIDENCE_PROMPT}",
-                context,
-                timeout=_STAGE_TIMEOUT,
-                model=_FAST_MODEL,
-            )
-            beta_analysis = _parse_json_response(result["content"])
-            usage = result["usage"]
-        except Exception as exc:
-            logger.warning("Beta evidence analysis failed: %s", exc)
-            beta_analysis = None
-            usage = {}
-
-        # Merge API results with Beta's analysis
         evidence = {
             "sources": lit_results["sources"],
             "total_found": lit_results["total_found"],
             "provider_stats": lit_results.get("provider_stats", {}),
             "tier": tier,
             "retrieval_notes": lit_results.get("retrieval_notes", ""),
-            "beta_analysis": beta_analysis,
         }
         return {
             "stage": "retrieve_evidence",
             "evidence": evidence,
-            "usage": usage,
+            "usage": {},
         }
     else:
         # Fallback: ask Beta to identify sources from its knowledge
@@ -796,6 +778,22 @@ def run_didal_protocol(
             prompt, force_mode, effective_max_rounds,
             protocol_id, model_override, start_time,
         )
+    except _ProtocolTimeoutError as exc:
+        elapsed = round(time.time() - start_time, 1)
+        logger.warning("didal[%s] protocol timeout: %s", protocol_id, exc)
+        _emit_progress("Timeout", f"protocol exceeded {_PROTOCOL_TIMEOUT}s budget")
+        return json.dumps({
+            "success": False,
+            "protocol_id": protocol_id,
+            "error": "protocol_timeout",
+            "message": (
+                f"DiDAL protocol timed out after {elapsed}s "
+                f"(budget: {_PROTOCOL_TIMEOUT}s). "
+                "Try 'fast' mode for quicker answers, or increase "
+                "DIDAL_PROTOCOL_TIMEOUT."
+            ),
+            "elapsed_seconds": elapsed,
+        }, ensure_ascii=False)
     except Exception as exc:
         elapsed = round(time.time() - start_time, 1)
         logger.error("didal[%s] protocol crashed: %s", protocol_id, exc, exc_info=True)
@@ -807,6 +805,10 @@ def run_didal_protocol(
             "message": f"DiDAL protocol error: {str(exc)[:300]}",
             "elapsed_seconds": elapsed,
         }, ensure_ascii=False)
+
+
+class _ProtocolTimeoutError(Exception):
+    """Raised when the entire protocol exceeds its time budget."""
 
 
 def _run_protocol_inner(
@@ -824,6 +826,14 @@ def _run_protocol_inner(
 
     # Set per-request model override for all _beta_call invocations
     _model_token = _request_model.set(model_override)
+
+    def _check_timeout(stage_name: str):
+        elapsed = time.time() - start_time
+        if elapsed > _PROTOCOL_TIMEOUT:
+            raise _ProtocolTimeoutError(
+                f"Protocol exceeded {_PROTOCOL_TIMEOUT}s budget at stage {stage_name} "
+                f"(elapsed: {elapsed:.1f}s)"
+            )
 
     def _track_usage(stage_data: dict):
         nonlocal all_cached_tokens
@@ -903,6 +913,7 @@ def _run_protocol_inner(
                     })
 
         # Stage 1: Frame task
+        _check_timeout("frame_task")
         _emit_progress("Framing", "structuring the research question")
         with trace_stage("frontend.frame_task", tctx, agent_role="frontend_naive") as sctx:
             frame_result = _stage_frame_task(prompt, classification)
@@ -914,6 +925,7 @@ def _run_protocol_inner(
         # Stage 2: Retrieve evidence (only for didal_literature)
         evidence = None
         if mode == "didal_literature":
+            _check_timeout("retrieve")
             _emit_progress("Retrieving", "searching literature databases")
             with trace_stage("backend.retrieve", tctx, agent_role="backend_expert",
                              question_type=task_object.get("task_type", "unknown")) as sctx:
@@ -927,6 +939,7 @@ def _run_protocol_inner(
                 _emit_progress("Retrieved", f"{n_sources} sources found")
 
         # Stage 3: Expert draft (streaming — tokens arrive in real-time)
+        _check_timeout("expert_draft")
         _emit_progress("Drafting", "writing expert synthesis (streaming)")
         with trace_stage("backend.synthesize_draft", tctx, agent_role="backend_expert") as sctx:
             draft_result = _stage_expert_draft(task_object, evidence)
@@ -955,6 +968,14 @@ def _run_protocol_inner(
 
         for round_idx in range(effective_max_rounds):
             if skip_critique:
+                break
+
+            # Check protocol timeout before each critique-revise round
+            try:
+                _check_timeout("critique_revise")
+            except _ProtocolTimeoutError:
+                logger.info("didal[%s] skipping critique — protocol timeout", protocol_id)
+                _emit_progress("Skipping critique", "time budget reached")
                 break
 
             # Stage 4: Naive critique
