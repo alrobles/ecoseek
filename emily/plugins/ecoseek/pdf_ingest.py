@@ -167,13 +167,44 @@ def ingest_pdf(pdf_path: str) -> dict:
 
 
 def ingest_text(text: str, filename: str = "pasted_text.txt") -> dict:
-    """Index raw text (for non-PDF content like pasted abstracts)."""
+    """Index raw text (for non-PDF content like pasted abstracts).
+
+    Also saves the text to the workspace so it appears in the Files panel.
+    """
     from .litdb import ingest_document
 
+    # Save to workspace for visibility in the Files panel
+    _save_to_workspace(filename, text)
+
+    metadata = _guess_metadata(text)
     return ingest_document(
         filename=filename,
         full_text=text,
+        title=metadata.get("title", ""),
+        authors=metadata.get("authors", ""),
+        year=metadata.get("year"),
+        abstract=metadata.get("abstract", ""),
     )
+
+
+def _save_to_workspace(filename: str, text: str) -> str | None:
+    """Save extracted text to /workspace/papers/ so it appears in Files panel."""
+    workspace = os.environ.get("R_WORKSPACE_DIR", "/workspace")
+    papers_dir = os.path.join(workspace, "papers")
+    try:
+        os.makedirs(papers_dir, exist_ok=True)
+        # Save as .txt alongside the original filename
+        safe_name = re.sub(r"[^\w\-.]", "_", filename)
+        if not safe_name.endswith(".txt"):
+            safe_name = os.path.splitext(safe_name)[0] + ".txt"
+        out_path = os.path.join(papers_dir, safe_name)
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(text)
+        logger.info("Saved paper text to workspace: %s", out_path)
+        return out_path
+    except OSError as exc:
+        logger.warning("Could not save to workspace: %s", exc)
+        return None
 
 
 def ensure_upload_dir() -> str:
