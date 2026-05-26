@@ -704,7 +704,7 @@ function App() {
                     <div className="info-row">
                       <span className="info-label">Tools</span>
                       <span className="info-value info-tools">
-                        didal_protocol, classify_prompt, escalate_remote, dialectical_exchange, eco_analyze, ku_hpc
+                        16 tools: DiDAL, LACS, Web Search, PDF Upload, R Compute, Niche Model, EcoAgent...
                       </span>
                     </div>
                   )}
