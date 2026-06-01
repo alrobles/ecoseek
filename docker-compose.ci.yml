@@ -1,14 +1,39 @@
 # CI-only compose override: replaces external-repo services (agenticplug, ecoagent)
-# with lightweight nginx mock containers so ecoseek-api can start and pass
-# healthchecks in GitHub Actions without cloning private external repos.
+# and Emily (Hermes Agent) with lightweight nginx mock containers so ecoseek-api
+# can start and pass healthchecks in GitHub Actions without cloning private
+# external repos or building the full hermes-agent Docker image.
 #
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait
 
 services:
+  # ── Emily mock (Hermes Agent API server stub) ──────────────────────────
+  # Replaces the real Emily Docker build (which does `pip install
+  # git+https://github.com/alrobles/hermes-agent.git` — too slow for CI).
+  emily:
+    image: nginx:alpine
+    container_name: emily
+    ports:
+      - "127.0.0.1:${EMILY_PORT:-8642}:8642"
+    volumes:
+      - ./docker/ci/emily-mock.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8642/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+    networks:
+      - ecoseek-net
+
+  # ── AgenticPlug mock ───────────────────────────────────────────────────
+  # Clears the `profiles: ["agenticplug"]` restriction from the base compose
+  # so this mock always starts in CI.
   agenticplug:
     image: nginx:alpine
     container_name: agenticplug
+    profiles: []
     ports:
       - "127.0.0.1:${AGENTICPLUG_PORT:-8080}:8080"
     volumes:
@@ -26,6 +51,7 @@ services:
     networks:
       - ecoseek-net
 
+  # ── EcoAgent mock ──────────────────────────────────────────────────────
   ecoagent:
     image: nginx:alpine
     container_name: ecoagent
