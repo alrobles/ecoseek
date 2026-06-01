@@ -1,86 +1,119 @@
-# EcoSeek — full Docker Compose stack
+# EcoSeek — lightweight Docker Compose stack (v2)
 #
 # One-command install:
-#   bash setup.sh && docker compose up -d
+#   cp .env.example .env && docker compose up -d
 #
-# What starts (base stack, CPU-only):
-#   - EcoSeek API        (FastAPI backend / orchestrator)     → http://127.0.0.1:${ECOSEEK_API_PORT:-3000}
-#   - AgenticPlug        (gateway: auth, policy, audit)       → http://127.0.0.1:${AGENTICPLUG_PORT:-8080}
-#   - EcoAgent           (tool server, 30+ ecological tools)  → http://127.0.0.1:${ECOAGENT_PORT:-8000}
-#   - Ollama             (local model inference, CPU)         → http://127.0.0.1:${OLLAMA_PORT:-11434}
-#   - SearxNG            (private web search, used by API)    (internal)
-#   - Redis              (task queue)                         (internal)
+# Core stack (starts by default):
+#   - Emily              (Hermes Agent API server)             → http://127.0.0.1:8642
+#   - EcoSeek API        (FastAPI thin router)                 → http://127.0.0.1:3000
+#   - EcoAgent           (tool server, 30+ ecological tools)   → http://127.0.0.1:8000
+#   - Ollama             (local model inference, CPU)          → http://127.0.0.1:11434
+#   - SearxNG            (private web search)                  (internal)
+#   - Redis              (task queue)                          (internal)
+#
+# Emily is the PRIMARY backend — a full Hermes Agent instance with the
+# ecoseek plugin + Emily scientific personality. The API server exposes
+# an OpenAI-compatible endpoint at /v1/chat/completions that ecoseek-api
+# routes to directly (no AgenticPlug/Task Bridge needed for chat).
 #
 # Optional profiles:
-#   - gpu             — replaces CPU Ollama with NVIDIA-passthrough Ollama
+#   - gpu             — replaces CPU Ollama with NVIDIA-passthrough
 #                       docker compose --profile gpu up
-#                       (CPU `ollama` is in profile `cpu`; default base stack
-#                        activates `cpu` automatically; see COMPOSE_PROFILES below.)
 #   - observability   — adds Arize Phoenix tracing UI
 #                       docker compose --profile observability up
-#                       Publishes Phoenix on 127.0.0.1:${PHOENIX_PORT:-6006}
-#                       (the container always listens on 6006 internally).
-#   - frontend        — EcoSeek React web UI (thin SPA, talks to broker)
+#   - frontend        — EcoSeek React web UI
 #                       docker compose --profile frontend up
-#                       Publishes frontend on 127.0.0.1:${FRONTEND_PORT:-4000}
+#   - agenticplug     — AgenticPlug broker (auth/sessions, optional fallback)
+#                       docker compose --profile agenticplug up
 #   - r-workspace     — R geospatial workspace (rocker/geospatial + HTTP bridge)
 #                       docker compose --profile r-workspace up
-#                       Emily executes R code via POST /execute on port 8787
+#
+# Cloudflare Tunnels (configure separately):
+#   chat.ecoseek.org   → Hermes Agent API on reumanlab
+#   emily.ecoseek.org  → Emily API server (this stack, port 8642)
 #
 # All host port publications are bound to 127.0.0.1 so the stack is reachable
 # only from the local machine. If you need LAN/remote access, edit the
-# `ports:` entries explicitly — do not let unauthenticated services
-# (Ollama, /healthz) leak onto a network.
-#
-# All ports, model names, and endpoints are configurable via .env.
-# Run setup.sh / setup.ps1 to generate a starter .env on first use.
-#
-# NOTE: `COMPOSE_PROFILES` is set in .env by setup.sh to `cpu` so that
-# the default `docker compose up` brings the CPU Ollama variant. Using
-# `--profile gpu` swaps in the GPU variant. The two are mutually
-# exclusive because they share the host port ${OLLAMA_PORT}.
+# `ports:` entries explicitly.
 
 services:
-  # ── EcoSeek API (lightweight FastAPI gateway) ──────────────────────────
-  # Builds from ./backend — no agenticSeek dependency. Routes queries to
-  # Hermes (via AgenticPlug /v1/orchestrate), AgenticPlug chat completions,
-  # or a local OpenAI-compatible LLM, with a configurable fallback chain.
-  # See backend/api.py for the full /v1/query contract.
+  # ── Emily — Hermes Agent API server (PRIMARY backend) ───────────────────
+  # Emily IS the brain. Full Hermes Agent with ecoseek plugin, Emily
+  # scientific personality, and all tools (eco_analyze, web_search, etc.).
+  # Exposes OpenAI-compatible /v1/chat/completions at port 8642.
+  # ecoseek-api routes directly here — no AgenticPlug/Task Bridge needed.
+  emily:
+    build:
+      context: ./emily
+    container_name: emily
+    ports:
+      - "127.0.0.1:${EMILY_PORT:-8642}:8642"
+    environment:
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+      OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-}"
+      API_SERVER_KEY: "${EMILY_API_KEY:-emily-local-key}"
+      API_SERVER_CORS_ORIGINS: "${API_SERVER_CORS_ORIGINS:-http://localhost:4000,http://localhost:3000,http://127.0.0.1:4000}"
+      R_WORKSPACE_URL: "${R_WORKSPACE_URL:-http://r-workspace:8787}"
+      # Hermes remote for DiDAL escalation (optional)
+      HERMES_ECOSEEK_API_KEY: "${HERMES_ECOSEEK_API_KEY:-}"
+      HERMES_REMOTE_URL: "${HERMES_REMOTE_URL:-https://hermes.ecoseek.org}"
+      HERMES_REMOTE_MODEL: "${HERMES_REMOTE_MODEL:-hermes-fast}"
+      HERMES_FAST_MODEL: "${HERMES_FAST_MODEL:-hermes-fast}"
+      DIDAL_ENABLED: "${DIDAL_ENABLED:-true}"
+      DIDAL_MAX_CRITIQUE_ROUNDS: "${DIDAL_MAX_CRITIQUE_ROUNDS:-1}"
+      DIDAL_STREAM_DRAFT: "${DIDAL_STREAM_DRAFT:-true}"
+      DIDAL_STAGE_TIMEOUT: "${DIDAL_STAGE_TIMEOUT:-30}"
+      DIDAL_PROTOCOL_TIMEOUT: "${DIDAL_PROTOCOL_TIMEOUT:-90}"
+      ENTREZ_API_KEY: "${ENTREZ_API_KEY:-}"
+      ENTREZ_EMAIL: "${ENTREZ_EMAIL:-ecoseek@ecoseek.org}"
+      GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
+      ECOSEEK_ARTIFACTS_REPO: "${ECOSEEK_ARTIFACTS_REPO:-alrobles/ecoseek-artifacts}"
+      # AgenticPlug fallback (optional)
+      ECOSEEK_BROKER_URL: "${ECOSEEK_BROKER_URL:-}"
+      ECOSEEK_BROKER_KEY: "${ECOSEEK_BROKER_KEY:-}"
+      ECOSEEK_MODEL: "${ECOSEEK_MODEL:-hermes}"
+    volumes:
+      - emily-data:/root/.hermes
+      - r-workspace-data:/workspace
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8642/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      - ecoseek-net
+
+  # ── EcoSeek API (thin FastAPI router) ───────────────────────────────────
+  # Lightweight router that connects to Emily directly via /v1/chat/completions.
+  # Fallback chain: Emily → AgenticPlug → local LLM.
   ecoseek-api:
     build:
       context: ./backend
     container_name: ecoseek-api
     ports:
-      # Loopback-only by design: the FastAPI backend has no authentication
-      # at this layer (auth lives in AgenticPlug). Do not change 127.0.0.1
-      # to 0.0.0.0 — that would expose the orchestrator to the LAN.
       - "127.0.0.1:${ECOSEEK_API_PORT:-3000}:3000"
     environment:
-      # BACKEND_PORT is intentionally derived from ECOSEEK_API_PORT (and
-      # NOT read from a separate BACKEND_PORT env var) so the host-side
-      # publication and the in-container listener can never drift. To
-      # change the port, set ECOSEEK_API_PORT in .env — do not override
-      # BACKEND_PORT directly.
       BACKEND_PORT: "3000"
-      AGENTICPLUG_URL: "http://agenticplug:${AGENTICPLUG_PORT:-8080}"
-      HERMES_ENABLED: "${HERMES_ENABLED:-false}"
-      HERMES_URL: "${HERMES_URL:-}"
-      HERMES_API_KEY: "${HERMES_API_KEY:-}"
-      UPSTREAM_TIMEOUT_S: "${UPSTREAM_TIMEOUT_S:-30}"
+      # Primary: Emily (Hermes Agent API server)
+      EMILY_API_URL: "http://emily:8642"
+      EMILY_API_KEY: "${EMILY_API_KEY:-emily-local-key}"
+      EMILY_ENABLED: "true"
+      # Fallback: AgenticPlug (optional)
+      AGENTICPLUG_URL: "${AGENTICPLUG_URL:-http://agenticplug:8080}"
+      UPSTREAM_TIMEOUT_S: "${UPSTREAM_TIMEOUT_S:-120}"
       LOCAL_LLM_URL: "${LOCAL_LLM_URL:-}"
       LOCAL_LLM_API_KEY: "${LOCAL_LLM_API_KEY:-}"
-      # Phoenix / OpenTelemetry tracing (disabled by default).
-      # Enable with PHOENIX_ENABLED=true and --profile observability.
+      # Phoenix / OpenTelemetry tracing
       PHOENIX_ENABLED: "${PHOENIX_ENABLED:-false}"
       PHOENIX_ENDPOINT: "${PHOENIX_ENDPOINT:-http://phoenix:6006/v1/traces}"
       PHOENIX_PROJECT_NAME: "${PHOENIX_PROJECT_NAME:-ecoseek}"
     depends_on:
-      agenticplug:
+      emily:
         condition: service_healthy
-      redis:
-        condition: service_healthy
-      searxng:
-        condition: service_started
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -95,61 +128,6 @@ services:
       interval: 15s
       timeout: 5s
       retries: 10
-      start_period: 30s
-    networks:
-      - ecoseek-net
-
-  # ── AgenticPlug gateway (auth, policy, audit) ──────────────────────────
-  agenticplug:
-    build:
-      context: .repos/agenticplug
-      dockerfile: ../../docker/broker.Dockerfile
-    container_name: agenticplug
-    environment:
-      BROKER_HOST: "0.0.0.0"
-      BROKER_PORT: "${AGENTICPLUG_PORT:-8080}"
-      # Session store backend. `sqlite` is the alpha default: sessions
-      # persist across `docker compose restart agenticplug` via the
-      # broker-data named volume mounted at /data. Override with
-      # BROKER_SESSION_STORE=memory in .env for tests/dev where ephemeral
-      # state is acceptable. The memory backend is NOT suitable for
-      # production or anything that requires audit retention.
-      BROKER_SESSION_STORE: "${BROKER_SESSION_STORE:-sqlite}"
-      ECOAGENT_URL: "http://ecoagent:${ECOAGENT_PORT:-8000}"
-      OLLAMA_URL: "http://ollama:${OLLAMA_PORT:-11434}"
-      # Required by /v1/chat/completions (AgenticPlug PR #80). Fixed path
-      # /api/chat is appended by the broker; the client never picks the
-      # upstream URL. Without this, every chat-completions request returns
-      # 503 model_route_unconfigured (the route fails closed by design).
-      OLLAMA_BASE_URL: "http://ollama:${OLLAMA_PORT:-11434}"
-      # Optional GitHub login allowlist for CLI session handshake. Comma-
-      # separated GitHub logins. Empty = fail-closed (no sessions can be
-      # issued). The smoke test reads AGENTICPLUG_SESSION from .env; set
-      # this list to your GitHub login if you want to obtain one.
-      AGENTICPLUG_ALLOWED_LOGINS: "${AGENTICPLUG_ALLOWED_LOGINS:-}"
-      # Hermes remote orchestration service. When HERMES_ENABLED=true,
-      # AgenticPlug forwards /v1/orchestrate requests to HERMES_URL.
-      # Fail-closed when HERMES_ENABLED=false (default).
-      HERMES_URL: "${HERMES_URL:-}"
-      HERMES_API_KEY: "${HERMES_API_KEY:-}"
-      HERMES_ENABLED: "${HERMES_ENABLED:-false}"
-    ports:
-      - "127.0.0.1:${AGENTICPLUG_PORT:-8080}:${AGENTICPLUG_PORT:-8080}"
-    volumes:
-      - broker-data:/data
-    depends_on:
-      ecoagent:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - >-
-          node -e "require('http').get('http://localhost:'+process.env.BROKER_PORT+'/healthz',
-          r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
-      interval: 10s
-      timeout: 5s
-      retries: 6
       start_period: 15s
     networks:
       - ecoseek-net
@@ -188,7 +166,7 @@ services:
     networks:
       - ecoseek-net
 
-  # ── Ollama, CPU variant (profile: cpu — default via COMPOSE_PROFILES) ──
+  # ── Ollama, CPU variant ─────────────────────────────────────────────────
   ollama:
     image: ollama/ollama:latest
     container_name: ollama
@@ -211,9 +189,7 @@ services:
     networks:
       - ecoseek-net
 
-  # ── Ollama, NVIDIA GPU variant (profile: gpu) ──────────────────────────
-  # Activate with: docker compose --profile gpu up
-  # Mutually exclusive with the CPU variant — both publish ${OLLAMA_PORT}.
+  # ── Ollama, NVIDIA GPU variant ──────────────────────────────────────────
   ollama-gpu:
     image: ollama/ollama:latest
     container_name: ollama
@@ -243,7 +219,7 @@ services:
     networks:
       - ecoseek-net
 
-  # ── SearxNG (private web search, used by the API) ──────────────────────
+  # ── SearxNG (private web search) ────────────────────────────────────────
   searxng:
     image: docker.io/searxng/searxng:latest
     container_name: searxng
@@ -272,7 +248,7 @@ services:
     networks:
       - ecoseek-net
 
-  # ── Redis / Valkey (task queue) ────────────────────────────────────────
+  # ── Redis / Valkey (task queue) ─────────────────────────────────────────
   redis:
     image: docker.io/valkey/valkey:8-alpine
     container_name: redis
@@ -294,7 +270,49 @@ services:
     networks:
       - ecoseek-net
 
-  # ── Phoenix observability (profile: observability) ─────────────────────
+  # ── AgenticPlug (optional — auth/session broker) ────────────────────────
+  # No longer required for basic chat — Emily handles that directly.
+  # Use this profile if you need GitHub OAuth sessions, audit trails,
+  # or the legacy orchestration endpoint.
+  agenticplug:
+    build:
+      context: .repos/agenticplug
+      dockerfile: ../../docker/broker.Dockerfile
+    container_name: agenticplug
+    profiles: ["agenticplug"]
+    environment:
+      BROKER_HOST: "0.0.0.0"
+      BROKER_PORT: "${AGENTICPLUG_PORT:-8080}"
+      BROKER_SESSION_STORE: "${BROKER_SESSION_STORE:-sqlite}"
+      ECOAGENT_URL: "http://ecoagent:${ECOAGENT_PORT:-8000}"
+      OLLAMA_URL: "http://ollama:${OLLAMA_PORT:-11434}"
+      OLLAMA_BASE_URL: "http://ollama:${OLLAMA_PORT:-11434}"
+      AGENTICPLUG_ALLOWED_LOGINS: "${AGENTICPLUG_ALLOWED_LOGINS:-}"
+      HERMES_URL: "${HERMES_URL:-}"
+      HERMES_API_KEY: "${HERMES_API_KEY:-}"
+      HERMES_ENABLED: "${HERMES_ENABLED:-false}"
+    ports:
+      - "127.0.0.1:${AGENTICPLUG_PORT:-8080}:${AGENTICPLUG_PORT:-8080}"
+    volumes:
+      - broker-data:/data
+    depends_on:
+      ecoagent:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "require('http').get('http://localhost:'+process.env.BROKER_PORT+'/healthz',
+          r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    networks:
+      - ecoseek-net
+
+  # ── Phoenix observability ───────────────────────────────────────────────
   phoenix:
     image: arizephoenix/phoenix:latest
     container_name: phoenix
@@ -317,18 +335,10 @@ services:
     networks:
       - ecoseek-net
 
-  # ── EcoSeek API, remote-only variant (profile: remote) ───────────────
-  # Thin mode for the PoC: runs only the API gateway pointing at a remote
-  # AgenticPlug broker. No local EcoAgent, Ollama, SearxNG, or Redis.
-  #
+  # ── EcoSeek API, remote-only variant ────────────────────────────────────
+  # Thin mode: API gateway pointing at a remote Emily instance.
   #   cp .env.remote.example .env
-  #   # edit .env with your remote broker URL
   #   docker compose --profile remote up
-  #
-  # Or without Docker:
-  #   pip install -e ecoseek-client
-  #   ecoseek login --broker https://your-agenticplug-url
-  #   ecoseek hermes orchestrate "List mammal species in Yucatan"
   ecoseek-api-remote:
     build:
       context: ./backend
@@ -338,11 +348,10 @@ services:
       - "127.0.0.1:${ECOSEEK_API_PORT:-3000}:3000"
     environment:
       BACKEND_PORT: "3000"
-      # Point to the remote AgenticPlug broker (not local container)
-      AGENTICPLUG_URL: "${AGENTICPLUG_URL:?Set AGENTICPLUG_URL in .env to the remote broker}"
-      HERMES_ENABLED: "${HERMES_ENABLED:-true}"
-      HERMES_URL: "${HERMES_URL:-}"
-      HERMES_API_KEY: "${HERMES_API_KEY:-}"
+      EMILY_API_URL: "${EMILY_API_URL:?Set EMILY_API_URL in .env}"
+      EMILY_API_KEY: "${EMILY_API_KEY:-}"
+      EMILY_ENABLED: "true"
+      AGENTICPLUG_URL: "${AGENTICPLUG_URL:-}"
       UPSTREAM_TIMEOUT_S: "${UPSTREAM_TIMEOUT_S:-120}"
       LOCAL_LLM_URL: "${LOCAL_LLM_URL:-}"
       LOCAL_LLM_API_KEY: "${LOCAL_LLM_API_KEY:-}"
@@ -367,20 +376,13 @@ services:
     networks:
       - ecoseek-net
 
-  # ── EcoSeek Frontend (React SPA) ────────────────────────────────────
-  # Standalone web UI that talks directly to the AgenticPlug broker.
-  # Auth via GitHub OAuth redirect, chat via /v1/chat/completions.
-  #
-  #   docker compose --profile frontend up
-  #
-  # Or for development (runs on port 3001 to avoid OpenWebUI on 3000):
-  #   cd frontend && npm install && npm start
+  # ── EcoSeek Frontend (React SPA) ────────────────────────────────────────
   ecoseek-frontend:
     build:
       context: ./frontend
       args:
         REACT_APP_BROKER_URL: "${REACT_APP_BROKER_URL:-https://broker.ecoseek.org}"
-        REACT_APP_EMILY_URL: "${REACT_APP_EMILY_URL:-}"
+        REACT_APP_EMILY_URL: "${REACT_APP_EMILY_URL:-http://localhost:8642}"
         REACT_APP_EMILY_KEY: "${REACT_APP_EMILY_KEY:-${EMILY_API_KEY:-emily-local-key}}"
     container_name: ecoseek-frontend
     profiles: ["frontend"]
@@ -396,15 +398,7 @@ services:
     networks:
       - ecoseek-net
 
-  # ── R Workspace (rocker/geospatial + HTTP bridge) ────────────────────
-  # Full R geospatial environment for agentic R code execution.
-  # Emily generates R code → sends to r-workspace via HTTP → reads results.
-  #
-  #   docker compose --profile r-workspace up
-  #
-  # Pre-installed: sf, terra, raster, dismo, vegan, ape, rgbif, taxize,
-  # ENMeval, spocc, CoordinateCleaner, biomod2, rnaturalearth, tidyverse.
-  # Emily communicates via POST /execute on port 8787 (internal).
+  # ── R Workspace (rocker/geospatial + HTTP bridge) ───────────────────────
   r-workspace:
     build:
       context: .
@@ -433,68 +427,11 @@ services:
     networks:
       - ecoseek-net
 
-  # ── Emily Local Agent (Hermes fork with ecoseek plugin) ──────────────
-  # Lightweight ecological AI assistant that runs locally and can escalate
-  # heavy tasks to the remote Hermes on reumanlab via the broker.
-  #
-  #   docker compose --profile emily up
-  #
-  # Requires at least one LLM backend:
-  #   - DEEPSEEK_API_KEY for DeepSeek API (BYOK)
-  #   - OLLAMA_BASE_URL for a local Ollama instance
-  #   - Or the remote Hermes via ECOSEEK_BROKER_URL (escalation only)
-  emily:
-    build:
-      context: ./emily
-    container_name: emily
-    profiles: ["emily"]
-    ports:
-      - "127.0.0.1:${EMILY_PORT:-8642}:8642"
-    environment:
-      ECOSEEK_BROKER_URL: "${ECOSEEK_BROKER_URL:-https://broker.ecoseek.org}"
-      ECOSEEK_BROKER_KEY: "${ECOSEEK_BROKER_KEY:-}"
-      ECOSEEK_MODEL: "${ECOSEEK_MODEL:-hermes}"
-      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
-      OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-}"
-      API_SERVER_KEY: "${EMILY_API_KEY:-emily-local-key}"
-      API_SERVER_CORS_ORIGINS: "http://localhost:4000,http://localhost:3001,http://127.0.0.1:4000"
-      R_WORKSPACE_URL: "http://r-workspace:8787"
-      # Hermes remote (DiDAL escalation + fast/deep modes)
-      HERMES_ECOSEEK_API_KEY: "${HERMES_ECOSEEK_API_KEY:-}"
-      HERMES_REMOTE_URL: "${HERMES_REMOTE_URL:-https://hermes.ecoseek.org}"
-      HERMES_REMOTE_MODEL: "${HERMES_REMOTE_MODEL:-hermes-fast}"
-      HERMES_FAST_MODEL: "${HERMES_FAST_MODEL:-hermes-fast}"
-      DIDAL_ENABLED: "${DIDAL_ENABLED:-true}"
-      DIDAL_MAX_CRITIQUE_ROUNDS: "${DIDAL_MAX_CRITIQUE_ROUNDS:-1}"
-      DIDAL_STREAM_DRAFT: "${DIDAL_STREAM_DRAFT:-true}"
-      DIDAL_STAGE_TIMEOUT: "${DIDAL_STAGE_TIMEOUT:-30}"
-      DIDAL_PROTOCOL_TIMEOUT: "${DIDAL_PROTOCOL_TIMEOUT:-90}"
-      # NCBI Entrez / PubMed (3 req/s without key, 10 req/s with key)
-      ENTREZ_API_KEY: "${ENTREZ_API_KEY:-}"
-      ENTREZ_EMAIL: "${ENTREZ_EMAIL:-ecoseek@ecoseek.org}"
-      # GitHub artifacts pivot (large files from Hermes)
-      GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
-      ECOSEEK_ARTIFACTS_REPO: "${ECOSEEK_ARTIFACTS_REPO:-alrobles/ecoseek-artifacts}"
-    volumes:
-      - emily-data:/root/.hermes
-      - r-workspace-data:/workspace
-    restart: unless-stopped
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8642/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-    networks:
-      - ecoseek-net
-
 volumes:
+  emily-data:
   broker-data:
   ollama-data:
   redis-data:
-  emily-data:
   r-workspace-data:
 
 networks:

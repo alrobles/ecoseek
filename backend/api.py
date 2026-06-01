@@ -1,17 +1,22 @@
 """
-EcoSeek API gateway.
+EcoSeek API gateway — lightweight router to Emily (Hermes Agent).
 
 Endpoints
 ---------
 GET  /          Health check — always returns {"status": "ok"}.
-POST /v1/query  Primary query endpoint. Routes to Hermes / AgenticPlug /
-                local model with a configurable fallback chain.
+POST /v1/query  Primary query endpoint. Routes to Emily / AgenticPlug /
+                local model with configurable fallback chain.
 
-/v1/query — request (v1)
+Emily is the PRIMARY backend — Hermes Agent API server (OpenAI-compatible)
+running with the ecoseek plugin + Emily scientific personality at
+EMILY_API_URL/v1/chat/completions.
+
+/v1/query — request (v2)
     text        string   required  The user query.
     mode        enum     optional  Routing preference:
                                    auto | hermes | agenticplug | local
                                    Default: auto
+                                   "hermes" mode routes to Emily directly.
     session_id  string   optional  Opaque session identifier forwarded to
                                    upstream services.
     metadata    object   optional  Arbitrary key-value pairs forwarded as
@@ -24,7 +29,7 @@ POST /v1/query  Primary query endpoint. Routes to Hermes / AgenticPlug /
     error           string|null    Error message when success=false.
     fallback_chain  list[string]   Backends tried in order.
 
-Streaming is NOT supported in alpha.  If the caller sends ?stream=true the
+Streaming is NOT supported in alpha. If the caller sends ?stream=true the
 endpoint returns 501 Not Implemented.
 
 OpenTelemetry
@@ -32,29 +37,26 @@ OpenTelemetry
 When PHOENIX_ENABLED=true, every /v1/query request emits a trace tree:
   POST /v1/query   →  Auto-instrumented by FastAPIInstrumentor
     ecoseek.route   →  Routing decision + fallback chain
-      ecoseek.call.{backend} → Upstream HTTP call (hermes / agenticplug / local)
-
-Spans carry attributes: ecoseek.mode, ecoseek.upstream, ecoseek.success,
-ecoseek.fallback_chain, ecoseek.session_id, http.url, http.status_code, error.
+      ecoseek.call.{backend} → Upstream HTTP call (emily / agenticplug / local)
 
 curl examples
 -------------
 # Health
 curl http://localhost:3000/
 
-# Simple auto-routed query
-curl -s -X POST http://localhost:3000/v1/query \\
-  -H 'Content-Type: application/json' \\
+# Simple auto-routed query (hits Emily by default)
+curl -s -X POST http://localhost:3000/v1/query \
+  -H 'Content-Type: application/json' \
   -d '{"text": "List top 5 mammal species in Yucatan."}'
 
-# Force Hermes mode
-curl -s -X POST http://localhost:3000/v1/query \\
-  -H 'Content-Type: application/json' \\
+# Force Emily mode
+curl -s -X POST http://localhost:3000/v1/query \
+  -H 'Content-Type: application/json' \
   -d '{"text": "Analyse host-parasite network.", "mode": "hermes"}'
 
 # Force local fallback
-curl -s -X POST http://localhost:3000/v1/query \\
-  -H 'Content-Type: application/json' \\
+curl -s -X POST http://localhost:3000/v1/query \
+  -H 'Content-Type: application/json' \
   -d '{"text": "Hello?", "mode": "local"}'
 """
 
@@ -75,7 +77,7 @@ from phoenix_tracer import get_tracer, instrument_fastapi
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 log = logging.getLogger("ecoseek.api")
 
-app = FastAPI(title="EcoSeek API", version="1.0.0-alpha")
+app = FastAPI(title="EcoSeek API", version="2.0.0-alpha")
 
 # ── OpenTelemetry auto-instrumentation (no-op when PHOENIX_ENABLED=false) ──
 instrument_fastapi(app)
@@ -88,7 +90,7 @@ _tracer = get_tracer()
 
 class Mode(str, Enum):
     auto = "auto"
-    hermes = "hermes"
+    hermes = "hermes"  # "hermes" mode routes to Emily (Hermes Agent API server)
     agenticplug = "agenticplug"
     local = "local"
 
@@ -111,10 +113,19 @@ class QueryResponse(BaseModel):
 # ── Upstream helpers ────────────────────────────────────────────────────────
 
 
-def _hermes_headers() -> Dict[str, str]:
+def _emily_headers() -> Dict[str, str]:
+    """Auth headers for Emily (Hermes API server)."""
     headers: Dict[str, str] = {"Content-Type": "application/json"}
-    if config.HERMES_API_KEY:
-        headers["Authorization"] = f"Bearer {config.HERMES_API_KEY}"
+    if config.EMILY_API_KEY:
+        headers["Authorization"] = f"Bearer {config.EMILY_API_KEY}"
+    return headers
+
+
+def _agenticplug_headers() -> Dict[str, str]:
+    """Auth headers for AgenticPlug (uses same key as legacy)."""
+    headers: Dict[str, str] = {"Content-Type": "application/json"}
+    if config.EMILY_API_KEY:
+        headers["Authorization"] = f"Bearer {config.EMILY_API_KEY}"
     return headers
 
 
@@ -125,28 +136,55 @@ def _local_headers() -> Dict[str, str]:
     return headers
 
 
-async def _call_hermes(req: QueryRequest) -> Dict[str, Any]:
-    """POST to Hermes orchestrate endpoint via AgenticPlug."""
-    url = f"{config.AGENTICPLUG_URL}/v1/orchestrate"
-    payload: Dict[str, Any] = {"text": req.text}
+async def _call_emily(req: QueryRequest) -> Dict[str, Any]:
+    """
+    POST to Emily (Hermes Agent API server) directly.
+
+    Emily exposes an OpenAI-compatible /v1/chat/completions endpoint.
+    This is the PRIMARY backend — Hermes Agent with ecoseek plugin,
+    full tool access (eco_analyze, ku_hpc, web_search, etc.),
+    and the Emily scientific personality.
+    """
+    url = f"{config.EMILY_API_URL}/v1/chat/completions"
+    payload: Dict[str, Any] = {
+        "model": "emily",
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are Emily, an expert ecological scientist and AI assistant "
+                    "for EcoSeek. Respond in markdown with scientific rigour."
+                ),
+            },
+            {"role": "user", "content": req.text},
+        ],
+        "stream": False,
+    }
     if req.session_id:
         payload["session_id"] = req.session_id
-    if req.metadata:
-        payload["metadata"] = req.metadata
 
-    with _tracer.start_as_current_span("ecoseek.call.hermes") as span:
-        span.set_attribute("ecoseek.upstream", "hermes")
+    with _tracer.start_as_current_span("ecoseek.call.emily") as span:
+        span.set_attribute("ecoseek.upstream", "emily")
         span.set_attribute("http.url", url)
         span.set_attribute("http.method", "POST")
         if req.session_id:
             span.set_attribute("ecoseek.session_id", req.session_id)
         try:
             async with httpx.AsyncClient(timeout=config.UPSTREAM_TIMEOUT_S) as client:
-                r = await client.post(url, json=payload, headers=_hermes_headers())
+                r = await client.post(url, json=payload, headers=_emily_headers())
                 span.set_attribute("http.status_code", r.status_code)
                 r.raise_for_status()
+                data = r.json()
                 span.set_attribute("ecoseek.success", True)
-                return r.json()
+                # Convert OpenAI chat completion to our response format
+                content = ""
+                if data.get("choices"):
+                    content = data["choices"][0].get("message", {}).get("content", "")
+                return {
+                    "text": content,
+                    "model": data.get("model", "emily"),
+                    "raw": data,
+                }
         except Exception as exc:  # noqa: BLE001
             span.set_attribute("ecoseek.success", False)
             span.set_attribute("error", True)
@@ -155,7 +193,7 @@ async def _call_hermes(req: QueryRequest) -> Dict[str, Any]:
 
 
 async def _call_agenticplug(req: QueryRequest) -> Dict[str, Any]:
-    """POST to AgenticPlug chat completions (OpenAI-compatible)."""
+    """POST to AgenticPlug chat completions (OpenAI-compatible fallback)."""
     url = f"{config.AGENTICPLUG_URL}/v1/chat/completions"
     payload: Dict[str, Any] = {
         "messages": [{"role": "user", "content": req.text}],
@@ -172,7 +210,7 @@ async def _call_agenticplug(req: QueryRequest) -> Dict[str, Any]:
             span.set_attribute("ecoseek.session_id", req.session_id)
         try:
             async with httpx.AsyncClient(timeout=config.UPSTREAM_TIMEOUT_S) as client:
-                r = await client.post(url, json=payload)
+                r = await client.post(url, json=payload, headers=_agenticplug_headers())
                 span.set_attribute("http.status_code", r.status_code)
                 r.raise_for_status()
                 span.set_attribute("ecoseek.success", True)
@@ -221,11 +259,12 @@ async def _route(req: QueryRequest) -> QueryResponse:
     """
     Routing / fallback chain:
 
-    mode=hermes     → Hermes (via AgenticPlug /v1/orchestrate); hard-fail if down.
+    mode=hermes     → Emily (Hermes Agent API) direct; hard-fail if down.
+                      This is the PRIMARY path — full agent with tools.
     mode=agenticplug → AgenticPlug only; fail if down.
     mode=local       → Local LLM only; fail if not configured or down.
-    mode=auto        → Hermes (if enabled) → AgenticPlug → local; each step
-                       is tried only when the previous one fails.
+    mode=auto        → Emily (if enabled) → AgenticPlug → local; each step
+                      is tried only when the previous one fails.
     """
     with _tracer.start_as_current_span("ecoseek.route") as span:
         span.set_attribute("ecoseek.mode", req.mode.value)
@@ -245,7 +284,7 @@ async def _route(req: QueryRequest) -> QueryResponse:
                 return None
 
         if req.mode == Mode.hermes:
-            result = await _try("hermes", _call_hermes(req))
+            result = await _try("emily", _call_emily(req))
             span.set_attribute("ecoseek.fallback_chain", ",".join(chain))
             if result is None:
                 span.set_attribute("ecoseek.success", False)
@@ -254,14 +293,14 @@ async def _route(req: QueryRequest) -> QueryResponse:
                     success=False,
                     mode_used=None,
                     result=None,
-                    error="Hermes backend unavailable and no fallback allowed for mode=hermes.",
+                    error="Emily (Hermes Agent) unavailable and no fallback allowed for mode=hermes.",
                     fallback_chain=chain,
                 )
             span.set_attribute("ecoseek.success", True)
-            span.set_attribute("ecoseek.mode_used", "hermes")
+            span.set_attribute("ecoseek.mode_used", "emily")
             return QueryResponse(
                 success=True,
-                mode_used="hermes",
+                mode_used="emily",
                 result=result,
                 error=None,
                 fallback_chain=chain,
@@ -313,16 +352,16 @@ async def _route(req: QueryRequest) -> QueryResponse:
                 fallback_chain=chain,
             )
 
-        # mode=auto: try Hermes first (if enabled), then AgenticPlug, then local.
-        if config.HERMES_ENABLED and config.HERMES_URL:
-            result = await _try("hermes", _call_hermes(req))
+        # mode=auto: try Emily first (if enabled), then AgenticPlug, then local.
+        if config.EMILY_ENABLED and config.EMILY_API_URL:
+            result = await _try("emily", _call_emily(req))
             if result is not None:
                 span.set_attribute("ecoseek.fallback_chain", ",".join(chain))
                 span.set_attribute("ecoseek.success", True)
-                span.set_attribute("ecoseek.mode_used", "hermes")
+                span.set_attribute("ecoseek.mode_used", "emily")
                 return QueryResponse(
                     success=True,
-                    mode_used="hermes",
+                    mode_used="emily",
                     result=result,
                     error=None,
                     fallback_chain=chain,
@@ -386,7 +425,11 @@ async def query(
     """
     Route a natural-language query to the appropriate backend.
 
-    Streaming is **not** supported in alpha.  Pass ``?stream=true`` to get a
+    Emily (Hermes Agent) is the PRIMARY backend. It has full tool access
+    (eco_analyze, ku_hpc, web_search, GitHub, etc.) and responds with
+    scientific rigour.
+
+    Streaming is **not** supported in alpha. Pass ``?stream=true`` to get a
     501 response rather than unexpected behaviour.
     """
     if stream:
