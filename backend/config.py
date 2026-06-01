@@ -5,20 +5,28 @@ All settings are read from environment variables (no config.ini).
 
 Environment variables
 ---------------------
-AGENTICPLUG_URL         URL of the AgenticPlug gateway (docker-internal).
+EMILY_API_URL           URL of Emily (Hermes Agent API server).
+                        Default: http://localhost:8642
+                        Emily is the primary backend — Hermes Agent running
+                        with the ecoseek plugin + Emily scientific personality.
+                        Exposes an OpenAI-compatible endpoint at /v1/chat/completions.
+
+EMILY_API_KEY           Bearer token for Emily API authentication.
+                        Must match API_SERVER_KEY in the Emily container.
+
+EMILY_ENABLED           Set to "true" to enable routing to Emily.
+                        Default: true (Emily is the primary backend).
+
+AGENTICPLUG_URL         URL of the AgenticPlug gateway (optional fallback).
                         Default: http://agenticplug:8080
 
-HERMES_ENABLED          Set to "true" to enable routing to Hermes.
-                        Default: false
-
-HERMES_URL              External URL of the Hermes orchestration service.
-                        Required when HERMES_ENABLED=true.
-
-HERMES_API_KEY          Bearer token for Hermes API authentication.
-                        Optional; sent as Authorization header when present.
+# ── Legacy / deprecated (kept for backward compat) ─────────────────────
+HERMES_ENABLED          Deprecated. Use EMILY_ENABLED.
+HERMES_URL              Deprecated. Use EMILY_API_URL.
+HERMES_API_KEY          Deprecated. Use EMILY_API_KEY.
 
 UPSTREAM_TIMEOUT_S      Seconds before upstream requests time out.
-                        Default: 30
+                        Default: 60 (longer for Emily's tool-calling loops).
 
 LOCAL_LLM_URL           OpenAI-compatible endpoint for local-model fallback
                         (e.g. Ollama or OpenWebUI). Optional.
@@ -32,7 +40,8 @@ BACKEND_PORT            Port the uvicorn server listens on inside the
 PHOENIX_ENABLED         Set to "true" to send traces to Arize Phoenix.
                         Default: false.
 
-PHOENIX_ENDPOINT        OTLP collector endpoint. Default: http://phoenix:6006/v1/traces
+PHOENIX_ENDPOINT        OTLP collector endpoint.
+                        Default: http://phoenix:6006/v1/traces
 
 PHOENIX_PROJECT_NAME    Project name in Phoenix UI. Default: ecoseek
 """
@@ -43,18 +52,39 @@ from dotenv import load_dotenv
 
 load_dotenv()  # loads .env if present (dev only; prod uses docker env)
 
-# ── AgenticPlug (internal docker network) ─────────────────────────────────
-AGENTICPLUG_URL: str = os.getenv("AGENTICPLUG_URL", "http://agenticplug:8080").rstrip("/")
+# ── Emily (Hermes Agent API server) — PRIMARY backend ────────────────────
+def _resolve_emily_url() -> str:
+    """Resolve Emily URL: EMILY_API_URL > HERMES_URL (legacy) > localhost:8642."""
+    url = os.getenv("EMILY_API_URL", "") or os.getenv("HERMES_URL", "")
+    return url.rstrip("/") if url else "http://localhost:8642"
 
-# Hermes orchestration service (optional; disabled by default).
-HERMES_ENABLED: bool = os.getenv("HERMES_ENABLED", "false").lower() in ("1", "true", "yes")
-HERMES_URL: str = os.getenv("HERMES_URL", "").rstrip("/")
-HERMES_API_KEY: str = os.getenv("HERMES_API_KEY", "")
+def _resolve_emily_key() -> str:
+    """Resolve Emily API key: EMILY_API_KEY > HERMES_API_KEY (legacy) > empty."""
+    return os.getenv("EMILY_API_KEY", "") or os.getenv("HERMES_API_KEY", "")
+
+def _resolve_emily_enabled() -> bool:
+    """Emily enabled by default. HERMES_ENABLED is legacy fallback."""
+    env = os.getenv("EMILY_ENABLED", os.getenv("HERMES_ENABLED", "true"))
+    return env.lower() in ("1", "true", "yes")
+
+EMILY_API_URL: str = _resolve_emily_url()
+EMILY_API_KEY: str = _resolve_emily_key()
+EMILY_ENABLED: bool = _resolve_emily_enabled()
+
+# Legacy aliases for backward compat
+HERMES_ENABLED = EMILY_ENABLED
+HERMES_URL = EMILY_API_URL
+HERMES_API_KEY = EMILY_API_KEY
+
+# ── AgenticPlug (optional fallback) ──────────────────────────────────────
+AGENTICPLUG_URL: str = os.getenv(
+    "AGENTICPLUG_URL", "http://agenticplug:8080"
+).rstrip("/")
 
 # ── Timeouts ──────────────────────────────────────────────────────────────
-UPSTREAM_TIMEOUT_S: int = int(os.getenv("UPSTREAM_TIMEOUT_S", "30"))
+UPSTREAM_TIMEOUT_S: int = int(os.getenv("UPSTREAM_TIMEOUT_S", "60"))
 
-# ── Local LLM fallback (e.g. Ollama, OpenWebUI) ───────────────────────────
+# ── Local LLM fallback (e.g. Ollama) ─────────────────────────────────────
 LOCAL_LLM_URL: str = os.getenv("LOCAL_LLM_URL", "").rstrip("/")
 LOCAL_LLM_API_KEY: str = os.getenv("LOCAL_LLM_API_KEY", "")
 
@@ -62,6 +92,10 @@ LOCAL_LLM_API_KEY: str = os.getenv("LOCAL_LLM_API_KEY", "")
 BACKEND_PORT: int = int(os.getenv("BACKEND_PORT", "3000"))
 
 # ── Phoenix observability (tracing disabled by default) ───────────────────
-PHOENIX_ENABLED: bool = os.getenv("PHOENIX_ENABLED", "false").lower() in ("1", "true", "yes")
-PHOENIX_ENDPOINT: str = os.getenv("PHOENIX_ENDPOINT", "http://phoenix:6006/v1/traces")
+PHOENIX_ENABLED: bool = (
+    os.getenv("PHOENIX_ENABLED", "false").lower() in ("1", "true", "yes")
+)
+PHOENIX_ENDPOINT: str = os.getenv(
+    "PHOENIX_ENDPOINT", "http://phoenix:6006/v1/traces"
+)
 PHOENIX_PROJECT_NAME: str = os.getenv("PHOENIX_PROJECT_NAME", "ecoseek")
