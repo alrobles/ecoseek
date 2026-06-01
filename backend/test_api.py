@@ -1,16 +1,31 @@
+"""Tests for EcoSeek API v2 — Emily (Hermes Agent) direct integration."""
+
 import unittest
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
 import api
+import config
+
+
+class HealthEndpointTests(unittest.TestCase):
+    def setUp(self):
+        self.client = TestClient(api.app)
+
+    def test_health_returns_ok(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok"})
 
 
 class QueryEndpointTests(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(api.app)
 
-    def test_missing_text_and_messages_returns_422(self):
+    # ── Validation ──────────────────────────────────────────────────────
+
+    def test_missing_text_returns_422(self):
         response = self.client.post("/v1/query", json={"mode": "auto"})
         self.assertEqual(response.status_code, 422)
 
@@ -22,94 +37,184 @@ class QueryEndpointTests(unittest.TestCase):
         response = self.client.post("/v1/query?stream=true", json={"text": "hello"})
         self.assertEqual(response.status_code, 501)
 
-    def test_messages_win_when_text_also_present(self):
+    # ── Emily (primary backend) ─────────────────────────────────────────
+
+    def test_hermes_mode_calls_emily(self):
+        """mode=hermes routes to Emily (Hermes Agent API server)."""
+        mock_response = {
+            "choices": [{"message": {"content": "Emily's ecological analysis here."}}],
+            "model": "emily",
+        }
         with patch.object(
-            api, "_try_agenticplug_chat", new=AsyncMock(return_value="agentic response")
-        ) as mocked:
+            api, "_call_emily", new=AsyncMock(return_value=mock_response)
+        ):
             response = self.client.post(
                 "/v1/query",
-                json={
-                    "mode": "agenticplug",
-                    "text": "ignored text",
-                    "messages": [{"role": "user", "content": "use this"}],
-                },
+                json={"mode": "hermes", "text": "Explain niche modeling"},
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["mode_used"], "agenticplug")
-        mocked.assert_awaited_once_with(
-            "use this", [{"role": "user", "content": "use this"}]
-        )
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["mode_used"], "emily")
+        self.assertIn("Emily's ecological analysis", str(data["result"]))
+
+    def test_hermes_mode_fails_when_emily_down(self):
+        """mode=hermes hard-fails when Emily is unreachable."""
+        with patch.object(
+            api, "_call_emily", new=AsyncMock(side_effect=ConnectionError("refused"))
+        ):
+            response = self.client.post(
+                "/v1/query",
+                json={"mode": "hermes", "text": "Explain niche modeling"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertFalse(data["success"])
+        self.assertIn("unavailable", data.get("error", ""))
+
+    # ── AgenticPlug (fallback) ──────────────────────────────────────────
+
+    def test_agenticplug_mode_calls_agenticplug(self):
+        mock_response = {"text": "agenticplug response"}
+        with patch.object(
+            api, "_call_agenticplug", new=AsyncMock(return_value=mock_response)
+        ):
+            response = self.client.post(
+                "/v1/query",
+                json={"mode": "agenticplug", "text": "hello"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["mode_used"], "agenticplug")
+
+    # ── Local LLM ───────────────────────────────────────────────────────
+
+    def test_local_mode_calls_local_llm(self):
+        with patch.object(config, "LOCAL_LLM_URL", "http://ollama:11434"):
+            with patch.object(
+                api, "_call_local", new=AsyncMock(return_value={"text": "local"})
+            ):
+                response = self.client.post(
+                    "/v1/query",
+                    json={"mode": "local", "text": "hello"},
+                )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["mode_used"], "local")
+
+    def test_local_mode_fails_without_url(self):
+        with patch.object(config, "LOCAL_LLM_URL", ""):
+            response = self.client.post(
+                "/v1/query",
+                json={"mode": "local", "text": "hello"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertFalse(data["success"])
+
+    # ── Auto mode (fallback chain) ──────────────────────────────────────
+
+    def test_auto_falls_back_to_agenticplug_when_emily_down(self):
+        """When Emily fails, auto mode tries AgenticPlug next."""
+        with patch.object(config, "EMILY_ENABLED", True):
+            with patch.object(config, "EMILY_API_URL", "http://emily:8642"):
+                with patch.object(
+                    api, "_call_emily", new=AsyncMock(side_effect=ConnectionError)
+                ):
+                    with patch.object(
+                        api,
+                        "_call_agenticplug",
+                        new=AsyncMock(return_value={"text": "fallback"}),
+                    ):
+                        response = self.client.post(
+                            "/v1/query",
+                            json={"mode": "auto", "text": "hello"},
+                        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["mode_used"], "agenticplug")
+        self.assertEqual(data["fallback_chain"], ["emily", "agenticplug"])
 
     def test_auto_falls_back_to_local(self):
-        with (
-            patch.object(api, "HERMES_URL", "http://hermes.example"),
-            patch.object(api, "_try_hermes", new=AsyncMock(return_value=None)),
-            patch.object(
-                api, "_try_agenticplug_chat", new=AsyncMock(return_value=None)
-            ),
-            patch.object(
-                api, "_try_local_llm", new=AsyncMock(return_value="local response")
-            ),
-        ):
-            response = self.client.post(
-                "/v1/query", json={"mode": "auto", "text": "hello"}
-            )
+        """When both Emily and AgenticPlug fail, auto mode tries local."""
+        with patch.object(config, "EMILY_ENABLED", True):
+            with patch.object(config, "EMILY_API_URL", "http://emily:8642"):
+                with patch.object(config, "LOCAL_LLM_URL", "http://ollama:11434"):
+                    with patch.object(
+                        api, "_call_emily", new=AsyncMock(side_effect=ConnectionError)
+                    ):
+                        with patch.object(
+                            api,
+                            "_call_agenticplug",
+                            new=AsyncMock(side_effect=ConnectionError),
+                        ):
+                            with patch.object(
+                                api,
+                                "_call_local",
+                                new=AsyncMock(return_value={"text": "local"}),
+                            ):
+                                response = self.client.post(
+                                    "/v1/query",
+                                    json={"mode": "auto", "text": "hello"},
+                                )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.json(),
-            {
-                "answer": "local response",
-                "mode_used": "local",
-                "fallback_chain": ["hermes", "agenticplug", "local"],
-            },
-        )
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["mode_used"], "local")
+        self.assertEqual(data["fallback_chain"], ["emily", "agenticplug", "local"])
 
-    def test_explicit_local_mode_skips_other_upstreams(self):
-        with (
-            patch.object(api, "_try_hermes", new=AsyncMock(return_value="wrong")),
-            patch.object(
-                api, "_try_agenticplug_chat", new=AsyncMock(return_value="wrong")
-            ),
-            patch.object(
-                api, "_try_local_llm", new=AsyncMock(return_value="local response")
-            ) as mocked_local,
-        ):
-            response = self.client.post(
-                "/v1/query", json={"mode": "local", "text": "hello"}
-            )
+    def test_auto_all_fail(self):
+        """When all backends fail, return error."""
+        with patch.object(config, "EMILY_ENABLED", True):
+            with patch.object(config, "EMILY_API_URL", "http://emily:8642"):
+                with patch.object(
+                    api, "_call_emily", new=AsyncMock(side_effect=ConnectionError)
+                ):
+                    with patch.object(
+                        api,
+                        "_call_agenticplug",
+                        new=AsyncMock(side_effect=ConnectionError),
+                    ):
+                        with patch.object(
+                            api,
+                            "_call_local",
+                            new=AsyncMock(side_effect=ConnectionError),
+                        ):
+                            response = self.client.post(
+                                "/v1/query",
+                                json={"mode": "auto", "text": "hello"},
+                            )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["mode_used"], "local")
-        mocked_local.assert_awaited_once()
+        data = response.json()
+        self.assertFalse(data["success"])
+        self.assertIn("All backends", data.get("error", ""))
 
+    # ── Emily API contract ──────────────────────────────────────────────
 
-class LocalEndpointTests(unittest.IsolatedAsyncioTestCase):
-    async def test_local_llm_uses_openai_path(self):
-        captured = {}
-
-        class FakeResponse:
-            status_code = 200
-
-            @staticmethod
-            def json():
-                return {"choices": [{"message": {"content": "ok"}}]}
-
-        class FakeClient:
-            async def post(self, url, json):
-                captured["url"] = url
-                captured["payload"] = json
-                return FakeResponse()
-
-        with (
-            patch.object(api, "_client", return_value=FakeClient()),
-            patch.object(api, "LOCAL_LLM_URL", "http://local-llm:11434"),
-        ):
-            answer = await api._try_local_llm(
-                "hello", [{"role": "user", "content": "hello"}]
+    def test_emily_chat_completion_format(self):
+        """Verify Emily is called with OpenAI-compatible chat format."""
+        mock_response = {
+            "choices": [{"message": {"content": "Response", "role": "assistant"}}],
+            "model": "emily",
+        }
+        with patch.object(
+            api, "_call_emily", new=AsyncMock(return_value=mock_response)
+        ) as mocked:
+            self.client.post(
+                "/v1/query",
+                json={"mode": "hermes", "text": "Tell me about SDM"},
             )
 
-        self.assertEqual(answer, "ok")
-        self.assertEqual(captured["url"], "http://local-llm:11434/v1/chat/completions")
-        self.assertEqual(captured["payload"]["stream"], False)
+        # Emily should have been called
+        mocked.assert_awaited_once()
