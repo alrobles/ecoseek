@@ -52,20 +52,24 @@ from dotenv import load_dotenv
 
 load_dotenv()  # loads .env if present (dev only; prod uses docker env)
 
+
 # ── Emily (Hermes Agent API server) — PRIMARY backend ────────────────────
 def _resolve_emily_url() -> str:
     """Resolve Emily URL: EMILY_API_URL > HERMES_URL (legacy) > localhost:8642."""
     url = os.getenv("EMILY_API_URL", "") or os.getenv("HERMES_URL", "")
     return url.rstrip("/") if url else "http://localhost:8642"
 
+
 def _resolve_emily_key() -> str:
     """Resolve Emily API key: EMILY_API_KEY > HERMES_API_KEY (legacy) > empty."""
     return os.getenv("EMILY_API_KEY", "") or os.getenv("HERMES_API_KEY", "")
+
 
 def _resolve_emily_enabled() -> bool:
     """Emily enabled by default. HERMES_ENABLED is legacy fallback."""
     env = os.getenv("EMILY_ENABLED", os.getenv("HERMES_ENABLED", "true"))
     return env.lower() in ("1", "true", "yes")
+
 
 EMILY_API_URL: str = _resolve_emily_url()
 EMILY_API_KEY: str = _resolve_emily_key()
@@ -77,9 +81,9 @@ HERMES_URL = EMILY_API_URL
 HERMES_API_KEY = EMILY_API_KEY
 
 # ── AgenticPlug (optional fallback) ──────────────────────────────────────
-AGENTICPLUG_URL: str = os.getenv(
-    "AGENTICPLUG_URL", "http://agenticplug:8080"
-).rstrip("/")
+AGENTICPLUG_URL: str = os.getenv("AGENTICPLUG_URL", "http://agenticplug:8080").rstrip(
+    "/"
+)
 
 # ── Timeouts ──────────────────────────────────────────────────────────────
 UPSTREAM_TIMEOUT_S: int = int(os.getenv("UPSTREAM_TIMEOUT_S", "60"))
@@ -92,10 +96,10 @@ LOCAL_LLM_API_KEY: str = os.getenv("LOCAL_LLM_API_KEY", "")
 BACKEND_PORT: int = int(os.getenv("BACKEND_PORT", "3000"))
 
 # ── Phoenix observability (tracing disabled by default) ───────────────────
-PHOENIX_ENABLED: bool = (
-    os.getenv("PHOENIX_ENABLED", "false").lower() in ("1", "true", "yes")
+PHOENIX_ENABLED: bool = os.getenv("PHOENIX_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
 )
-PHOENIX_ENDPOINT: str = os.getenv(
-    "PHOENIX_ENDPOINT", "http://phoenix:6006/v1/traces"
-)
+PHOENIX_ENDPOINT: str = os.getenv("PHOENIX_ENDPOINT", "http://phoenix:6006/v1/traces")
 PHOENIX_PROJECT_NAME: str = os.getenv("PHOENIX_PROJECT_NAME", "ecoseek")

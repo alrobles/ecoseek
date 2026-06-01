@@ -87,6 +87,7 @@ _tracer = get_tracer()
 
 # ── Models ─────────────────────────────────────────────────────────────────
 
+
 class Mode(str, Enum):
     auto = "auto"
     hermes = "hermes"  # "hermes" mode routes to Emily (Hermes Agent API server)
@@ -110,6 +111,7 @@ class QueryResponse(BaseModel):
 
 
 # ── Upstream helpers ────────────────────────────────────────────────────────
+
 
 def _emily_headers() -> Dict[str, str]:
     """Auth headers for Emily (Hermes API server)."""
@@ -252,6 +254,7 @@ async def _call_local(req: QueryRequest) -> Dict[str, Any]:
 
 # ── Routing logic ───────────────────────────────────────────────────────────
 
+
 async def _route(req: QueryRequest) -> QueryResponse:
     """
     Routing / fallback chain:
@@ -296,7 +299,11 @@ async def _route(req: QueryRequest) -> QueryResponse:
             span.set_attribute("ecoseek.success", True)
             span.set_attribute("ecoseek.mode_used", "emily")
             return QueryResponse(
-                success=True, mode_used="emily", result=result, error=None, fallback_chain=chain
+                success=True,
+                mode_used="emily",
+                result=result,
+                error=None,
+                fallback_chain=chain,
             )
 
         if req.mode == Mode.agenticplug:
@@ -315,7 +322,11 @@ async def _route(req: QueryRequest) -> QueryResponse:
             span.set_attribute("ecoseek.success", True)
             span.set_attribute("ecoseek.mode_used", "agenticplug")
             return QueryResponse(
-                success=True, mode_used="agenticplug", result=result, error=None, fallback_chain=chain
+                success=True,
+                mode_used="agenticplug",
+                result=result,
+                error=None,
+                fallback_chain=chain,
             )
 
         if req.mode == Mode.local:
@@ -334,7 +345,11 @@ async def _route(req: QueryRequest) -> QueryResponse:
             span.set_attribute("ecoseek.success", True)
             span.set_attribute("ecoseek.mode_used", "local")
             return QueryResponse(
-                success=True, mode_used="local", result=result, error=None, fallback_chain=chain
+                success=True,
+                mode_used="local",
+                result=result,
+                error=None,
+                fallback_chain=chain,
             )
 
         # mode=auto: try Emily first (if enabled), then AgenticPlug, then local.
@@ -345,7 +360,11 @@ async def _route(req: QueryRequest) -> QueryResponse:
                 span.set_attribute("ecoseek.success", True)
                 span.set_attribute("ecoseek.mode_used", "emily")
                 return QueryResponse(
-                    success=True, mode_used="emily", result=result, error=None, fallback_chain=chain
+                    success=True,
+                    mode_used="emily",
+                    result=result,
+                    error=None,
+                    fallback_chain=chain,
                 )
 
         result = await _try("agenticplug", _call_agenticplug(req))
@@ -354,7 +373,11 @@ async def _route(req: QueryRequest) -> QueryResponse:
             span.set_attribute("ecoseek.success", True)
             span.set_attribute("ecoseek.mode_used", "agenticplug")
             return QueryResponse(
-                success=True, mode_used="agenticplug", result=result, error=None, fallback_chain=chain
+                success=True,
+                mode_used="agenticplug",
+                result=result,
+                error=None,
+                fallback_chain=chain,
             )
 
         if config.LOCAL_LLM_URL:
@@ -364,7 +387,11 @@ async def _route(req: QueryRequest) -> QueryResponse:
                 span.set_attribute("ecoseek.success", True)
                 span.set_attribute("ecoseek.mode_used", "local")
                 return QueryResponse(
-                    success=True, mode_used="local", result=result, error=None, fallback_chain=chain
+                    success=True,
+                    mode_used="local",
+                    result=result,
+                    error=None,
+                    fallback_chain=chain,
                 )
 
         span.set_attribute("ecoseek.fallback_chain", ",".join(chain))
@@ -380,6 +407,7 @@ async def _route(req: QueryRequest) -> QueryResponse:
 
 
 # ── Endpoints ───────────────────────────────────────────────────────────────
+
 
 @app.get("/", summary="Health check")
 async def health() -> Dict[str, str]:
@@ -407,7 +435,9 @@ async def query(
     if stream:
         return JSONResponse(
             status_code=501,
-            content={"detail": "Streaming is not supported in alpha. Omit ?stream=true."},
+            content={
+                "detail": "Streaming is not supported in alpha. Omit ?stream=true."
+            },
         )
 
     return await _route(req)

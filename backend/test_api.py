@@ -30,15 +30,11 @@ class QueryEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
 
     def test_stream_true_in_body_returns_501(self):
-        response = self.client.post(
-            "/v1/query", json={"text": "hello", "stream": True}
-        )
+        response = self.client.post("/v1/query", json={"text": "hello", "stream": True})
         self.assertEqual(response.status_code, 501)
 
     def test_stream_true_in_query_param_returns_501(self):
-        response = self.client.post(
-            "/v1/query?stream=true", json={"text": "hello"}
-        )
+        response = self.client.post("/v1/query?stream=true", json={"text": "hello"})
         self.assertEqual(response.status_code, 501)
 
     # ── Emily (primary backend) ─────────────────────────────────────────
@@ -46,12 +42,12 @@ class QueryEndpointTests(unittest.TestCase):
     def test_hermes_mode_calls_emily(self):
         """mode=hermes routes to Emily (Hermes Agent API server)."""
         mock_response = {
-            "choices": [
-                {"message": {"content": "Emily's ecological analysis here."}}
-            ],
+            "choices": [{"message": {"content": "Emily's ecological analysis here."}}],
             "model": "emily",
         }
-        with patch.object(api, "_call_emily", new=AsyncMock(return_value=mock_response)):
+        with patch.object(
+            api, "_call_emily", new=AsyncMock(return_value=mock_response)
+        ):
             response = self.client.post(
                 "/v1/query",
                 json={"mode": "hermes", "text": "Explain niche modeling"},
@@ -175,9 +171,7 @@ class QueryEndpointTests(unittest.TestCase):
         data = response.json()
         self.assertTrue(data["success"])
         self.assertEqual(data["mode_used"], "local")
-        self.assertEqual(
-            data["fallback_chain"], ["emily", "agenticplug", "local"]
-        )
+        self.assertEqual(data["fallback_chain"], ["emily", "agenticplug", "local"])
 
     def test_auto_all_fail(self):
         """When all backends fail, return error."""
@@ -211,9 +205,7 @@ class QueryEndpointTests(unittest.TestCase):
     def test_emily_chat_completion_format(self):
         """Verify Emily is called with OpenAI-compatible chat format."""
         mock_response = {
-            "choices": [
-                {"message": {"content": "Response", "role": "assistant"}}
-            ],
+            "choices": [{"message": {"content": "Response", "role": "assistant"}}],
             "model": "emily",
         }
         with patch.object(
