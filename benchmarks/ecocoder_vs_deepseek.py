@@ -23,6 +23,7 @@ Requirements:
   - DeepSeek API key (for DeepSeek v4 comparison)
   - No extra dependencies — uses only stdlib + the ecoseek judge module
 """
+
 from __future__ import annotations
 
 import json
@@ -50,7 +51,9 @@ DEEPSEEK_URL = "https://api.deepseek.com/v1"
 DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
 DEEPSEEK_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 
-HERMES_URL = os.environ.get("HERMES_REMOTE_URL", "https://hermes.ecoseek.org").rstrip("/")
+HERMES_URL = os.environ.get("HERMES_REMOTE_URL", "https://hermes.ecoseek.org").rstrip(
+    "/"
+)
 HERMES_KEY = os.environ.get("HERMES_ECOSEEK_API_KEY", "")
 
 TIMEOUT = int(os.environ.get("BENCHMARK_TIMEOUT", "120"))
@@ -125,6 +128,7 @@ For deep questions, structure your answer as a mini-report with sections."""
 # LLM call
 # ---------------------------------------------------------------------------
 
+
 def call_llm(
     url: str,
     model: str,
@@ -137,15 +141,17 @@ def call_llm(
     Returns dict with 'content', 'latency_ms', 'tokens', 'error'.
     """
     start = time.time()
-    body = json.dumps({
-        "model": model,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-        ],
-        "temperature": 0.3,
-        "max_tokens": 2048,
-    }).encode("utf-8")
+    body = json.dumps(
+        {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.3,
+            "max_tokens": 2048,
+        }
+    ).encode("utf-8")
 
     req = urllib.request.Request(
         f"{url}/chat/completions",
@@ -188,9 +194,14 @@ def call_llm(
 # Judge wrapper
 # ---------------------------------------------------------------------------
 
+
 def judge_response(prompt: str, answer: str, level: str) -> dict:
     """Score an answer using the DiDAL judge (LLM or heuristic fallback)."""
-    mode_map = {"direct": "direct", "didal": "didal", "didal_literature": "didal_literature"}
+    mode_map = {
+        "direct": "direct",
+        "didal": "didal",
+        "didal_literature": "didal_literature",
+    }
     mode = mode_map.get(level, "didal")
 
     # Try LLM judge if Hermes key is available, otherwise heuristic
@@ -210,6 +221,7 @@ def judge_response(prompt: str, answer: str, level: str) -> dict:
 # Check endpoint availability
 # ---------------------------------------------------------------------------
 
+
 def check_endpoint(url: str, api_key: str, model: str, name: str) -> bool:
     """Quick health check — try a minimal completion."""
     print(f"  Checking {name} at {url}...", end=" ", flush=True)
@@ -224,6 +236,7 @@ def check_endpoint(url: str, api_key: str, model: str, name: str) -> bool:
 # ---------------------------------------------------------------------------
 # Run benchmark
 # ---------------------------------------------------------------------------
+
 
 def run_benchmark(
     run_ecocoder: bool = True,
@@ -241,9 +254,13 @@ def run_benchmark(
     deepseek_ok = False
 
     if run_ecocoder:
-        ecocoder_ok = check_endpoint(ECOCODER_URL, ECOCODER_KEY, ECOCODER_MODEL, "EcoCoder-7B")
+        ecocoder_ok = check_endpoint(
+            ECOCODER_URL, ECOCODER_KEY, ECOCODER_MODEL, "EcoCoder-7B"
+        )
     if run_deepseek:
-        deepseek_ok = check_endpoint(DEEPSEEK_URL, DEEPSEEK_KEY, DEEPSEEK_MODEL, "DeepSeek")
+        deepseek_ok = check_endpoint(
+            DEEPSEEK_URL, DEEPSEEK_KEY, DEEPSEEK_MODEL, "DeepSeek"
+        )
 
     if not ecocoder_ok and not deepseek_ok:
         print("\nERROR: No models available. Set ECOCODER_URL or DEEPSEEK_API_KEY.")
@@ -252,13 +269,17 @@ def run_benchmark(
     models = {}
     if ecocoder_ok:
         models["ecocoder"] = {
-            "url": ECOCODER_URL, "model": ECOCODER_MODEL,
-            "key": ECOCODER_KEY, "label": "EcoCoder-7B",
+            "url": ECOCODER_URL,
+            "model": ECOCODER_MODEL,
+            "key": ECOCODER_KEY,
+            "label": "EcoCoder-7B",
         }
     if deepseek_ok:
         models["deepseek"] = {
-            "url": DEEPSEEK_URL, "model": DEEPSEEK_MODEL,
-            "key": DEEPSEEK_KEY, "label": f"DeepSeek ({DEEPSEEK_MODEL})",
+            "url": DEEPSEEK_URL,
+            "model": DEEPSEEK_MODEL,
+            "key": DEEPSEEK_KEY,
+            "label": f"DeepSeek ({DEEPSEEK_MODEL})",
         }
 
     results = {
@@ -283,8 +304,10 @@ def run_benchmark(
 
             # Get response
             resp = call_llm(
-                model_info["url"], model_info["model"],
-                model_info["key"], p["prompt"],
+                model_info["url"],
+                model_info["model"],
+                model_info["key"],
+                p["prompt"],
             )
 
             if resp["error"]:
@@ -300,7 +323,9 @@ def run_benchmark(
 
             score = judge.get("overall_score", 0)
             verdict = judge.get("verdict", "unknown")
-            print(f"score={score:.2f} ({verdict}) [{resp['latency_ms']}ms, {resp['completion_tokens']}tok]")
+            print(
+                f"score={score:.2f} ({verdict}) [{resp['latency_ms']}ms, {resp['completion_tokens']}tok]"
+            )
 
             prompt_result["responses"][model_key] = {
                 "content": resp["content"],
@@ -325,7 +350,9 @@ def print_summary(results: dict):
     model_keys = list(results["models"].keys())
 
     # Aggregate scores
-    aggregates: dict[str, dict] = {k: {"scores": [], "latencies": [], "tokens": []} for k in model_keys}
+    aggregates: dict[str, dict] = {
+        k: {"scores": [], "latencies": [], "tokens": []} for k in model_keys
+    }
     level_scores: dict[str, dict[str, list]] = {}
 
     for p in results["prompts"]:
@@ -350,12 +377,16 @@ def print_summary(results: dict):
         agg = aggregates[mk]
         n = len(agg["scores"])
         if n == 0:
-            print(f"{results['models'][mk]:<25} {'N/A':>10} {'N/A':>12} {'N/A':>11} {0:>4}")
+            print(
+                f"{results['models'][mk]:<25} {'N/A':>10} {'N/A':>12} {'N/A':>11} {0:>4}"
+            )
             continue
         avg_score = sum(agg["scores"]) / n
         avg_lat = sum(agg["latencies"]) / n
         avg_tok = sum(agg["tokens"]) / n
-        print(f"{results['models'][mk]:<25} {avg_score:>9.3f} {avg_lat:>10.0f}ms {avg_tok:>10.0f} {n:>4}")
+        print(
+            f"{results['models'][mk]:<25} {avg_score:>9.3f} {avg_lat:>10.0f}ms {avg_tok:>10.0f} {n:>4}"
+        )
 
     # Per-level breakdown
     print(f"\n{'Level':<20}", end="")
@@ -385,7 +416,9 @@ def print_summary(results: dict):
     print("-" * (50 + 13 * len(model_keys) + 11))
 
     for p in results["prompts"]:
-        prompt_short = p["prompt"][:47] + "..." if len(p["prompt"]) > 47 else p["prompt"]
+        prompt_short = (
+            p["prompt"][:47] + "..." if len(p["prompt"]) > 47 else p["prompt"]
+        )
         print(f"{prompt_short:<50}", end="")
 
         scores = {}
@@ -419,7 +452,9 @@ def print_summary(results: dict):
         winner = max(totals, key=totals.get)
         loser = min(totals, key=totals.get)
         diff = totals[winner] - totals[loser]
-        print(f"Overall winner: {results['models'][winner]} ({totals[winner]:.3f} vs {totals[loser]:.3f}, +{diff:.3f})")
+        print(
+            f"Overall winner: {results['models'][winner]} ({totals[winner]:.3f} vs {totals[loser]:.3f}, +{diff:.3f})"
+        )
 
 
 def save_results(results: dict):
@@ -437,12 +472,20 @@ def save_results(results: dict):
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main():
     import argparse
+
     parser = argparse.ArgumentParser(description="EcoCoder vs DeepSeek benchmark")
-    parser.add_argument("--ecocoder-only", action="store_true", help="Only benchmark EcoCoder")
-    parser.add_argument("--deepseek-only", action="store_true", help="Only benchmark DeepSeek")
-    parser.add_argument("--no-save", action="store_true", help="Don't save results to file")
+    parser.add_argument(
+        "--ecocoder-only", action="store_true", help="Only benchmark EcoCoder"
+    )
+    parser.add_argument(
+        "--deepseek-only", action="store_true", help="Only benchmark DeepSeek"
+    )
+    parser.add_argument(
+        "--no-save", action="store_true", help="Don't save results to file"
+    )
     args = parser.parse_args()
 
     run_eco = not args.deepseek_only

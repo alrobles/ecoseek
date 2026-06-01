@@ -19,10 +19,13 @@ import os
 log = logging.getLogger("ecoseek.phoenix")
 
 PHOENIX_ENABLED: bool = os.getenv("PHOENIX_ENABLED", "false").lower() in (
-    "1", "true", "yes",
+    "1",
+    "true",
+    "yes",
 )
 PHOENIX_ENDPOINT: str = os.getenv(
-    "PHOENIX_ENDPOINT", "http://phoenix:6006/v1/traces",
+    "PHOENIX_ENDPOINT",
+    "http://phoenix:6006/v1/traces",
 )
 PHOENIX_PROJECT_NAME: str = os.getenv("PHOENIX_PROJECT_NAME", "ecoseek")
 
@@ -57,7 +60,8 @@ def _init_tracer():
         _tracer = trace.get_tracer("ecoseek.gateway")
         log.info(
             "Phoenix tracing enabled → %s (project=%s)",
-            PHOENIX_ENDPOINT, PHOENIX_PROJECT_NAME,
+            PHOENIX_ENDPOINT,
+            PHOENIX_PROJECT_NAME,
         )
     except ImportError:
         log.warning(

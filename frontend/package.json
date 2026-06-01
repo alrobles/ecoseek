@@ -9,6 +9,7 @@
     "@testing-library/user-event": "^13.5.0",
     "axios": "^1.8.4",
     "better-react-mathjax": "^3.0.1",
+    "pdfjs-dist": "^4.9.155",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",

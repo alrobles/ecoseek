@@ -11,10 +11,8 @@ Run with:
 import json
 import os
 import re
-import sqlite3
 import sys
 import tempfile
-from unittest import mock
 
 # ── make the plugin package importable without Hermes runtime ──────────────
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -34,6 +32,7 @@ os.environ["DIDAL_MEMORY_ENABLED"] = "true"
 # ═══════════════════════════════════════════════════════════════════════════
 # 1. Classifier — pure function, no deps
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def test_classifier_direct_simple():
     """Trivial fact questions go to direct mode."""
@@ -186,6 +185,7 @@ def test_classifier_named_scientist_historical():
 # 2. Judge — fallback (heuristic) scoring
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def test_judge_fallback_empty_answer():
     """Empty/short answer gets low scores."""
     from plugins.ecoseek.judge import judge_answer
@@ -221,10 +221,14 @@ def test_judge_fallback_structured():
         prompt="Compare Grinnell and Hutchinson's niche concepts",
         answer=answer,
         mode="didal",
-        evidence={"sources": [
-            {"title": "Hutchinson 1957"}, {"title": "Grinnell 1917"},
-            {"title": "Elton 1927"}, {"title": "Soberón 2007"},
-        ]},
+        evidence={
+            "sources": [
+                {"title": "Hutchinson 1957"},
+                {"title": "Grinnell 1917"},
+                {"title": "Elton 1927"},
+                {"title": "Soberón 2007"},
+            ]
+        },
     )
     assert result["judge_type"] == "heuristic"
     assert result["overall_score"] > 0.5  # good structure + evidence
@@ -280,7 +284,9 @@ def test_judge_fallback_verdict_boundaries():
         "the latitudinal gradient is consistent across marine, freshwater, and terrestrial systems. "
         "Reference: doi:10.1234/biodiversity",
         mode="didal_literature",
-        evidence={"sources": [{"title": "Hillebrand 2004"}, {"title": "Mittelbach 2007"}]},
+        evidence={
+            "sources": [{"title": "Hillebrand 2004"}, {"title": "Mittelbach 2007"}]
+        },
     )
     assert rich["verdict"] in ("adequate", "good")
 
@@ -288,6 +294,7 @@ def test_judge_fallback_verdict_boundaries():
 # ═══════════════════════════════════════════════════════════════════════════
 # 3. Protocol helpers — JSON parsing, report assembly, references
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def test_parse_json_response_direct():
     """Plain JSON parses directly."""
@@ -301,9 +308,7 @@ def test_parse_json_response_fenced():
     """JSON inside ```json fences parses."""
     from plugins.ecoseek.protocol import _parse_json_response
 
-    result = _parse_json_response(
-        '```json\n{"thesis": "hello world"}\n```'
-    )
+    result = _parse_json_response('```json\n{"thesis": "hello world"}\n```')
     assert result == {"thesis": "hello world"}
 
 
@@ -321,9 +326,7 @@ def test_parse_json_response_bare_braces():
     """JSON with surrounding text but no fences."""
     from plugins.ecoseek.protocol import _parse_json_response
 
-    result = _parse_json_response(
-        'Some text... {"thesis": "value"} ...more text'
-    )
+    result = _parse_json_response('Some text... {"thesis": "value"} ...more text')
     assert result == {"thesis": "value"}
 
 
@@ -358,7 +361,10 @@ def test_build_references_llm_refs():
     """LLM-generated references are included."""
     from plugins.ecoseek.protocol import _build_references
 
-    llm_refs = ["Hutchinson, G.E. (1957). Concluding remarks.", "Elton, C. (1927). Animal Ecology."]
+    llm_refs = [
+        "Hutchinson, G.E. (1957). Concluding remarks.",
+        "Elton, C. (1927). Animal Ecology.",
+    ]
     result = _build_references(llm_refs, None)
     assert "1. " in result
     assert "2. " in result
@@ -372,7 +378,12 @@ def test_build_references_api_sources():
 
     evidence = {
         "sources": [
-            {"title": "Test Paper", "authors": "Smith J", "year": 2020, "doi": "10.1234/test"},
+            {
+                "title": "Test Paper",
+                "authors": "Smith J",
+                "year": 2020,
+                "doi": "10.1234/test",
+            },
         ]
     }
     result = _build_references([], evidence)
@@ -456,6 +467,7 @@ def test_assemble_report_raw_fallback():
 # 4. Memory — SQLite schema, read/write lifecycle
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def test_memory_enabled():
     """is_memory_enabled reads the env var."""
     from plugins.ecoseek.memory import is_memory_enabled
@@ -487,9 +499,7 @@ def test_memory_schema_creation():
     assert len(rows) == 1
 
     # Verify indexes
-    rows = db.execute(
-        "SELECT name FROM sqlite_master WHERE type='index'"
-    ).fetchall()
+    rows = db.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
     indexes = {r["name"] for r in rows}
     assert "idx_memories_class" in indexes
     assert "idx_memories_key" in indexes
@@ -501,16 +511,22 @@ def test_memory_schema_creation():
 
 def test_memory_write_and_recall():
     """Write a memory, then recall it via FTS."""
-    from plugins.ecoseek.memory import _get_db, recall, memorize
+    from plugins.ecoseek.memory import recall, memorize
 
     # Write a semantic memory
-    memorize("semantic", "grinnell_niche_definition",
-             "Grinnell defined the niche as the habitat requirements of a species.",
-             metadata={"source": "Grinnell 1917"})
+    memorize(
+        "semantic",
+        "grinnell_niche_definition",
+        "Grinnell defined the niche as the habitat requirements of a species.",
+        metadata={"source": "Grinnell 1917"},
+    )
 
-    memorize("semantic", "elton_niche_definition",
-             "Elton defined the niche as the functional role of a species in its community.",
-             metadata={"source": "Elton 1927"})
+    memorize(
+        "semantic",
+        "elton_niche_definition",
+        "Elton defined the niche as the functional role of a species in its community.",
+        metadata={"source": "Elton 1927"},
+    )
 
     # Recall by keyword
     results = recall("Grinnell niche habitat")
@@ -529,11 +545,14 @@ def test_memory_write_and_recall():
 
 def test_memory_recall_by_class():
     """recall_by_class returns memories of a specific type."""
-    from plugins.ecoseek.memory import _get_db, memorize, recall_by_class
+    from plugins.ecoseek.memory import memorize, recall_by_class
 
-    memorize("procedural", "sdm_best_practice",
-             "Always use bias files with MaxEnt for presence-only SDM.",
-             metadata={"domain": "sdm"})
+    memorize(
+        "procedural",
+        "sdm_best_practice",
+        "Always use bias files with MaxEnt for presence-only SDM.",
+        metadata={"domain": "sdm"},
+    )
 
     results = recall_by_class("procedural", limit=5)
     assert len(results) >= 1
@@ -542,11 +561,14 @@ def test_memory_recall_by_class():
 
 def test_memory_write_increments_access_count():
     """Recall bumps access_count."""
-    from plugins.ecoseek.memory import _get_db, memorize, recall
+    from plugins.ecoseek.memory import memorize, recall
 
-    memorize("semantic", "shannon_index",
-             "Shannon diversity index H' = -Σ(pi * ln(pi)).",
-             metadata={"formula": "H = -sum(pi*ln(pi))"})
+    memorize(
+        "semantic",
+        "shannon_index",
+        "Shannon diversity index H' = -Σ(pi * ln(pi)).",
+        metadata={"formula": "H = -sum(pi*ln(pi))"},
+    )
 
     results = recall("Shannon diversity")
     assert len(results) >= 1
@@ -562,7 +584,8 @@ def test_memory_write_increments_access_count():
 def test_memory_writeback_policy():
     """Writeback only writes when judge score exceeds threshold."""
     from plugins.ecoseek.memory import (
-        _get_db, record_policy_signal,
+        _get_db,
+        record_policy_signal,
     )
 
     # Low judge score — should NOT write
@@ -641,6 +664,7 @@ def test_memory_disabled_noop():
 # 5. Prompt template validation
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def test_prompts_not_empty():
     """All prompt templates are non-empty strings."""
     from plugins.ecoseek import prompts
@@ -658,8 +682,12 @@ def test_frame_task_prompt_structure():
     from plugins.ecoseek.prompts import FRAME_TASK_PROMPT
 
     required_fields = [
-        "user_question", "task_type", "scope",
-        "subquestions", "required_output", "clarification_needed",
+        "user_question",
+        "task_type",
+        "scope",
+        "subquestions",
+        "required_output",
+        "clarification_needed",
     ]
     for field in required_fields:
         assert field in FRAME_TASK_PROMPT, f"Missing field: {field}"
@@ -672,8 +700,12 @@ def test_judge_prompt_criteria():
     from plugins.ecoseek.judge import JUDGE_SYSTEM_PROMPT
 
     criteria = [
-        "scientific_accuracy", "definition_clarity", "evidence_grounding",
-        "perspective_contrast", "depth", "report_structure",
+        "scientific_accuracy",
+        "definition_clarity",
+        "evidence_grounding",
+        "perspective_contrast",
+        "depth",
+        "report_structure",
     ]
     for c in criteria:
         assert c in JUDGE_SYSTEM_PROMPT, f"Missing criterion: {c}"
@@ -685,10 +717,20 @@ def test_mini_report_template_placeholders():
 
     placeholders = re.findall(r"\{(\w+)\}", MINI_REPORT_TEMPLATE)
     expected = {
-        "title", "question_and_scope", "short_answer", "definition",
-        "historical_development", "key_distinctions", "evidence_and_references",
-        "competing_views", "synthesis", "open_questions",
-        "references", "complexity_score", "mode", "rounds",
+        "title",
+        "question_and_scope",
+        "short_answer",
+        "definition",
+        "historical_development",
+        "key_distinctions",
+        "evidence_and_references",
+        "competing_views",
+        "synthesis",
+        "open_questions",
+        "references",
+        "complexity_score",
+        "mode",
+        "rounds",
     }
     found = set(placeholders)
     assert found == expected, f"Missing: {expected - found}, Extra: {found - expected}"
@@ -698,6 +740,7 @@ def test_mini_report_template_placeholders():
 # 6. Reasoning mode prefix parsing
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def test_reasoning_mode_regex():
     """The reasoning mode regex correctly extracts mode prefixes."""
     RE = re.compile(r"^\[reasoning_mode:(fast|deep|auto)\]\s*", re.IGNORECASE)
@@ -705,7 +748,7 @@ def test_reasoning_mode_regex():
     def extract(prompt):
         m = RE.match(prompt)
         if m:
-            return m.group(1).lower(), prompt[m.end():]
+            return m.group(1).lower(), prompt[m.end() :]
         return None, prompt
 
     mode, clean = extract("[reasoning_mode:fast] What is a niche?")
@@ -737,6 +780,7 @@ def test_reasoning_mode_regex():
 # ═══════════════════════════════════════════════════════════════════════════
 # 7. Protocol error handling
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def test_protocol_not_configured():
     """run_didal_protocol returns error when API key is missing."""
@@ -798,6 +842,7 @@ def test_hermes_unreachable_returns_error():
 # ═══════════════════════════════════════════════════════════════════════════
 # 8. ClassificationResult structure
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def test_classification_result_fields():
     """ClassificationResult has all expected fields with correct types."""

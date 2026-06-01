@@ -14,6 +14,7 @@ inject into the expert draft stage.
 Design inspired by alrobles/gbifliterature (GBIF Literature API wrapper)
 and alrobles/paper-qa (Apache 2.0, search → chunk → cite pipeline).
 """
+
 from __future__ import annotations
 
 import json
@@ -35,12 +36,22 @@ _OPENALEX_MAILTO = os.environ.get("OPENALEX_MAILTO", "ecoseek@ecoseek.org")
 _S2_API_KEY = os.environ.get("S2_API_KEY", "")
 _ENTREZ_API_KEY = os.environ.get("ENTREZ_API_KEY", "")
 _ENTREZ_EMAIL = os.environ.get("ENTREZ_EMAIL", "ecoseek@ecoseek.org")
-_GBIF_LIT_ENABLED = os.environ.get("GBIF_LITERATURE_ENABLED", "true").lower() in ("true", "1", "yes")
+_GBIF_LIT_ENABLED = os.environ.get("GBIF_LITERATURE_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
 _REQUEST_TIMEOUT = int(os.environ.get("RETRIEVAL_TIMEOUT", "15"))
 
 # EcoAgent RAG backend on reumanlab (accessed via Hermes → eco_analyze)
-_ECOAGENT_ENABLED = os.environ.get("ECOAGENT_ENABLED", "true").lower() in ("true", "1", "yes")
-_HERMES_REMOTE_URL = os.environ.get("HERMES_REMOTE_URL", "https://hermes.ecoseek.org").rstrip("/")
+_ECOAGENT_ENABLED = os.environ.get("ECOAGENT_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+_HERMES_REMOTE_URL = os.environ.get(
+    "HERMES_REMOTE_URL", "https://hermes.ecoseek.org"
+).rstrip("/")
 _HERMES_API_KEY = os.environ.get("HERMES_ECOSEEK_API_KEY", "")
 _ECOAGENT_TIMEOUT = int(os.environ.get("ECOAGENT_RETRIEVAL_TIMEOUT", "30"))
 
@@ -48,17 +59,18 @@ _ECOAGENT_TIMEOUT = int(os.environ.get("ECOAGENT_RETRIEVAL_TIMEOUT", "30"))
 # Normalized evidence schema
 # ---------------------------------------------------------------------------
 
+
 class Evidence(NamedTuple):
-    source_type: str       # "paper" | "review" | "web_reference" | "preprint"
+    source_type: str  # "paper" | "review" | "web_reference" | "preprint"
     title: str
-    authors: str           # first author et al.
+    authors: str  # first author et al.
     year: int | None
     url: str
     doi: str
     abstract: str
-    claim_used_for: str    # filled later by the protocol
-    confidence: float      # 0.0 - 1.0
-    provider: str          # "openalex" | "semantic_scholar" | "gbif" | "entrez"
+    claim_used_for: str  # filled later by the protocol
+    confidence: float  # 0.0 - 1.0
+    provider: str  # "openalex" | "semantic_scholar" | "gbif" | "entrez"
 
 
 def evidence_to_dict(ev: Evidence) -> dict:
@@ -80,13 +92,21 @@ def evidence_to_dict(ev: Evidence) -> dict:
 # HTTP helper
 # ---------------------------------------------------------------------------
 
-def _http_get_json(url: str, headers: dict | None = None, timeout: int = 0) -> dict | list | None:
+
+def _http_get_json(
+    url: str, headers: dict | None = None, timeout: int = 0
+) -> dict | list | None:
     """Simple GET → JSON with error handling."""
     req = urllib.request.Request(url, headers=headers or {}, method="GET")
     try:
         with urllib.request.urlopen(req, timeout=timeout or _REQUEST_TIMEOUT) as resp:
             return json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, TimeoutError) as exc:
+    except (
+        urllib.error.URLError,
+        urllib.error.HTTPError,
+        json.JSONDecodeError,
+        TimeoutError,
+    ) as exc:
         logger.warning("retrieval GET failed for %s: %s", url[:120], exc)
         return None
 
@@ -94,6 +114,7 @@ def _http_get_json(url: str, headers: dict | None = None, timeout: int = 0) -> d
 # ---------------------------------------------------------------------------
 # OpenAlex search
 # ---------------------------------------------------------------------------
+
 
 def search_openalex(query: str, max_results: int = 5) -> list[Evidence]:
     """Search OpenAlex for papers matching the query.
@@ -103,12 +124,14 @@ def search_openalex(query: str, max_results: int = 5) -> list[Evidence]:
 
     Docs: https://docs.openalex.org/api-entities/works/search-works
     """
-    params = urllib.parse.urlencode({
-        "search": query,
-        "per_page": min(max_results, 25),
-        "select": "id,doi,title,authorships,publication_year,type,cited_by_count,open_access,abstract_inverted_index",
-        "mailto": _OPENALEX_MAILTO,
-    })
+    params = urllib.parse.urlencode(
+        {
+            "search": query,
+            "per_page": min(max_results, 25),
+            "select": "id,doi,title,authorships,publication_year,type,cited_by_count,open_access,abstract_inverted_index",
+            "mailto": _OPENALEX_MAILTO,
+        }
+    )
     url = f"https://api.openalex.org/works?{params}"
     data = _http_get_json(url)
     if not data or "results" not in data:
@@ -149,18 +172,20 @@ def search_openalex(query: str, max_results: int = 5) -> list[Evidence]:
         if doi and not paper_url:
             paper_url = f"https://doi.org/{doi}"
 
-        results.append(Evidence(
-            source_type=source_type,
-            title=title,
-            authors=authors,
-            year=work.get("publication_year"),
-            url=paper_url,
-            doi=doi,
-            abstract=abstract,
-            claim_used_for="",
-            confidence=round(confidence, 2),
-            provider="openalex",
-        ))
+        results.append(
+            Evidence(
+                source_type=source_type,
+                title=title,
+                authors=authors,
+                year=work.get("publication_year"),
+                url=paper_url,
+                doi=doi,
+                abstract=abstract,
+                claim_used_for="",
+                confidence=round(confidence, 2),
+                provider="openalex",
+            )
+        )
 
     return results
 
@@ -181,6 +206,7 @@ def _reconstruct_abstract(inverted_index: dict | None) -> str:
 # Semantic Scholar search
 # ---------------------------------------------------------------------------
 
+
 def search_semantic_scholar(query: str, max_results: int = 5) -> list[Evidence]:
     """Search Semantic Scholar for papers.
 
@@ -189,11 +215,13 @@ def search_semantic_scholar(query: str, max_results: int = 5) -> list[Evidence]:
 
     Docs: https://api.semanticscholar.org/api-docs/graph#tag/Paper-Data/operation/get_graph_paper_relevance_search
     """
-    params = urllib.parse.urlencode({
-        "query": query,
-        "limit": min(max_results, 10),
-        "fields": "title,authors,year,abstract,url,externalIds,citationCount,openAccessPdf,publicationTypes,venue",
-    })
+    params = urllib.parse.urlencode(
+        {
+            "query": query,
+            "limit": min(max_results, 10),
+            "fields": "title,authors,year,abstract,url,externalIds,citationCount,openAccessPdf,publicationTypes,venue",
+        }
+    )
     url = f"https://api.semanticscholar.org/graph/v1/paper/search?{params}"
     headers = {}
     if _S2_API_KEY:
@@ -235,18 +263,20 @@ def search_semantic_scholar(query: str, max_results: int = 5) -> list[Evidence]:
         if doi and not paper_url:
             paper_url = f"https://doi.org/{doi}"
 
-        results.append(Evidence(
-            source_type=source_type,
-            title=paper.get("title") or "",
-            authors=authors,
-            year=paper.get("year"),
-            url=paper_url,
-            doi=doi,
-            abstract=(paper.get("abstract") or "")[:500],
-            claim_used_for="",
-            confidence=round(confidence, 2),
-            provider="semantic_scholar",
-        ))
+        results.append(
+            Evidence(
+                source_type=source_type,
+                title=paper.get("title") or "",
+                authors=authors,
+                year=paper.get("year"),
+                url=paper_url,
+                doi=doi,
+                abstract=(paper.get("abstract") or "")[:500],
+                claim_used_for="",
+                confidence=round(confidence, 2),
+                provider="semantic_scholar",
+            )
+        )
 
     return results
 
@@ -254,6 +284,7 @@ def search_semantic_scholar(query: str, max_results: int = 5) -> list[Evidence]:
 # ---------------------------------------------------------------------------
 # GBIF Literature search
 # ---------------------------------------------------------------------------
+
 
 def search_gbif_literature(query: str, max_results: int = 5) -> list[Evidence]:
     """Search GBIF Literature API for biodiversity papers.
@@ -267,11 +298,13 @@ def search_gbif_literature(query: str, max_results: int = 5) -> list[Evidence]:
     if not _GBIF_LIT_ENABLED:
         return []
 
-    params = urllib.parse.urlencode({
-        "q": query,
-        "limit": min(max_results, 20),
-        "peerReview": "true",
-    })
+    params = urllib.parse.urlencode(
+        {
+            "q": query,
+            "limit": min(max_results, 20),
+            "peerReview": "true",
+        }
+    )
     url = f"https://api.gbif.org/v1/literature/search?{params}"
     data = _http_get_json(url)
     if not data or "results" not in data:
@@ -279,7 +312,7 @@ def search_gbif_literature(query: str, max_results: int = 5) -> list[Evidence]:
 
     results = []
     for item in data["results"][:max_results]:
-        doi = (item.get("identifiers", {}).get("doi") or "")
+        doi = item.get("identifiers", {}).get("doi") or ""
         if isinstance(doi, list):
             doi = doi[0] if doi else ""
 
@@ -287,7 +320,9 @@ def search_gbif_literature(query: str, max_results: int = 5) -> list[Evidence]:
         authors_raw = item.get("authors") or []
         if authors_raw:
             if isinstance(authors_raw[0], dict):
-                first = authors_raw[0].get("lastName", authors_raw[0].get("firstName", "Unknown"))
+                first = authors_raw[0].get(
+                    "lastName", authors_raw[0].get("firstName", "Unknown")
+                )
             else:
                 first = str(authors_raw[0])
             authors = f"{first} et al." if len(authors_raw) > 1 else first
@@ -301,18 +336,20 @@ def search_gbif_literature(query: str, max_results: int = 5) -> list[Evidence]:
         if doi and not paper_url:
             paper_url = f"https://doi.org/{doi}"
 
-        results.append(Evidence(
-            source_type="paper",
-            title=item.get("title") or "",
-            authors=authors,
-            year=item.get("year"),
-            url=paper_url,
-            doi=doi,
-            abstract=(item.get("abstract") or "")[:500],
-            claim_used_for="",
-            confidence=0.75,  # GBIF-curated = good baseline
-            provider="gbif",
-        ))
+        results.append(
+            Evidence(
+                source_type="paper",
+                title=item.get("title") or "",
+                authors=authors,
+                year=item.get("year"),
+                url=paper_url,
+                doi=doi,
+                abstract=(item.get("abstract") or "")[:500],
+                claim_used_for="",
+                confidence=0.75,  # GBIF-curated = good baseline
+                provider="gbif",
+            )
+        )
 
     return results
 
@@ -320,6 +357,7 @@ def search_gbif_literature(query: str, max_results: int = 5) -> list[Evidence]:
 # ---------------------------------------------------------------------------
 # NCBI Entrez / PubMed search (works without API key)
 # ---------------------------------------------------------------------------
+
 
 def search_entrez(query: str, max_results: int = 5) -> list[Evidence]:
     """Search PubMed via NCBI Entrez E-utilities.
@@ -341,7 +379,9 @@ def search_entrez(query: str, max_results: int = 5) -> list[Evidence]:
     if _ENTREZ_API_KEY:
         params["api_key"] = _ENTREZ_API_KEY
     search_params = urllib.parse.urlencode(params)
-    search_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?{search_params}"
+    search_url = (
+        f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?{search_params}"
+    )
     search_data = _http_get_json(search_url)
     if not search_data:
         return []
@@ -362,7 +402,9 @@ def search_entrez(query: str, max_results: int = 5) -> list[Evidence]:
     if _ENTREZ_API_KEY:
         sum_params["api_key"] = _ENTREZ_API_KEY
     summary_params = urllib.parse.urlencode(sum_params)
-    summary_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?{summary_params}"
+    summary_url = (
+        f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?{summary_params}"
+    )
     summary_data = _http_get_json(summary_url)
     if not summary_data:
         return []
@@ -405,18 +447,20 @@ def search_entrez(query: str, max_results: int = 5) -> list[Evidence]:
         if doi:
             paper_url = f"https://doi.org/{doi}"
 
-        results.append(Evidence(
-            source_type=source_type,
-            title=item.get("title") or "",
-            authors=authors,
-            year=year,
-            url=paper_url,
-            doi=doi,
-            abstract="",  # ESummary doesn't return abstracts; would need EFetch
-            claim_used_for="",
-            confidence=0.80,  # PubMed = high quality baseline
-            provider="entrez",
-        ))
+        results.append(
+            Evidence(
+                source_type=source_type,
+                title=item.get("title") or "",
+                authors=authors,
+                year=year,
+                url=paper_url,
+                doi=doi,
+                abstract="",  # ESummary doesn't return abstracts; would need EFetch
+                claim_used_for="",
+                confidence=0.80,  # PubMed = high quality baseline
+                provider="entrez",
+            )
+        )
 
     return results
 
@@ -424,6 +468,7 @@ def search_entrez(query: str, max_results: int = 5) -> list[Evidence]:
 # ---------------------------------------------------------------------------
 # EcoAgent RAG backend (via Hermes → eco_analyze on reumanlab)
 # ---------------------------------------------------------------------------
+
 
 def _ecoagent_available() -> bool:
     """Return True if we can reach EcoAgent via Hermes."""
@@ -449,7 +494,10 @@ def _hermes_eco_analyze(action: str, params: dict, timeout: int = 0) -> dict | N
     payload = {
         "model": "hermes-agent",
         "messages": [
-            {"role": "system", "content": "You have the eco_analyze tool. Use it to execute ecological analysis actions on EcoAgent. Return the tool result as-is."},
+            {
+                "role": "system",
+                "content": "You have the eco_analyze tool. Use it to execute ecological analysis actions on EcoAgent. Return the tool result as-is.",
+            },
             {"role": "user", "content": prompt},
         ],
     }
@@ -535,22 +583,32 @@ def search_ecoagent_literature(query: str, max_results: int = 5) -> list[Evidenc
                         topics = line[7:].strip()
                 if title:
                     url = f"https://doi.org/{doi}" if doi else ""
-                    results.append(Evidence(
-                        source_type="paper",
-                        title=title,
-                        authors="",
-                        year=year,
-                        url=url,
-                        doi=doi,
-                        abstract=topics,
-                        claim_used_for="",
-                        confidence=0.80,
-                        provider="ecoagent:gbif",
-                    ))
+                    results.append(
+                        Evidence(
+                            source_type="paper",
+                            title=title,
+                            authors="",
+                            year=year,
+                            url=url,
+                            doi=doi,
+                            abstract=topics,
+                            claim_used_for="",
+                            confidence=0.80,
+                            provider="ecoagent:gbif",
+                        )
+                    )
 
     # 2. Cofid host-parasite interactions (if query is relevant)
     query_lower = query.lower()
-    cofid_keywords = ("host", "parasite", "parasit", "infection", "pathogen", "cofid", "helminth")
+    cofid_keywords = (
+        "host",
+        "parasite",
+        "parasit",
+        "infection",
+        "pathogen",
+        "cofid",
+        "helminth",
+    )
     if any(kw in query_lower for kw in cofid_keywords):
         cofid_data = _hermes_eco_analyze(
             "query_cofid",
@@ -564,18 +622,20 @@ def search_ecoagent_literature(query: str, max_results: int = 5) -> list[Evidenc
             elif "raw_text" in cofid_data:
                 result_text = cofid_data["raw_text"]
             if result_text and len(result_text) > 20:
-                results.append(Evidence(
-                    source_type="web_reference",
-                    title=f"CoFID host-parasite interactions: {query[:60]}",
-                    authors="CoFID Database",
-                    year=2024,
-                    url="https://github.com/alrobles/cofid",
-                    doi="",
-                    abstract=result_text[:500],
-                    claim_used_for="",
-                    confidence=0.85,
-                    provider="ecoagent:cofid",
-                ))
+                results.append(
+                    Evidence(
+                        source_type="web_reference",
+                        title=f"CoFID host-parasite interactions: {query[:60]}",
+                        authors="CoFID Database",
+                        year=2024,
+                        url="https://github.com/alrobles/cofid",
+                        doi="",
+                        abstract=result_text[:500],
+                        claim_used_for="",
+                        confidence=0.85,
+                        provider="ecoagent:cofid",
+                    )
+                )
 
     logger.info("ecoagent search: %d results for '%s'", len(results), query[:60])
     return results
@@ -585,25 +645,29 @@ def search_ecoagent_literature(query: str, max_results: int = 5) -> list[Evidenc
 # Local-first search sources (user papers + cluster FTS5 via Hermes)
 # ---------------------------------------------------------------------------
 
+
 def search_user_papers(query: str, max_results: int = 5) -> list[Evidence]:
     """Search user-uploaded documents in local litdb."""
     try:
         from .litdb import search_user_papers as _search_user
+
         hits = _search_user(query, limit=max_results)
         results = []
         for h in hits:
-            results.append(Evidence(
-                source_type="user_upload",
-                title=h.get("title", h.get("filename", "")),
-                authors=h.get("authors", ""),
-                year=h.get("year"),
-                url="",
-                doi="",
-                abstract=h.get("snippet", "")[:500],
-                claim_used_for="",
-                confidence=0.95,
-                provider="user_upload",
-            ))
+            results.append(
+                Evidence(
+                    source_type="user_upload",
+                    title=h.get("title", h.get("filename", "")),
+                    authors=h.get("authors", ""),
+                    year=h.get("year"),
+                    url="",
+                    doi="",
+                    abstract=h.get("snippet", "")[:500],
+                    claim_used_for="",
+                    confidence=0.95,
+                    provider="user_upload",
+                )
+            )
         return results
     except Exception as exc:
         logger.debug("user_papers search failed: %s", exc)
@@ -622,18 +686,21 @@ def search_cluster_pubmed(query: str, max_results: int = 5) -> list[Evidence]:
 
     try:
         from .http_client import http_post_json
+
         resp = http_post_json(
             f"{_HERMES_REMOTE_URL}/v1/chat/completions",
             body={
                 "model": "hermes-agent",
-                "messages": [{
-                    "role": "user",
-                    "content": (
-                        f"Run this command and return ONLY the JSON output, no explanation:\n"
-                        f"python3 /home/a474r867/work/Github/ecoseek-litdump/scripts/search_pubmed.py "
-                        f"\"{query}\" --limit {max_results} --json"
-                    ),
-                }],
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Run this command and return ONLY the JSON output, no explanation:\n"
+                            f"python3 /home/a474r867/work/Github/ecoseek-litdump/scripts/search_pubmed.py "
+                            f'"{query}" --limit {max_results} --json'
+                        ),
+                    }
+                ],
             },
             headers={"Authorization": f"Bearer {_HERMES_API_KEY}"},
             timeout=20,
@@ -661,18 +728,21 @@ def search_cluster_gbif_lit(query: str, max_results: int = 5) -> list[Evidence]:
 
     try:
         from .http_client import http_post_json
+
         resp = http_post_json(
             f"{_HERMES_REMOTE_URL}/v1/chat/completions",
             body={
                 "model": "hermes-agent",
-                "messages": [{
-                    "role": "user",
-                    "content": (
-                        f"Run this command and return ONLY the JSON output, no explanation:\n"
-                        f"python3 /home/a474r867/work/Github/ecoseek-litdump/scripts/search_gbif_literature.py "
-                        f"\"{query}\" --limit {max_results} --json"
-                    ),
-                }],
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Run this command and return ONLY the JSON output, no explanation:\n"
+                            f"python3 /home/a474r867/work/Github/ecoseek-litdump/scripts/search_gbif_literature.py "
+                            f'"{query}" --limit {max_results} --json'
+                        ),
+                    }
+                ],
             },
             headers={"Authorization": f"Bearer {_HERMES_API_KEY}"},
             timeout=20,
@@ -701,6 +771,7 @@ def _parse_cluster_results(content: str, provider: str) -> list[Evidence]:
     json_str = content
     if "```" in content:
         import re as _re
+
         match = _re.search(r"```(?:json)?\s*\n?(.*?)\n?```", content, _re.DOTALL)
         if match:
             json_str = match.group(1)
@@ -713,7 +784,7 @@ def _parse_cluster_results(content: str, provider: str) -> list[Evidence]:
         end = content.rfind("]")
         if start >= 0 and end > start:
             try:
-                data = json.loads(content[start:end + 1])
+                data = json.loads(content[start : end + 1])
             except json.JSONDecodeError:
                 return []
         else:
@@ -728,18 +799,20 @@ def _parse_cluster_results(content: str, provider: str) -> list[Evidence]:
     for item in data:
         if not isinstance(item, dict):
             continue
-        results.append(Evidence(
-            source_type="paper",
-            title=str(item.get("title", ""))[:200],
-            authors=str(item.get("authors", ""))[:200],
-            year=item.get("year"),
-            url=str(item.get("url", item.get("doi_url", "")))[:300],
-            doi=str(item.get("doi", ""))[:100],
-            abstract=str(item.get("abstract", ""))[:500],
-            claim_used_for="",
-            confidence=0.8,
-            provider=provider,
-        ))
+        results.append(
+            Evidence(
+                source_type="paper",
+                title=str(item.get("title", ""))[:200],
+                authors=str(item.get("authors", ""))[:200],
+                year=item.get("year"),
+                url=str(item.get("url", item.get("doi_url", "")))[:300],
+                doi=str(item.get("doi", ""))[:100],
+                abstract=str(item.get("abstract", ""))[:500],
+                claim_used_for="",
+                confidence=0.8,
+                provider=provider,
+            )
+        )
 
     return results
 
@@ -747,6 +820,7 @@ def _parse_cluster_results(content: str, provider: str) -> list[Evidence]:
 # ---------------------------------------------------------------------------
 # Multi-source retrieval orchestrator
 # ---------------------------------------------------------------------------
+
 
 def retrieve_literature(
     query: str,
@@ -795,23 +869,28 @@ def retrieve_literature(
     # --- Priority 2: Local literature cache (litdb) ---
     try:
         from .litdb import search as litdb_search
+
         cached = litdb_search(query, limit=max_per_source * 2)
         for paper in cached:
-            all_evidence.append(Evidence(
-                source_type=paper.get("source_type", "paper"),
-                title=paper.get("title", ""),
-                authors=paper.get("authors", ""),
-                year=paper.get("year"),
-                url=paper.get("url", ""),
-                doi=paper.get("doi", ""),
-                abstract=paper.get("abstract", ""),
-                claim_used_for="",
-                confidence=paper.get("confidence", 0.7),
-                provider=f"cache:{paper.get('provider', '')}",
-            ))
+            all_evidence.append(
+                Evidence(
+                    source_type=paper.get("source_type", "paper"),
+                    title=paper.get("title", ""),
+                    authors=paper.get("authors", ""),
+                    year=paper.get("year"),
+                    url=paper.get("url", ""),
+                    doi=paper.get("doi", ""),
+                    abstract=paper.get("abstract", ""),
+                    claim_used_for="",
+                    confidence=paper.get("confidence", 0.7),
+                    provider=f"cache:{paper.get('provider', '')}",
+                )
+            )
         if cached:
             provider_stats["cache"] = len(cached)
-            logger.info("litdb cache hit: %d papers for query '%s'", len(cached), query[:60])
+            logger.info(
+                "litdb cache hit: %d papers for query '%s'", len(cached), query[:60]
+            )
     except Exception as exc:
         logger.debug("litdb cache miss or error: %s", exc)
 
@@ -830,7 +909,9 @@ def retrieve_literature(
     # Previously sequential (~14s). Now concurrent (~3-4s, limited by slowest).
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    def _search_source(name: str, fn, q: str, max_r: int) -> tuple[str, list[Evidence], str | None]:
+    def _search_source(
+        name: str, fn, q: str, max_r: int
+    ) -> tuple[str, list[Evidence], str | None]:
         """Wrapper that returns (source_name, results, error_or_None)."""
         try:
             return (name, fn(q, max_results=max_r), None)
@@ -846,19 +927,27 @@ def retrieve_literature(
 
     # Source 2-4: Tier B sources
     if tier == "B":
-        search_tasks.append(("semantic_scholar", search_semantic_scholar, query, max_per_source))
+        search_tasks.append(
+            ("semantic_scholar", search_semantic_scholar, query, max_per_source)
+        )
         if _GBIF_LIT_ENABLED:
             search_tasks.append(("gbif", search_gbif_literature, query, max_per_source))
         search_tasks.append(("entrez", search_entrez, query, max_per_source))
 
     # Source 5: EcoAgent RAG (via Hermes)
     if _ecoagent_available():
-        search_tasks.append(("ecoagent", search_ecoagent_literature, query, max_per_source))
+        search_tasks.append(
+            ("ecoagent", search_ecoagent_literature, query, max_per_source)
+        )
 
     # Source 6-7: Cluster FTS5 indices (PubMed ~36M + GBIF Lit ~61K)
     if tier == "B" and _HERMES_API_KEY:
-        search_tasks.append(("pubmed_local", search_cluster_pubmed, query, max_per_source))
-        search_tasks.append(("gbif_lit_local", search_cluster_gbif_lit, query, max_per_source))
+        search_tasks.append(
+            ("pubmed_local", search_cluster_pubmed, query, max_per_source)
+        )
+        search_tasks.append(
+            ("gbif_lit_local", search_cluster_gbif_lit, query, max_per_source)
+        )
 
     # Execute all searches in parallel (max 10s total timeout)
     with ThreadPoolExecutor(max_workers=min(len(search_tasks), 6)) as pool:
@@ -907,6 +996,7 @@ def retrieve_literature(
     # --- Store new API results in local literature cache ---
     try:
         from .litdb import store_many
+
         api_papers = [
             evidence_to_dict(e)
             for e in unique_evidence
@@ -929,12 +1019,15 @@ def retrieve_literature(
     lacs_domain = ""
     try:
         from .lacs_classifier import rerank_evidence, _LACS_ENABLED
+
         if _LACS_ENABLED and sources_dicts:
             lacs_domain = _detect_domain(query)
             sources_dicts = rerank_evidence(sources_dicts, domain=lacs_domain)
             lacs_applied = True
             provider_stats["lacs_rerank"] = len(sources_dicts)
-            logger.info("LACS re-ranked %d sources (domain=%s)", len(sources_dicts), lacs_domain)
+            logger.info(
+                "LACS re-ranked %d sources (domain=%s)", len(sources_dicts), lacs_domain
+            )
     except Exception as exc:
         logger.debug("LACS re-ranking skipped: %s", exc)
 
@@ -960,10 +1053,31 @@ def retrieve_literature(
 def _detect_domain(query: str) -> str:
     """Heuristic to detect the best LACS domain for a query."""
     q = query.lower()
-    host_parasite_kw = {"host", "parasite", "pathogen", "virus", "zoonotic", "infection",
-                        "reservoir", "hantavirus", "spillover", "vector", "disease"}
-    niche_kw = {"niche", "distribution", "sdm", "maxent", "bioclim", "chelsa",
-                "occurrence", "suitability", "habitat", "climate"}
+    host_parasite_kw = {
+        "host",
+        "parasite",
+        "pathogen",
+        "virus",
+        "zoonotic",
+        "infection",
+        "reservoir",
+        "hantavirus",
+        "spillover",
+        "vector",
+        "disease",
+    }
+    niche_kw = {
+        "niche",
+        "distribution",
+        "sdm",
+        "maxent",
+        "bioclim",
+        "chelsa",
+        "occurrence",
+        "suitability",
+        "habitat",
+        "climate",
+    }
 
     hp_hits = sum(1 for kw in host_parasite_kw if kw in q)
     nm_hits = sum(1 for kw in niche_kw if kw in q)

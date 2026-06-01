@@ -10,6 +10,7 @@ Criteria (from DiDAL Protocol spec):
 
 The judge produces both numeric scores and reasons.
 """
+
 from __future__ import annotations
 
 import json
@@ -23,14 +24,16 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ---------------------------------------------------------------------------
 
-_REMOTE_URL = os.environ.get(
-    "HERMES_REMOTE_URL", "https://hermes.ecoseek.org"
-).rstrip("/")
+_REMOTE_URL = os.environ.get("HERMES_REMOTE_URL", "https://hermes.ecoseek.org").rstrip(
+    "/"
+)
 _API_KEY = os.environ.get("HERMES_ECOSEEK_API_KEY", "")
 _MODEL = os.environ.get("HERMES_FAST_MODEL", "hermes-fast")
 _TIMEOUT = int(os.environ.get("DIDAL_JUDGE_TIMEOUT", "45"))
 _JUDGE_ENABLED = os.environ.get("DIDAL_JUDGE_ENABLED", "true").lower() in (
-    "1", "true", "yes",
+    "1",
+    "true",
+    "yes",
 )
 
 
@@ -81,6 +84,7 @@ Be rigorous. A scientist reading this answer should find it useful."""
 # ---------------------------------------------------------------------------
 # Judge function
 # ---------------------------------------------------------------------------
+
 
 def judge_answer(
     prompt: str,
@@ -201,7 +205,7 @@ def _parse_judge_json(content: str) -> Optional[dict]:
     brace_end = content.rfind("}")
     if brace_start >= 0 and brace_end > brace_start:
         try:
-            return json.loads(content[brace_start:brace_end + 1])
+            return json.loads(content[brace_start : brace_end + 1])
         except json.JSONDecodeError:
             pass
 
@@ -219,10 +223,14 @@ def _fallback_judge(
     """
     answer_len = len(answer)
     has_headers = answer.count("#") >= 2
-    has_evidence = bool(evidence and isinstance(evidence, dict) and evidence.get("sources"))
+    has_evidence = bool(
+        evidence and isinstance(evidence, dict) and evidence.get("sources")
+    )
     n_sources = len(evidence.get("sources", [])) if has_evidence else 0
     has_lists = "- " in answer or "1." in answer
-    has_refs = any(w in answer.lower() for w in ["reference", "citation", "doi", "http", "et al"])
+    has_refs = any(
+        w in answer.lower() for w in ["reference", "citation", "doi", "http", "et al"]
+    )
 
     # Heuristic scores
     depth = min(1.0, answer_len / 3000)  # longer = deeper (up to 3k chars)
@@ -246,7 +254,10 @@ def _fallback_judge(
 
     definition = 0.5 if answer_len > 200 else 0.3
     contrast = 0.3
-    if any(w in answer.lower() for w in ["however", "in contrast", "alternatively", "debate"]):
+    if any(
+        w in answer.lower()
+        for w in ["however", "in contrast", "alternatively", "debate"]
+    ):
         contrast += 0.3
 
     overall = (

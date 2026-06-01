@@ -23,6 +23,7 @@ Env vars:
   LACS_DEFAULT_DOMAIN  — default model domain (default: host-parasite)
   LACS_THRESHOLD       — minimum score to consider relevant (default: 0.5)
 """
+
 from __future__ import annotations
 
 import json
@@ -39,7 +40,9 @@ _LACS_ENABLED = os.environ.get("LACS_ENABLED", "true").lower() in ("true", "1", 
 _DEFAULT_DOMAIN = os.environ.get("LACS_DEFAULT_DOMAIN", "host-parasite")
 _LACS_THRESHOLD = float(os.environ.get("LACS_THRESHOLD", "0.5"))
 
-_HERMES_URL = os.environ.get("HERMES_REMOTE_URL", "https://hermes.ecoseek.org").rstrip("/")
+_HERMES_URL = os.environ.get("HERMES_REMOTE_URL", "https://hermes.ecoseek.org").rstrip(
+    "/"
+)
 _API_KEY = os.environ.get("HERMES_ECOSEEK_API_KEY", "")
 _TIMEOUT = int(os.environ.get("LACS_TIMEOUT", "30"))
 
@@ -61,22 +64,70 @@ AVAILABLE_DOMAINS = {
 
 _DOMAIN_KEYWORDS: dict[str, list[str]] = {
     "host-parasite": [
-        "host", "parasite", "pathogen", "virus", "zoonotic", "spillover",
-        "reservoir", "vector", "infection", "transmission", "susceptibility",
-        "hantavirus", "rodent", "bat", "mammal", "interaction", "disease",
-        "endemic", "epidemic", "wildlife", "ecological", "phylogenetic",
+        "host",
+        "parasite",
+        "pathogen",
+        "virus",
+        "zoonotic",
+        "spillover",
+        "reservoir",
+        "vector",
+        "infection",
+        "transmission",
+        "susceptibility",
+        "hantavirus",
+        "rodent",
+        "bat",
+        "mammal",
+        "interaction",
+        "disease",
+        "endemic",
+        "epidemic",
+        "wildlife",
+        "ecological",
+        "phylogenetic",
     ],
     "niche-modeling": [
-        "niche", "distribution", "bioclimatic", "chelsa", "maxent", "gbif",
-        "occurrence", "suitability", "ellipsoid", "climate", "species",
-        "habitat", "modeling", "projection", "environmental", "raster",
-        "ecoregion", "presence", "absence", "sdm",
+        "niche",
+        "distribution",
+        "bioclimatic",
+        "chelsa",
+        "maxent",
+        "gbif",
+        "occurrence",
+        "suitability",
+        "ellipsoid",
+        "climate",
+        "species",
+        "habitat",
+        "modeling",
+        "projection",
+        "environmental",
+        "raster",
+        "ecoregion",
+        "presence",
+        "absence",
+        "sdm",
     ],
     "biodiversity": [
-        "biodiversity", "species", "richness", "diversity", "conservation",
-        "ecosystem", "community", "abundance", "phylogenetic", "trait",
-        "functional", "ecological", "habitat", "population", "evolution",
-        "taxonomy", "morphological", "genetic",
+        "biodiversity",
+        "species",
+        "richness",
+        "diversity",
+        "conservation",
+        "ecosystem",
+        "community",
+        "abundance",
+        "phylogenetic",
+        "trait",
+        "functional",
+        "ecological",
+        "habitat",
+        "population",
+        "evolution",
+        "taxonomy",
+        "morphological",
+        "genetic",
     ],
 }
 
@@ -98,6 +149,7 @@ def _score_local(abstract: str, domain: str) -> float:
 # ---------------------------------------------------------------------------
 # Remote scoring via Hermes → R execution
 # ---------------------------------------------------------------------------
+
 
 def _build_r_scoring_script(abstracts: list[str], domain: str) -> str:
     """Generate R code that loads a LACS model and scores abstracts."""
@@ -197,6 +249,7 @@ def score_abstracts_remote(
 
     try:
         from .http_client import http_post_json
+
         result = http_post_json(
             f"{_HERMES_URL}/v1/chat/completions",
             payload,
@@ -217,7 +270,9 @@ def score_abstracts_remote(
         except (json.JSONDecodeError, ValueError, TypeError):
             pass
 
-        logger.warning("Could not parse LACS scores from Hermes response; using local fallback")
+        logger.warning(
+            "Could not parse LACS scores from Hermes response; using local fallback"
+        )
         return [_score_local(a, domain) for a in abstracts]
 
     except Exception as exc:
@@ -228,6 +283,7 @@ def score_abstracts_remote(
 def _extract_json(text: str) -> dict | None:
     """Extract a JSON object from mixed text (LLM response may have wrapping)."""
     import re
+
     # Try the full text first
     try:
         return json.loads(text)
@@ -262,6 +318,7 @@ def _extract_json(text: str) -> dict | None:
 # ---------------------------------------------------------------------------
 # Public API: classify literature
 # ---------------------------------------------------------------------------
+
 
 def classify_abstracts(
     abstracts: list[str],
@@ -329,10 +386,7 @@ def rerank_evidence(
     if not evidence_list:
         return evidence_list
 
-    abstracts = [
-        e.get("abstract", "") or e.get("title", "")
-        for e in evidence_list
-    ]
+    abstracts = [e.get("abstract", "") or e.get("title", "") for e in evidence_list]
 
     classifications = classify_abstracts(abstracts, domain=domain)
 
@@ -343,9 +397,7 @@ def rerank_evidence(
         ev["lacs_domain"] = cls["domain"]
         # Combined score: original confidence weighted by LACS relevance
         original_confidence = ev.get("confidence", 0.5)
-        ev["combined_score"] = round(
-            0.4 * original_confidence + 0.6 * cls["score"], 4
-        )
+        ev["combined_score"] = round(0.4 * original_confidence + 0.6 * cls["score"], 4)
 
     # Re-sort by combined score (highest first)
     evidence_list.sort(key=lambda e: e.get("combined_score", 0), reverse=True)
@@ -356,6 +408,7 @@ def rerank_evidence(
 # ---------------------------------------------------------------------------
 # Train a new LACS model (via Hermes → cluster)
 # ---------------------------------------------------------------------------
+
 
 def train_lacs_model(
     domain: str,
@@ -382,7 +435,10 @@ def train_lacs_model(
         return {"error": "Hermes API key required for model training", "success": False}
 
     if len(positive_abstracts) < 10:
-        return {"error": "Need at least 10 positive abstracts to train a model", "success": False}
+        return {
+            "error": "Need at least 10 positive abstracts to train a model",
+            "success": False,
+        }
 
     model_path = f"{_MODELS_DIR}/{domain}.rds"
 
@@ -495,6 +551,7 @@ cat(toJSON(result, auto_unbox = TRUE))
 
     try:
         from .http_client import http_post_json
+
         result = http_post_json(
             f"{_HERMES_URL}/v1/chat/completions",
             payload,
@@ -506,7 +563,11 @@ cat(toJSON(result, auto_unbox = TRUE))
         parsed = _extract_json(content)
         if parsed:
             return parsed
-        return {"success": False, "error": "Could not parse training result", "raw": content[:500]}
+        return {
+            "success": False,
+            "error": "Could not parse training result",
+            "raw": content[:500],
+        }
 
     except Exception as exc:
         return {"success": False, "error": str(exc)[:200]}
