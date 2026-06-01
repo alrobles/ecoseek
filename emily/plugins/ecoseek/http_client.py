@@ -13,6 +13,7 @@ Usage::
     data = http_post_json(url, payload, headers, timeout=30)
     data = http_get_json(url, headers, timeout=15)
 """
+
 from __future__ import annotations
 
 import json
@@ -58,10 +59,15 @@ def http_post_json(
         except Exception as exc:
             last_exc = exc
             if attempt < retries:
-                delay = min(_BASE_DELAY * (2 ** (attempt - 1)) + random.uniform(0, 0.5), 8)
+                delay = min(
+                    _BASE_DELAY * (2 ** (attempt - 1)) + random.uniform(0, 0.5), 8
+                )
                 logger.info(
                     "http_post_json attempt %d/%d failed (%s), retrying in %.1fs",
-                    attempt, retries, exc, delay,
+                    attempt,
+                    retries,
+                    exc,
+                    delay,
                 )
                 time.sleep(delay)
 
@@ -101,13 +107,15 @@ def _post_once(
                 f"Server: {err_body[:100]}"
             ) from exc
         if exc.code == 403:
-            if "1010" in err_body or "cloudflare" in err_body.lower() or not err_body.strip():
+            if (
+                "1010" in err_body
+                or "cloudflare" in err_body.lower()
+                or not err_body.strip()
+            ):
                 logger.info("urllib blocked by Cloudflare (1010), falling back to curl")
                 return _curl_post(url, payload, hdrs, timeout)
             # Non-Cloudflare 403 is an auth error — don't retry
-            raise _NoRetryError(
-                f"Forbidden (HTTP 403). {err_body[:100]}"
-            ) from exc
+            raise _NoRetryError(f"Forbidden (HTTP 403). {err_body[:100]}") from exc
         if exc.code == 404:
             raise _NoRetryError(f"Not found (HTTP 404): {url}") from exc
         raise
@@ -138,7 +146,11 @@ def http_get_json(
                 err_body = exc.read().decode("utf-8", errors="replace")[:500]
             except Exception:
                 pass
-            if "1010" in err_body or "cloudflare" in err_body.lower() or not err_body.strip():
+            if (
+                "1010" in err_body
+                or "cloudflare" in err_body.lower()
+                or not err_body.strip()
+            ):
                 logger.info("urllib blocked by Cloudflare (1010), falling back to curl")
                 return _curl_get(url, hdrs, timeout)
         raise
@@ -155,9 +167,12 @@ def _curl_post(url: str, payload: dict, headers: dict, timeout: int) -> dict:
     Uses -w to capture HTTP status code and validates response before parsing.
     """
     cmd = [
-        "curl", "-s",
-        "--max-time", str(timeout),
-        "-w", "\n%{http_code}",
+        "curl",
+        "-s",
+        "--max-time",
+        str(timeout),
+        "-w",
+        "\n%{http_code}",
     ]
     for k, v in headers.items():
         cmd.extend(["-H", f"{k}: {v}"])
@@ -165,7 +180,9 @@ def _curl_post(url: str, payload: dict, headers: dict, timeout: int) -> dict:
 
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 10)
     if result.returncode != 0:
-        raise RuntimeError(f"curl POST failed (rc={result.returncode}): {result.stderr[:200]}")
+        raise RuntimeError(
+            f"curl POST failed (rc={result.returncode}): {result.stderr[:200]}"
+        )
 
     stdout = result.stdout.rstrip()
     lines = stdout.rsplit("\n", 1)
@@ -199,7 +216,9 @@ def _curl_get(url: str, headers: dict, timeout: int) -> dict | list | None:
 
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 10)
     if result.returncode != 0:
-        logger.warning("curl GET failed (rc=%d): %s", result.returncode, result.stderr[:200])
+        logger.warning(
+            "curl GET failed (rc=%d): %s", result.returncode, result.stderr[:200]
+        )
         return None
     try:
         return json.loads(result.stdout)

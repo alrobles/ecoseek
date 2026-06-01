@@ -35,6 +35,7 @@ Requirements:
   - Hermes API key (HERMES_ECOSEEK_API_KEY) for full DiDAL loop
   - Python 3.10+, no extra dependencies
 """
+
 from __future__ import annotations
 
 import argparse
@@ -45,7 +46,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator
+
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -80,7 +81,6 @@ RETRY_DELAY = 5  # seconds
 #   category: used for --categories filtering
 
 PROMPT_BANK: list[dict] = [
-
     # -- Ecology: Direct ------------------------------------------------
     {
         "id": "eco_direct_1",
@@ -106,7 +106,6 @@ PROMPT_BANK: list[dict] = [
         "level": "direct",
         "prompt": "What is a trophic cascade?",
     },
-
     # -- Ecology: DiDAL -------------------------------------------------
     {
         "id": "eco_didal_1",
@@ -144,7 +143,6 @@ PROMPT_BANK: list[dict] = [
         "level": "didal",
         "prompt": "Explain island biogeography theory and its main predictions.",
     },
-
     # -- Ecology: DiDAL Literature ---------------------------------------
     {
         "id": "eco_lit_1",
@@ -170,7 +168,6 @@ PROMPT_BANK: list[dict] = [
         "level": "didal_literature",
         "prompt": "What is the species-energy hypothesis and what empirical evidence supports or challenges it?",
     },
-
     # -- Reasoning: Deductive Logic -------------------------------------
     {
         "id": "reason_ded_1",
@@ -207,16 +204,15 @@ PROMPT_BANK: list[dict] = [
         "category": "reasoning",
         "level": "didal",
         "prompt": "Three boxes contain: Box A has only apples, Box B has only oranges, Box C has both. "
-                  "All labels are wrong. You pick one fruit from one box. How do you identify all boxes?",
+        "All labels are wrong. You pick one fruit from one box. How do you identify all boxes?",
     },
-
     # -- Reasoning: Causal / Counterfactual ----------------------------
     {
         "id": "reason_causal_1",
         "category": "reasoning",
         "level": "didal",
         "prompt": "A drug trial shows patients who took the drug recovered faster. "
-                  "What alternative explanations should be ruled out before concluding the drug works?",
+        "What alternative explanations should be ruled out before concluding the drug works?",
     },
     {
         "id": "reason_causal_2",
@@ -236,7 +232,6 @@ PROMPT_BANK: list[dict] = [
         "level": "didal",
         "prompt": "Explain the concept of confounding variables and how randomized controlled trials address them.",
     },
-
     # -- Math: Quantitative Reasoning ----------------------------------
     {
         "id": "math_1",
@@ -249,28 +244,28 @@ PROMPT_BANK: list[dict] = [
         "category": "math",
         "level": "direct",
         "prompt": "If a species has a growth rate r=0.2 per year and current population N=500, "
-                  "what is the instantaneous rate of change dN/dt?",
+        "what is the instantaneous rate of change dN/dt?",
     },
     {
         "id": "math_3",
         "category": "math",
         "level": "didal",
         "prompt": "Explain the logistic growth equation dN/dt = rN(1 - N/K). "
-                  "What does each parameter mean and what happens as N approaches K?",
+        "What does each parameter mean and what happens as N approaches K?",
     },
     {
         "id": "math_4",
         "category": "math",
         "level": "didal",
         "prompt": "A coin is flipped 10 times and lands heads 8 times. "
-                  "What is the probability of this outcome if the coin is fair? Show the calculation.",
+        "What is the probability of this outcome if the coin is fair? Show the calculation.",
     },
     {
         "id": "math_5",
         "category": "math",
         "level": "didal",
         "prompt": "Explain the difference between Type I and Type II errors in statistical testing. "
-                  "How do they trade off and what determines acceptable thresholds?",
+        "How do they trade off and what determines acceptable thresholds?",
     },
     {
         "id": "math_6",
@@ -284,7 +279,6 @@ PROMPT_BANK: list[dict] = [
         "level": "didal",
         "prompt": "Explain the central limit theorem. Why is it important for statistical inference?",
     },
-
     # -- Science: Hypothesis & Experiment Design -----------------------
     {
         "id": "sci_1",
@@ -309,7 +303,7 @@ PROMPT_BANK: list[dict] = [
         "category": "science",
         "level": "didal",
         "prompt": "Compare frequentist and Bayesian approaches to statistical inference. "
-                  "What are the philosophical differences and practical consequences?",
+        "What are the philosophical differences and practical consequences?",
     },
     {
         "id": "sci_5",
@@ -322,46 +316,44 @@ PROMPT_BANK: list[dict] = [
         "category": "science",
         "level": "didal_literature",
         "prompt": "Summarize the debate between gradualism and punctuated equilibrium in evolutionary biology "
-                  "and what empirical evidence exists for each.",
+        "and what empirical evidence exists for each.",
     },
-
     # -- Multi-step Reasoning ------------------------------------------
     {
         "id": "multistep_1",
         "category": "multistep",
         "level": "didal",
         "prompt": "A researcher finds that forest bird diversity decreases near roads. "
-                  "Design a study to determine whether this is caused by noise, habitat loss, or predator attraction.",
+        "Design a study to determine whether this is caused by noise, habitat loss, or predator attraction.",
     },
     {
         "id": "multistep_2",
         "category": "multistep",
         "level": "didal",
         "prompt": "You have two species with overlapping niches. Species A dominates in all lab trials "
-                  "but both coexist in the field. What mechanisms could explain this coexistence?",
+        "but both coexist in the field. What mechanisms could explain this coexistence?",
     },
     {
         "id": "multistep_3",
         "category": "multistep",
         "level": "didal",
         "prompt": "A city introduces a predator to control a pest population. "
-                  "Trace the possible consequences through the food web over 5 years.",
+        "Trace the possible consequences through the food web over 5 years.",
     },
     {
         "id": "multistep_4",
         "category": "multistep",
         "level": "didal",
         "prompt": "An AI model performs well on training data but poorly on new data. "
-                  "List all possible explanations and how you would diagnose each.",
+        "List all possible explanations and how you would diagnose each.",
     },
     {
         "id": "multistep_5",
         "category": "multistep",
         "level": "didal",
         "prompt": "A company's revenue increases every month that they run ads, but also increases "
-                  "in months with no ads. How do you determine the true effect of advertising?",
+        "in months with no ads. How do you determine the true effect of advertising?",
     },
-
     # -- Analogy & Conceptual Transfer ---------------------------------
     {
         "id": "analogy_1",
@@ -380,23 +372,22 @@ PROMPT_BANK: list[dict] = [
         "category": "analogy",
         "level": "didal",
         "prompt": "Compare the immune system's response to pathogens with how a machine learning model "
-                  "generalizes from training data. What are the deep parallels?",
+        "generalizes from training data. What are the deep parallels?",
     },
-
     # -- Ethical Reasoning ---------------------------------------------
     {
         "id": "ethics_1",
         "category": "ethics",
         "level": "didal",
         "prompt": "A conservation program requires culling invasive deer to protect native plants. "
-                  "What ethical frameworks apply and how would each evaluate the action?",
+        "What ethical frameworks apply and how would each evaluate the action?",
     },
     {
         "id": "ethics_2",
         "category": "ethics",
         "level": "didal",
         "prompt": "When is it ethical to use animals in scientific research? "
-                  "Describe the key principles and how they are balanced.",
+        "Describe the key principles and how they are balanced.",
     },
 ]
 
@@ -415,10 +406,7 @@ LLAMA3_TEMPLATE = (
     "<|eot_id|>"
 )
 
-ALPACA_TEMPLATE = (
-    "### Instruction:\n{prompt}\n\n"
-    "### Response:\n{response}"
-)
+ALPACA_TEMPLATE = "### Instruction:\n{prompt}\n\n### Response:\n{response}"
 
 
 def format_example(prompt: str, response: str, fmt: str) -> dict:
@@ -435,13 +423,16 @@ def format_example(prompt: str, response: str, fmt: str) -> dict:
 # DiDAL runner
 # ---------------------------------------------------------------------------
 
+
 def run_didal_safe(prompt: str, retries: int = MAX_RETRIES) -> dict | None:
     """Run DiDAL protocol with retry logic. Returns parsed result or None."""
     try:
         from ecoseek.protocol import run_didal_protocol
     except ImportError as e:
         log.error("Cannot import DiDAL protocol: %s", e)
-        log.error("Make sure emily/plugins is in sys.path and dependencies are installed.")
+        log.error(
+            "Make sure emily/plugins is in sys.path and dependencies are installed."
+        )
         return None
 
     for attempt in range(retries + 1):
@@ -451,10 +442,17 @@ def run_didal_safe(prompt: str, retries: int = MAX_RETRIES) -> dict | None:
             return result
         except Exception as exc:
             if attempt < retries:
-                log.warning("Attempt %d failed: %s -- retrying in %ds", attempt + 1, exc, RETRY_DELAY)
+                log.warning(
+                    "Attempt %d failed: %s -- retrying in %ds",
+                    attempt + 1,
+                    exc,
+                    RETRY_DELAY,
+                )
                 time.sleep(RETRY_DELAY)
             else:
-                log.error("All attempts failed for prompt: %s\nError: %s", prompt[:60], exc)
+                log.error(
+                    "All attempts failed for prompt: %s\nError: %s", prompt[:60], exc
+                )
                 return None
     return None
 
@@ -462,6 +460,7 @@ def run_didal_safe(prompt: str, retries: int = MAX_RETRIES) -> dict | None:
 # ---------------------------------------------------------------------------
 # Main generator
 # ---------------------------------------------------------------------------
+
 
 def generate_corpus(
     prompts: list[dict],
@@ -485,8 +484,12 @@ def generate_corpus(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    log.info("Starting corpus generation -- %d prompts, threshold=%.2f, format=%s",
-             len(prompts), threshold, fmt)
+    log.info(
+        "Starting corpus generation -- %d prompts, threshold=%.2f, format=%s",
+        len(prompts),
+        threshold,
+        fmt,
+    )
     if dry_run:
         log.info("DRY RUN -- printing prompts only, no Hermes calls")
 
@@ -522,11 +525,17 @@ def generate_corpus(
             stats["by_mode"][mode] = stats["by_mode"].get(mode, 0) + 1
             stats["by_category"][category] = stats["by_category"].get(category, 0) + 1
 
-            print(f"  -> score={judge_score:.3f} verdict={verdict} mode={mode} "
-                  f"rounds={critique_rounds} elapsed={elapsed}s")
+            print(
+                f"  -> score={judge_score:.3f} verdict={verdict} mode={mode} "
+                f"rounds={critique_rounds} elapsed={elapsed}s"
+            )
 
             if judge_score < threshold:
-                log.info("  -> REJECTED (score %.3f < threshold %.2f)", judge_score, threshold)
+                log.info(
+                    "  -> REJECTED (score %.3f < threshold %.2f)",
+                    judge_score,
+                    threshold,
+                )
                 stats["skipped_low_score"] += 1
                 continue
 
@@ -566,39 +575,58 @@ def generate_corpus(
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate SFT corpus from DiDAL protocol for Nemotron LoRA fine-tuning",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--threshold", type=float, default=JUDGE_THRESHOLD_DEFAULT,
+        "--threshold",
+        type=float,
+        default=JUDGE_THRESHOLD_DEFAULT,
         help=f"Minimum judge score to include an example (default: {JUDGE_THRESHOLD_DEFAULT})",
     )
     parser.add_argument(
-        "--output", type=str, default=None,
+        "--output",
+        type=str,
+        default=None,
         help="Output JSONL path (default: benchmarks/results/sft_corpus_<timestamp>.jsonl)",
     )
     parser.add_argument(
-        "--format", choices=["jsonl", "llama3", "alpaca"], default="llama3",
+        "--format",
+        choices=["jsonl", "llama3", "alpaca"],
+        default="llama3",
         help="Output format (default: llama3 -- ready for Axolotl/TRL)",
     )
     parser.add_argument(
-        "--categories", nargs="+",
-        choices=["ecology", "reasoning", "math", "science", "multistep", "analogy", "ethics"],
+        "--categories",
+        nargs="+",
+        choices=[
+            "ecology",
+            "reasoning",
+            "math",
+            "science",
+            "multistep",
+            "analogy",
+            "ethics",
+        ],
         help="Only run prompts from these categories (default: all)",
     )
     parser.add_argument(
-        "--levels", nargs="+",
+        "--levels",
+        nargs="+",
         choices=["direct", "didal", "didal_literature"],
         help="Only run prompts at these DiDAL levels (default: all)",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Print prompts without calling Hermes (no API calls)",
     )
     parser.add_argument(
-        "--stats-only", action="store_true",
+        "--stats-only",
+        action="store_true",
         help="Print stats about the prompt bank and exit",
     )
     args = parser.parse_args()
@@ -606,6 +634,7 @@ def main():
     # Stats mode
     if args.stats_only:
         from collections import Counter
+
         cats = Counter(p["category"] for p in PROMPT_BANK)
         levels = Counter(p["level"] for p in PROMPT_BANK)
         print(f"Total prompts: {len(PROMPT_BANK)}")
@@ -640,7 +669,9 @@ def main():
     # Run
     print("=" * 70)
     print("Nemotron SFT Corpus Generator -- DiDAL Protocol")
-    print(f"Prompts: {len(prompts)} | Threshold: {args.threshold} | Format: {args.format}")
+    print(
+        f"Prompts: {len(prompts)} | Threshold: {args.threshold} | Format: {args.format}"
+    )
     print(f"Output: {output_path}")
     print("=" * 70)
 
@@ -660,7 +691,9 @@ def main():
         print(f"  Total prompts   : {stats['total']}")
         print(f"  Processed       : {stats['processed']}")
         print(f"  Accepted        : {stats['passed']}  (score >= {args.threshold})")
-        print(f"  Rejected        : {stats['skipped_low_score']}  (score < {args.threshold})")
+        print(
+            f"  Rejected        : {stats['skipped_low_score']}  (score < {args.threshold})"
+        )
         print(f"  Failed          : {stats['failed']}")
         if stats.get("avg_score"):
             print(f"  Avg score       : {stats['avg_score']}")

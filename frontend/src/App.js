@@ -13,6 +13,7 @@ import emilyThinking from "./emily-avatar-thinking.gif";
 import { useAuth } from "./contexts/AuthContext";
 import { chatCompletionStream, checkHealth, checkRemoteHealth, BROKER_URL, CHAT_URL, IS_LOCAL_EMILY, HERMES_REMOTE_URL } from "./api/broker";
 import { ToolCallsContainer } from "./components/ToolCallCard";
+import { extractPdfText, validatePdf } from "./utils/pdfExtract";
 
 function LoginScreen({ onLogin }) {
   return (
@@ -63,9 +64,12 @@ function App() {
   const [lastHermesTrace, setLastHermesTrace] = useState(null);
   const [reasoningMode, setReasoningMode] = useState("auto"); // "fast" | "deep" | "auto"
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [uploadingPdf, setUploadingPdf] = useState(false);
+  const [uploadedFiles, setUploadedFiles] = useState([]); // [{name, text, pages}, ...]
   const messagesEndRef = useRef(null);
   const abortRef = useRef(null);
   const timerRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   const currentTheme = document.documentElement.getAttribute("data-theme") || "dark";
 
@@ -119,6 +123,114 @@ function App() {
       return s;
     });
   };
+
+  // PDF upload handler — extracts text client-side, sends to Emily for LACS
+  // Supports multiple files in a single selection.
+  const handlePdfUpload = useCallback(async (e) => {
+    const fileList = Array.from(e.target.files || []);
+    if (fileList.length === 0) return;
+    // Reset file input so the same files can be re-uploaded
+    e.target.value = "";
+
+    // Validate all files first
+    for (const file of fileList) {
+      const validation = validatePdf(file);
+      if (!validation.ok) {
+        setError(`${file.name}: ${validation.error}`);
+        return;
+      }
+    }
+
+    setUploadingPdf(true);
+    setError(null);
+
+    try {
+      // Extract text from all PDFs
+      const extracted = [];
+      for (const file of fileList) {
+        const { text, pages } = await extractPdfText(file);
+        if (!text.trim()) {
+          setError(`${file.name}: Could not extract text (might be image-based)`);
+          setUploadingPdf(false);
+          return;
+        }
+        extracted.push({ name: file.name, text, pages });
+      }
+
+      setUploadedFiles(extracted);
+
+      // Build user-visible message
+      const fileList_ = extracted.map(f => `**${f.name}** (${f.pages} pages)`).join(", ");
+      const previews = extracted.map(f => {
+        const preview = f.text.slice(0, 200).replace(/\s+/g, " ").trim();
+        return `> **${f.name}:** ${preview}...`;
+      }).join("\n\n");
+      const userMsg = {
+        type: "user",
+        content: `I'm uploading ${extracted.length} paper${extracted.length > 1 ? "s" : ""}: ${fileList_}.\n\nPlease ingest each document, classify with LACS, and find similar literature.\n\n${previews}`,
+      };
+      setMessages((prev) => [...prev, userMsg]);
+      setIsLoading(true);
+      setStreamingContent("");
+      setStreamingReasoning("");
+      setActiveToolCalls([]);
+      setToolProgress(null);
+      setDidalStages([]);
+
+      // Build the full content for Emily — one block per paper
+      const paperBlocks = extracted.map((f, i) => (
+        `--- PAPER ${i + 1} of ${extracted.length}: ${f.name} (${f.pages} pages) ---\n\n${f.text}`
+      )).join("\n\n");
+
+      const history = [
+        {
+          role: "user",
+          content: `[PDF Upload: ${extracted.length} file${extracted.length > 1 ? "s" : ""}]\n\nPlease process each paper below:\n1. Use upload_document to ingest each paper's text (call it once per paper with the paper title and text)\n2. Use classify_literature to score domain relevance with LACS\n3. Use literature_search to find similar papers\n\n${paperBlocks}`,
+        },
+      ];
+
+      const abortController = new AbortController();
+      abortRef.current = abortController;
+
+      await chatCompletionStream(
+        history,
+        {
+          reasoningMode: "auto",
+          onToken: (t) => { setStreamingContent((prev) => prev + t); scrollToBottom(); },
+          onReasoning: (t) => { setStreamingReasoning((prev) => prev + t); },
+          onToolCallStart: (tool) => {
+            setActiveToolCalls((prev) => [...prev, { ...tool, arguments: "" }]);
+          },
+          onToolCallDelta: (id, arg) => {
+            setActiveToolCalls((prev) =>
+              prev.map((tc) => tc.id === id ? { ...tc, arguments: tc.arguments + arg } : tc)
+            );
+          },
+          onToolProgress: (info) => { setToolProgress(info); },
+          onDone: (resp) => {
+            const content = resp?.choices?.[0]?.message?.content || streamingContent;
+            setMessages((prev) => [...prev, { type: "agent", content }]);
+            setStreamingContent("");
+            setStreamingReasoning("");
+            setIsLoading(false);
+            setActiveToolCalls([]);
+            setToolProgress(null);
+            setUploadedFiles([]);
+          },
+          onError: (err) => {
+            setError(err.message);
+            setIsLoading(false);
+            setUploadedFiles([]);
+          },
+          signal: abortController.signal,
+        },
+      );
+    } catch (err) {
+      setError(`PDF processing failed: ${err.message}`);
+    } finally {
+      setUploadingPdf(false);
+    }
+  }, [streamingContent, scrollToBottom]);
 
   const handleSubmit = useCallback(
     async (e) => {
@@ -561,6 +673,37 @@ function App() {
                 disabled={isLoading}
               />
               <div className="action-buttons">
+                {/* Hidden file input for PDF upload */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,application/pdf"
+                  multiple
+                  style={{ display: "none" }}
+                  onChange={handlePdfUpload}
+                />
+                <button
+                  type="button"
+                  className={`icon-button upload-btn ${uploadingPdf ? "uploading" : ""}`}
+                  disabled={isLoading || uploadingPdf}
+                  onClick={() => fileInputRef.current?.click()}
+                  aria-label="Upload PDF paper"
+                  title="Upload PDF papers for LACS classification"
+                >
+                  {uploadingPdf ? (
+                    <span className="upload-spinner" />
+                  ) : (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                      <path
+                        d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  )}
+                </button>
                 <button
                   type="submit"
                   disabled={isLoading || !query.trim()}
@@ -578,6 +721,22 @@ function App() {
                   </svg>
                 </button>
               </div>
+              {uploadedFiles.length > 0 && (
+                <div className="upload-badges">
+                  {uploadedFiles.map((f, i) => (
+                    <div className="upload-badge" key={f.name + i}>
+                      <span className="upload-badge-icon">&#128196;</span>
+                      <span className="upload-badge-name">{f.name}</span>
+                      <span className="upload-badge-pages">({f.pages} pages)</span>
+                      <button
+                        className="upload-badge-remove"
+                        onClick={() => setUploadedFiles(prev => prev.filter((_, j) => j !== i))}
+                        aria-label={`Remove ${f.name}`}
+                      >&times;</button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </form>
           </div>
 

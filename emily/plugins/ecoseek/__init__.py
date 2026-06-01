@@ -27,6 +27,7 @@ Env vars (set in ~/.hermes/.env or passed via Docker):
   DIDAL_MAX_TURNS             - Max dialogue turns for legacy exchange (default: 12)
   DIDAL_STUCK_THRESHOLD       - Repeated errors before stopping (default: 3)
 """
+
 from __future__ import annotations
 
 import json
@@ -46,9 +47,9 @@ logger = logging.getLogger(__name__)
 # Configuration — direct to hermes.ecoseek.org
 # ---------------------------------------------------------------------------
 
-_REMOTE_URL = os.environ.get(
-    "HERMES_REMOTE_URL", "https://hermes.ecoseek.org"
-).rstrip("/")
+_REMOTE_URL = os.environ.get("HERMES_REMOTE_URL", "https://hermes.ecoseek.org").rstrip(
+    "/"
+)
 _API_KEY = os.environ.get("HERMES_ECOSEEK_API_KEY", "")
 _MODEL = os.environ.get("HERMES_REMOTE_MODEL", "hermes-fast")
 _MODEL_FAST = os.environ.get("HERMES_FAST_MODEL", "hermes-fast")
@@ -66,6 +67,7 @@ def _is_configured() -> bool:
 # ---------------------------------------------------------------------------
 # HTTP helper — direct to hermes.ecoseek.org
 # ---------------------------------------------------------------------------
+
 
 def _hermes_request(
     path: str,
@@ -96,29 +98,35 @@ def _hermes_request(
 # Tool: hermes_status
 # ---------------------------------------------------------------------------
 
+
 def hermes_status(task_id: Optional[str] = None) -> str:
     """Check if Hermes remote is available and what tools/plugins are loaded."""
     try:
         health = _hermes_request("/health", timeout=15)
-        return json.dumps({
-            "success": True,
-            "status": health.get("status", "unknown"),
-            "platform": health.get("platform", "hermes-agent"),
-            "remote_url": _REMOTE_URL,
-            "configured": _is_configured(),
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "status": health.get("status", "unknown"),
+                "platform": health.get("platform", "hermes-agent"),
+                "remote_url": _REMOTE_URL,
+                "configured": _is_configured(),
+            }
+        )
     except Exception as exc:
-        return json.dumps({
-            "success": False,
-            "error": str(exc)[:300],
-            "remote_url": _REMOTE_URL,
-            "configured": _is_configured(),
-        })
+        return json.dumps(
+            {
+                "success": False,
+                "error": str(exc)[:300],
+                "remote_url": _REMOTE_URL,
+                "configured": _is_configured(),
+            }
+        )
 
 
 # ---------------------------------------------------------------------------
 # Tool: classify_prompt — complexity classifier
 # ---------------------------------------------------------------------------
+
 
 def classify_prompt_tool(prompt: str, task_id: Optional[str] = None) -> str:
     """Classify a prompt's complexity and recommend a response mode.
@@ -126,6 +134,7 @@ def classify_prompt_tool(prompt: str, task_id: Optional[str] = None) -> str:
     Returns the classification result with mode, score, and reasons.
     """
     from .classifier import classify_complexity
+
     result = classify_complexity(prompt)
     response = {
         "success": True,
@@ -163,15 +172,15 @@ _REASONING_MODE_RE = __import__("re").compile(
 
 # Map frontend reasoning toggle to DiDAL modes
 _REASONING_MODE_MAP = {
-    "fast": "direct",           # skip DiDAL, quick answer via hermes-fast
-    "deep": "didal_literature", # force full protocol + evidence retrieval
+    "fast": "direct",  # skip DiDAL, quick answer via hermes-fast
+    "deep": "didal_literature",  # force full protocol + evidence retrieval
     # "auto" → let classifier decide (no override)
 }
 
 # Map frontend reasoning toggle to Hermes model aliases
 _REASONING_MODEL_MAP = {
-    "fast": _MODEL_FAST,         # hermes-fast: bypass agent loop, sub-second TTFT
-    "deep": _MODEL_REASONER,     # hermes-reasoner: bypass + thinking mode
+    "fast": _MODEL_FAST,  # hermes-fast: bypass agent loop, sub-second TTFT
+    "deep": _MODEL_REASONER,  # hermes-reasoner: bypass + thinking mode
     # "auto" / None → _MODEL_FAST (each stage picks its own model)
 }
 
@@ -202,7 +211,7 @@ def didal_protocol_tool(
     m = _REASONING_MODE_RE.match(prompt)
     if m:
         frontend_mode = m.group(1).lower()
-        clean_prompt = prompt[m.end():]
+        clean_prompt = prompt[m.end() :]
         logger.info("reasoning_mode override from frontend: %s", frontend_mode)
 
     # Priority: explicit mode param > frontend toggle > classifier auto
@@ -210,9 +219,12 @@ def didal_protocol_tool(
 
     # Select Hermes model based on reasoning mode
     # In auto mode, pass None so each protocol stage picks its optimal model
-    effective_model = _REASONING_MODEL_MAP.get(frontend_mode or "") if frontend_mode else None
+    effective_model = (
+        _REASONING_MODEL_MAP.get(frontend_mode or "") if frontend_mode else None
+    )
 
     from .protocol import run_didal_protocol
+
     return run_didal_protocol(
         prompt=clean_prompt,
         force_mode=effective_mode or None,
@@ -225,6 +237,7 @@ def didal_protocol_tool(
 # ---------------------------------------------------------------------------
 # Tool: escalate_remote — one-shot delegation
 # ---------------------------------------------------------------------------
+
 
 def escalate_remote(
     task: str,
@@ -244,14 +257,16 @@ def escalate_remote(
         "normal" | "high" (shorter timeout) | "background" (longer timeout).
     """
     if not _is_configured():
-        return json.dumps({
-            "success": False,
-            "error": "hermes_not_configured",
-            "message": (
-                "Remote escalation requires HERMES_ECOSEEK_API_KEY. "
-                "Set it in ~/.hermes/.env or pass via Docker env."
-            ),
-        })
+        return json.dumps(
+            {
+                "success": False,
+                "error": "hermes_not_configured",
+                "message": (
+                    "Remote escalation requires HERMES_ECOSEEK_API_KEY. "
+                    "Set it in ~/.hermes/.env or pass via Docker env."
+                ),
+            }
+        )
 
     messages = []
     if context:
@@ -273,11 +288,13 @@ def escalate_remote(
 
         choices = data.get("choices", [])
         if not choices:
-            return json.dumps({
-                "success": False,
-                "error": "empty_response",
-                "message": "Hermes Beta returned no choices.",
-            })
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "empty_response",
+                    "message": "Hermes Beta returned no choices.",
+                }
+            )
 
         content = choices[0].get("message", {}).get("content", "")
         model_used = data.get("model", _MODEL)
@@ -285,16 +302,20 @@ def escalate_remote(
 
         logger.info(
             "escalate_remote → %s: model=%s tokens=%s",
-            _REMOTE_URL, model_used, usage.get("total_tokens", "?"),
+            _REMOTE_URL,
+            model_used,
+            usage.get("total_tokens", "?"),
         )
 
-        return json.dumps({
-            "success": True,
-            "remote_response": content,
-            "model": model_used,
-            "usage": usage,
-            "source": "hermes.ecoseek.org",
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "remote_response": content,
+                "model": model_used,
+                "usage": usage,
+                "source": "hermes.ecoseek.org",
+            }
+        )
 
     except urllib.error.HTTPError as exc:
         err = ""
@@ -303,26 +324,32 @@ def escalate_remote(
         except Exception:
             pass
         logger.warning("escalate_remote HTTP %s: %s", exc.code, err[:200])
-        return json.dumps({
-            "success": False,
-            "error": f"http_{exc.code}",
-            "message": f"Hermes Beta returned HTTP {exc.code}.",
-            "detail": err[:500],
-        })
+        return json.dumps(
+            {
+                "success": False,
+                "error": f"http_{exc.code}",
+                "message": f"Hermes Beta returned HTTP {exc.code}.",
+                "detail": err[:500],
+            }
+        )
     except urllib.error.URLError as exc:
         logger.warning("escalate_remote URL error: %s", exc.reason)
-        return json.dumps({
-            "success": False,
-            "error": "connection_error",
-            "message": f"Cannot reach Hermes remote: {exc.reason}",
-        })
+        return json.dumps(
+            {
+                "success": False,
+                "error": "connection_error",
+                "message": f"Cannot reach Hermes remote: {exc.reason}",
+            }
+        )
     except Exception as exc:
         logger.exception("escalate_remote unexpected error")
-        return json.dumps({
-            "success": False,
-            "error": "unexpected_error",
-            "message": str(exc)[:300],
-        })
+        return json.dumps(
+            {
+                "success": False,
+                "error": "unexpected_error",
+                "message": str(exc)[:300],
+            }
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -332,7 +359,9 @@ def escalate_remote(
 MESSAGE_TYPES = ("plan", "code", "execution_result", "critique", "final")
 
 
-def _make_msg(sender: str, msg_type: str, content: str, task_id: str, turn: int) -> dict:
+def _make_msg(
+    sender: str, msg_type: str, content: str, task_id: str, turn: int
+) -> dict:
     return {
         "from": sender,
         "type": msg_type,
@@ -347,7 +376,8 @@ def _make_msg(sender: str, msg_type: str, content: str, task_id: str, turn: int)
 
 def _detect_stuck(history: list[dict]) -> bool:
     errors = [
-        m for m in history
+        m
+        for m in history
         if m.get("type") in ("execution_result", "critique")
         and "error" in m.get("content", "").lower()
     ]
@@ -379,6 +409,7 @@ Respond with a JSON object: {"type": "execution_result|critique|final", "content
 # Tool: dialectical_exchange — structured Alpha↔Beta debate (legacy)
 # ---------------------------------------------------------------------------
 
+
 def dialectical_exchange(
     task: str,
     plan: str = "",
@@ -397,14 +428,16 @@ def dialectical_exchange(
         Max turns before stopping (default: DIDAL_MAX_TURNS env or 12).
     """
     if not _is_configured():
-        return json.dumps({
-            "success": False,
-            "error": "hermes_not_configured",
-            "message": (
-                "DiDAL requires HERMES_ECOSEEK_API_KEY to reach Hermes Beta. "
-                "Set it in ~/.hermes/.env or pass via Docker env."
-            ),
-        })
+        return json.dumps(
+            {
+                "success": False,
+                "error": "hermes_not_configured",
+                "message": (
+                    "DiDAL requires HERMES_ECOSEEK_API_KEY to reach Hermes Beta. "
+                    "Set it in ~/.hermes/.env or pass via Docker env."
+                ),
+            }
+        )
 
     effective_max = max_turns if max_turns > 0 else _MAX_TURNS
     dialogue_id = task_id or str(uuid.uuid4())[:8]
@@ -433,16 +466,22 @@ def dialectical_exchange(
                 "/v1/chat/completions",
                 payload={"model": _MODEL, "messages": api_messages},
             )
-            beta_content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            beta_content = (
+                data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            )
             beta_model = data.get("model", _MODEL)
             beta_usage = data.get("usage", {})
         except Exception as exc:
             logger.warning("didal[%s] beta error turn %d: %s", dialogue_id, turn, exc)
-            history.append(_make_msg(
-                "beta", "execution_result",
-                f"Error communicating with Beta: {exc}",
-                dialogue_id, turn,
-            ))
+            history.append(
+                _make_msg(
+                    "beta",
+                    "execution_result",
+                    f"Error communicating with Beta: {exc}",
+                    dialogue_id,
+                    turn,
+                )
+            )
             turn += 1
             if _detect_stuck(history):
                 break
@@ -471,7 +510,13 @@ def dialectical_exchange(
         history.append(msg)
         turn += 1
 
-        logger.info("didal[%s] turn %d: beta %s (%d chars)", dialogue_id, turn, beta_type, len(beta_content))
+        logger.info(
+            "didal[%s] turn %d: beta %s (%d chars)",
+            dialogue_id,
+            turn,
+            beta_type,
+            len(beta_content),
+        )
 
         if beta_type == "final":
             break
@@ -482,21 +527,22 @@ def dialectical_exchange(
             break
 
     total_tokens = sum(
-        m.get("metadata", {}).get("usage", {}).get("total_tokens", 0)
-        for m in history
+        m.get("metadata", {}).get("usage", {}).get("total_tokens", 0) for m in history
     )
 
-    return json.dumps({
-        "success": final_result is not None,
-        "dialogue_id": dialogue_id,
-        "turns": turn,
-        "final_result": final_result,
-        "last_beta_response": history[-1]["content"] if history else "",
-        "history": history,
-        "total_tokens": total_tokens,
-        "stuck_loop": _detect_stuck(history),
-        "source": "hermes.ecoseek.org",
-    })
+    return json.dumps(
+        {
+            "success": final_result is not None,
+            "dialogue_id": dialogue_id,
+            "turns": turn,
+            "final_result": final_result,
+            "last_beta_response": history[-1]["content"] if history else "",
+            "history": history,
+            "total_tokens": total_tokens,
+            "stuck_loop": _detect_stuck(history),
+            "source": "hermes.ecoseek.org",
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -651,9 +697,11 @@ def upload_document_tool(
     """Ingest a PDF or text into the user's personal knowledge base."""
     if file_path:
         from .pdf_ingest import ingest_pdf
+
         result = ingest_pdf(file_path)
     elif text:
         from .pdf_ingest import ingest_text
+
         result = ingest_text(text, filename=title or "pasted_text.txt")
     else:
         result = {"success": False, "error": "Provide either file_path or text."}
@@ -662,6 +710,7 @@ def upload_document_tool(
     if result.get("success") and (title or authors):
         try:
             from .litdb import _connect
+
             with _connect() as conn:
                 doc_id = result.get("id")
                 if doc_id:
@@ -717,7 +766,12 @@ def literature_search_tool(
     task_id: Optional[str] = None,
 ) -> str:
     """Search local literature cache, user papers, and optionally APIs."""
-    from .litdb import search as litdb_search, get_stats, search_user_papers, get_user_paper_stats
+    from .litdb import (
+        search as litdb_search,
+        get_stats,
+        search_user_papers,
+        get_user_paper_stats,
+    )
 
     # Search user-uploaded documents first (highest priority)
     user_results = []
@@ -733,6 +787,7 @@ def literature_search_tool(
     if not results:
         try:
             from .retrieval import retrieve_literature
+
             lit = retrieve_literature(query=query, tier="A", max_per_source=3)
             results = litdb_search(query, limit=limit)
             if not results:
@@ -752,13 +807,16 @@ def literature_search_tool(
     except Exception:
         pass
 
-    return json.dumps({
-        "success": True,
-        "results": all_results[:limit],
-        "count": len(all_results[:limit]),
-        "user_papers_found": len(user_results),
-        "cache_stats": stats,
-    }, ensure_ascii=False)
+    return json.dumps(
+        {
+            "success": True,
+            "results": all_results[:limit],
+            "count": len(all_results[:limit]),
+            "user_papers_found": len(user_results),
+            "cache_stats": stats,
+        },
+        ensure_ascii=False,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -804,12 +862,38 @@ WEB_SEARCH_SCHEMA = {
 def _detect_search_type(query: str) -> str:
     """Auto-detect the best search type from the query."""
     lower = query.lower()
-    github_signals = ["github", "repo", "repository", "repositorio", "code", "codigo",
-                      "pull request", "pr ", "issue", "commit", "branch", "fork",
-                      "alrobles/", "git "]
-    scientific_signals = ["paper", "papers", "articulo", "species", "especie",
-                          "niche", "ecology", "ecologia", "sdm", "gbif", "phylo",
-                          "pubmed", "doi", "abstract"]
+    github_signals = [
+        "github",
+        "repo",
+        "repository",
+        "repositorio",
+        "code",
+        "codigo",
+        "pull request",
+        "pr ",
+        "issue",
+        "commit",
+        "branch",
+        "fork",
+        "alrobles/",
+        "git ",
+    ]
+    scientific_signals = [
+        "paper",
+        "papers",
+        "articulo",
+        "species",
+        "especie",
+        "niche",
+        "ecology",
+        "ecologia",
+        "sdm",
+        "gbif",
+        "phylo",
+        "pubmed",
+        "doi",
+        "abstract",
+    ]
     if any(s in lower for s in github_signals):
         return "github"
     if any(s in lower for s in scientific_signals):
@@ -822,28 +906,32 @@ def _search_github(query: str, limit: int = 5) -> list[dict]:
     results = []
 
     # Search repositories
-    repo_url = (
-        "https://api.github.com/search/repositories?"
-        + urllib.parse.urlencode({"q": query, "per_page": min(limit, 10), "sort": "best match"})
+    repo_url = "https://api.github.com/search/repositories?" + urllib.parse.urlencode(
+        {"q": query, "per_page": min(limit, 10), "sort": "best match"}
     )
     try:
-        req = urllib.request.Request(repo_url, headers={
-            "Accept": "application/vnd.github.v3+json",
-            "User-Agent": "EcoSeek-Emily/1.0",
-        })
+        req = urllib.request.Request(
+            repo_url,
+            headers={
+                "Accept": "application/vnd.github.v3+json",
+                "User-Agent": "EcoSeek-Emily/1.0",
+            },
+        )
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         for item in data.get("items", [])[:limit]:
-            results.append({
-                "type": "repository",
-                "name": item.get("full_name", ""),
-                "description": item.get("description", "") or "",
-                "url": item.get("html_url", ""),
-                "stars": item.get("stargazers_count", 0),
-                "language": item.get("language", ""),
-                "updated": item.get("updated_at", ""),
-                "topics": item.get("topics", []),
-            })
+            results.append(
+                {
+                    "type": "repository",
+                    "name": item.get("full_name", ""),
+                    "description": item.get("description", "") or "",
+                    "url": item.get("html_url", ""),
+                    "stars": item.get("stargazers_count", 0),
+                    "language": item.get("language", ""),
+                    "updated": item.get("updated_at", ""),
+                    "topics": item.get("topics", []),
+                }
+            )
     except Exception as exc:
         logger.warning("GitHub repo search failed: %s", exc)
 
@@ -854,38 +942,50 @@ def _search_github(query: str, limit: int = 5) -> list[dict]:
         repo_name = match.group(1)
         direct_url = f"https://api.github.com/repos/{repo_name}"
         try:
-            req = urllib.request.Request(direct_url, headers={
-                "Accept": "application/vnd.github.v3+json",
-                "User-Agent": "EcoSeek-Emily/1.0",
-            })
+            req = urllib.request.Request(
+                direct_url,
+                headers={
+                    "Accept": "application/vnd.github.v3+json",
+                    "User-Agent": "EcoSeek-Emily/1.0",
+                },
+            )
             with urllib.request.urlopen(req, timeout=10) as resp:
                 item = json.loads(resp.read().decode("utf-8"))
             readme_text = ""
             try:
                 readme_url = f"https://api.github.com/repos/{repo_name}/readme"
-                req2 = urllib.request.Request(readme_url, headers={
-                    "Accept": "application/vnd.github.v3+json",
-                    "User-Agent": "EcoSeek-Emily/1.0",
-                })
+                req2 = urllib.request.Request(
+                    readme_url,
+                    headers={
+                        "Accept": "application/vnd.github.v3+json",
+                        "User-Agent": "EcoSeek-Emily/1.0",
+                    },
+                )
                 with urllib.request.urlopen(req2, timeout=10) as resp2:
                     readme_data = json.loads(resp2.read().decode("utf-8"))
                 import base64
-                readme_text = base64.b64decode(readme_data.get("content", "")).decode("utf-8", errors="replace")[:2000]
+
+                readme_text = base64.b64decode(readme_data.get("content", "")).decode(
+                    "utf-8", errors="replace"
+                )[:2000]
             except Exception:
                 pass
-            results.insert(0, {
-                "type": "repository_detail",
-                "name": item.get("full_name", ""),
-                "description": item.get("description", "") or "",
-                "url": item.get("html_url", ""),
-                "stars": item.get("stargazers_count", 0),
-                "forks": item.get("forks_count", 0),
-                "language": item.get("language", ""),
-                "updated": item.get("updated_at", ""),
-                "topics": item.get("topics", []),
-                "license": (item.get("license") or {}).get("spdx_id", ""),
-                "readme_excerpt": readme_text[:1500] if readme_text else "",
-            })
+            results.insert(
+                0,
+                {
+                    "type": "repository_detail",
+                    "name": item.get("full_name", ""),
+                    "description": item.get("description", "") or "",
+                    "url": item.get("html_url", ""),
+                    "stars": item.get("stargazers_count", 0),
+                    "forks": item.get("forks_count", 0),
+                    "language": item.get("language", ""),
+                    "updated": item.get("updated_at", ""),
+                    "topics": item.get("topics", []),
+                    "license": (item.get("license") or {}).get("spdx_id", ""),
+                    "readme_excerpt": readme_text[:1500] if readme_text else "",
+                },
+            )
         except Exception as exc:
             logger.warning("GitHub direct repo fetch failed for %s: %s", repo_name, exc)
 
@@ -895,8 +995,11 @@ def _search_github(query: str, limit: int = 5) -> list[dict]:
 def _search_scientific(query: str, limit: int = 5) -> list[dict]:
     """Search scientific literature APIs (OpenAlex, Semantic Scholar, GBIF, Entrez)."""
     from .retrieval import retrieve_literature
+
     try:
-        lit = retrieve_literature(query=query, tier="A", max_per_source=max(2, limit // 3))
+        lit = retrieve_literature(
+            query=query, tier="A", max_per_source=max(2, limit // 3)
+        )
         sources = lit.get("sources", [])[:limit]
         return sources
     except Exception as exc:
@@ -915,12 +1018,18 @@ def _search_general_via_hermes(query: str, limit: int = 5) -> list[dict]:
             payload={
                 "model": _MODEL_FAST,
                 "messages": [
-                    {"role": "system", "content": (
-                        "You are a web search assistant. Search the web for the query and "
-                        "return results as a JSON array of objects with fields: "
-                        "title, url, snippet, source. Return ONLY the JSON array, no markdown."
-                    )},
-                    {"role": "user", "content": f"Search the web for: {query}\nReturn up to {limit} results."},
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a web search assistant. Search the web for the query and "
+                            "return results as a JSON array of objects with fields: "
+                            "title, url, snippet, source. Return ONLY the JSON array, no markdown."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Search the web for: {query}\nReturn up to {limit} results.",
+                    },
                 ],
             },
             timeout=30,
@@ -954,7 +1063,8 @@ def web_search_tool(
         results = _search_github(query, limit)
         if not results and _is_configured():
             results = _search_general_via_hermes(
-                f"Search GitHub for: {query}. Use gh CLI if available.", limit,
+                f"Search GitHub for: {query}. Use gh CLI if available.",
+                limit,
             )
             if results:
                 search_type = "github_via_hermes"
@@ -965,13 +1075,16 @@ def web_search_tool(
     else:
         results = _search_general_via_hermes(query, limit)
 
-    return json.dumps({
-        "success": True,
-        "search_type": search_type,
-        "query": query,
-        "results": results,
-        "count": len(results),
-    }, ensure_ascii=False)
+    return json.dumps(
+        {
+            "success": True,
+            "search_type": search_type,
+            "query": query,
+            "results": results,
+            "count": len(results),
+        },
+        ensure_ascii=False,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -979,13 +1092,30 @@ def web_search_tool(
 # ---------------------------------------------------------------------------
 
 _ECOAGENT_ACTIONS = (
-    "query_species", "query_papers", "compute_diversity", "compute_clusters",
-    "search_literature", "query_pubtator", "fit_sdm", "fit_maxent",
-    "evaluate_niche", "resolve_taxonomy", "resolve_worms", "query_cofid",
-    "validate_cofid", "extract_triplets", "build_knowledge_graph",
-    "query_graph_hosts", "query_graph_parasites", "query_gbif_literature",
-    "query_gbif_parquet", "compute_bioclim", "compute_effort_bias",
-    "classify_abstract", "predict_susceptibility", "compute_ecological_distance",
+    "query_species",
+    "query_papers",
+    "compute_diversity",
+    "compute_clusters",
+    "search_literature",
+    "query_pubtator",
+    "fit_sdm",
+    "fit_maxent",
+    "evaluate_niche",
+    "resolve_taxonomy",
+    "resolve_worms",
+    "query_cofid",
+    "validate_cofid",
+    "extract_triplets",
+    "build_knowledge_graph",
+    "query_graph_hosts",
+    "query_graph_parasites",
+    "query_gbif_literature",
+    "query_gbif_parquet",
+    "compute_bioclim",
+    "compute_effort_bias",
+    "classify_abstract",
+    "predict_susceptibility",
+    "compute_ecological_distance",
     "fit_geotax",
 )
 
@@ -1002,34 +1132,45 @@ def ecoagent_query_tool(
     cofid host-parasite interactions, and more.
     """
     if action not in _ECOAGENT_ACTIONS:
-        return json.dumps({
-            "success": False,
-            "error": "invalid_action",
-            "message": f"Unknown action: {action!r}. Available: {', '.join(_ECOAGENT_ACTIONS)}",
-        })
+        return json.dumps(
+            {
+                "success": False,
+                "error": "invalid_action",
+                "message": f"Unknown action: {action!r}. Available: {', '.join(_ECOAGENT_ACTIONS)}",
+            }
+        )
 
     if not _is_configured():
-        return json.dumps({
-            "success": False,
-            "error": "hermes_not_configured",
-            "message": "EcoAgent requires HERMES_ECOSEEK_API_KEY to reach reumanlab.",
-        })
+        return json.dumps(
+            {
+                "success": False,
+                "error": "hermes_not_configured",
+                "message": "EcoAgent requires HERMES_ECOSEEK_API_KEY to reach reumanlab.",
+            }
+        )
 
     from .retrieval import _hermes_eco_analyze
+
     result = _hermes_eco_analyze(action, {"args": params or {}})
 
     if result is None:
-        return json.dumps({
-            "success": False,
-            "error": "ecoagent_unreachable",
-            "message": "EcoAgent tool_server on reumanlab did not respond via Hermes.",
-        })
+        return json.dumps(
+            {
+                "success": False,
+                "error": "ecoagent_unreachable",
+                "message": "EcoAgent tool_server on reumanlab did not respond via Hermes.",
+            }
+        )
 
-    return json.dumps({
-        "success": True,
-        "action": action,
-        "result": result,
-    }, ensure_ascii=False, default=str)
+    return json.dumps(
+        {
+            "success": True,
+            "action": action,
+            "result": result,
+        },
+        ensure_ascii=False,
+        default=str,
+    )
 
 
 ECOAGENT_QUERY_SCHEMA = {
@@ -1058,12 +1199,12 @@ ECOAGENT_QUERY_SCHEMA = {
                 "type": "object",
                 "description": (
                     "Parameters for the action. Examples:\n"
-                    "  query_species: {\"query\": \"Panthera tigris\", \"limit\": 10}\n"
-                    "  resolve_taxonomy: {\"name\": \"Quercus robur\"}\n"
-                    "  query_gbif_literature: {\"query\": \"species distribution modeling\", \"limit\": 5}\n"
-                    "  query_cofid: {\"query\": \"Mammalia\", \"limit\": 10}\n"
-                    "  fit_sdm: {\"species\": \"Panthera onca\", \"method\": \"maxent\"}\n"
-                    "  compute_diversity: {\"community_matrix\": [[1,2],[3,4]], \"index\": \"shannon\"}"
+                    '  query_species: {"query": "Panthera tigris", "limit": 10}\n'
+                    '  resolve_taxonomy: {"name": "Quercus robur"}\n'
+                    '  query_gbif_literature: {"query": "species distribution modeling", "limit": 5}\n'
+                    '  query_cofid: {"query": "Mammalia", "limit": 10}\n'
+                    '  fit_sdm: {"species": "Panthera onca", "method": "maxent"}\n'
+                    '  compute_diversity: {"community_matrix": [[1,2],[3,4]], "index": "shannon"}'
                 ),
             },
         },
@@ -1124,17 +1265,20 @@ def classify_literature_tool(
 
     n_relevant = sum(1 for r in results if r["relevant"])
 
-    return json.dumps({
-        "success": True,
-        "results": results,
-        "summary": {
-            "total": len(results),
-            "relevant": n_relevant,
-            "irrelevant": len(results) - n_relevant,
-            "domain": domain,
-            "domain_description": AVAILABLE_DOMAINS.get(domain, ""),
+    return json.dumps(
+        {
+            "success": True,
+            "results": results,
+            "summary": {
+                "total": len(results),
+                "relevant": n_relevant,
+                "irrelevant": len(results) - n_relevant,
+                "domain": domain,
+                "domain_description": AVAILABLE_DOMAINS.get(domain, ""),
+            },
         },
-    }, ensure_ascii=False)
+        ensure_ascii=False,
+    )
 
 
 TRAIN_LACS_MODEL_SCHEMA = {
@@ -1267,6 +1411,7 @@ def upload_artifact_tool(
 ) -> str:
     """Upload a large file from the cluster to GitHub artifacts repo."""
     from .artifacts import upload_artifact_via_hermes
+
     result = upload_artifact_via_hermes(
         local_path=cluster_path,
         artifact_name=artifact_name,
@@ -1373,6 +1518,7 @@ RUN_NICHE_MODEL_SCHEMA = {
 # ---------------------------------------------------------------------------
 # register(ctx) — Plugin system entry point
 # ---------------------------------------------------------------------------
+
 
 def register(ctx) -> None:
     """Register all EcoSeek DiDAL tools."""
@@ -1487,7 +1633,10 @@ def register(ctx) -> None:
 
     # R Workspace tools (available when r-workspace container is running)
     from .r_executor import (
-        execute_r_code, list_r_packages, r_workspace_status, run_niche_model,
+        execute_r_code,
+        list_r_packages,
+        r_workspace_status,
+        run_niche_model,
     )
 
     ctx.register_tool(
@@ -1528,7 +1677,10 @@ def register(ctx) -> None:
             num_starts=args.get("num_starts", 20),
             iqr_factor=args.get("iqr_factor", 1.5),
             ecoregion_pct=args.get("ecoregion_pct", 0.05),
-            bioclim_vars=args.get("bioclim_vars", "bio01,bio02,bio03,bio04,bio05,bio06,bio07,bio08,bio09,bio10,bio11,bio12,bio13,bio14,bio15,bio16,bio17,bio18,bio19"),
+            bioclim_vars=args.get(
+                "bioclim_vars",
+                "bio01,bio02,bio03,bio04,bio05,bio06,bio07,bio08,bio09,bio10,bio11,bio12,bio13,bio14,bio15,bio16,bio17,bio18,bio19",
+            ),
             use_gbif_api=args.get("use_gbif_api", False),
             task_id=kw.get("task_id"),
         ),
@@ -1577,7 +1729,9 @@ def register(ctx) -> None:
     n = 15 if _is_configured() else 10
     logger.info(
         "ecoseek plugin registered: %d tools, remote=%s configured=%s didal=v2 ecoagent=true r_workspace=true niche=true pdf=true artifacts=true lacs=true",
-        n, _REMOTE_URL, _is_configured(),
+        n,
+        _REMOTE_URL,
+        _is_configured(),
     )
 
 

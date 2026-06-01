@@ -1,0 +1,75 @@
+#!/bin/bash
+#SBATCH --job-name=niche-pipeline
+#SBATCH --partition=sixhour
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=32G
+#SBATCH --time=02:00:00
+#SBATCH --output=niche-output-%j.log
+#
+# Niche modeling pipeline via Apptainer + geospatial SIF
+#
+# Usage:
+#   sbatch run_niche_hpc.job "Panthera onca"
+#   sbatch run_niche_hpc.job "Quercus robur" "--num_starts 50"
+#
+# The species name is passed as the first argument.
+# Additional CLI flags can be passed as the second argument.
+
+set -euo pipefail
+
+SPECIES="${1:?Usage: sbatch run_niche_hpc.job \"Species name\" [\"extra args\"]}"
+EXTRA_ARGS="${2:-}"
+
+# Paths
+SIF="/home/a474r867/geospatial-rserver/geospatial_latest.sif"
+R_LIBS_USER="/home/a474r867/R/library"
+CHELSA_DIR="/home/a474r867/work/chelsa_bioclim"
+ECOREGIONS="/home/a474r867/work/ecoregions"
+GBIF_PARQUET="/home/a474r867/work/gbifdata/data/work/gbifdata/occurrence/2025-06-01/occurrence.parquet"
+
+# Use SLURM_SUBMIT_DIR for the script location (not BASH_SOURCE)
+if [ -n "${SLURM_SUBMIT_DIR:-}" ]; then
+    SCRIPT_DIR="${SLURM_SUBMIT_DIR}"
+else
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+
+PIPELINE_SCRIPT="${SCRIPT_DIR}/niche_pipeline.R"
+SPECIES_CLEAN=$(echo "${SPECIES}" | tr ' ' '_' | tr -cd 'a-zA-Z0-9_')
+OUTPUT_DIR="/home/a474r867/work/niche_output/${SPECIES_CLEAN}"
+
+mkdir -p "${R_LIBS_USER}" "${OUTPUT_DIR}"
+
+echo "=== Niche Pipeline HPC Job ==="
+echo "Species: ${SPECIES}"
+echo "Job ID: ${SLURM_JOB_ID:-local}"
+echo "Node: $(hostname)"
+echo "CPUs: ${SLURM_CPUS_PER_TASK:-16}"
+echo "Output: ${OUTPUT_DIR}"
+echo "SIF: ${SIF}"
+echo ""
+
+apptainer exec \
+  --cleanenv \
+  --bind "${R_LIBS_USER}:/usr/local/lib/R/site-library" \
+  --bind "${CHELSA_DIR}:${CHELSA_DIR}:ro" \
+  --bind "${ECOREGIONS}:${ECOREGIONS}:ro" \
+  --bind "${GBIF_PARQUET}:${GBIF_PARQUET}:ro" \
+  --bind "${OUTPUT_DIR}:${OUTPUT_DIR}" \
+  --bind "${SCRIPT_DIR}:${SCRIPT_DIR}:ro" \
+  --bind "/tmp:/tmp" \
+  "${SIF}" \
+  Rscript "${PIPELINE_SCRIPT}" \
+    --species "${SPECIES}" \
+    --chelsa_dir "${CHELSA_DIR}" \
+    --ecoregions "${ECOREGIONS}" \
+    --gbif_parquet "${GBIF_PARQUET}" \
+    --output_dir "${OUTPUT_DIR}" \
+    ${EXTRA_ARGS}
+
+echo ""
+echo "=== Job complete ==="
+echo "Output files:"
+ls -la "${OUTPUT_DIR}/"
