@@ -119,6 +119,10 @@ if [ -n "${API_SERVER_CORS_ORIGINS:-}" ]; then
     echo "API_SERVER_CORS_ORIGINS=${API_SERVER_CORS_ORIGINS}" >> "$ENV_FILE"
 fi
 
+# Emily is a public-facing deployment — allow all users.
+# Auth is handled at the API level via API_SERVER_KEY.
+echo "GATEWAY_ALLOW_ALL_USERS=true" >> "$ENV_FILE"
+
 # Validate: at least one LLM backend must be configured
 if [ -z "${DEEPSEEK_API_KEY:-}" ] && [ -z "${OLLAMA_BASE_URL:-}" ] && [ -z "${ECOCODER_URL:-}" ]; then
     echo "[emily] WARNING: No LLM backend configured!"
