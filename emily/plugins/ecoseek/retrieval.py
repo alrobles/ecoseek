@@ -55,6 +55,11 @@ _HERMES_REMOTE_URL = os.environ.get(
 _HERMES_API_KEY = os.environ.get("HERMES_ECOSEEK_API_KEY", "")
 _ECOAGENT_TIMEOUT = int(os.environ.get("ECOAGENT_RETRIEVAL_TIMEOUT", "30"))
 
+# CORE API — world's largest open access aggregator (57M+ full texts)
+_CORE_API_KEY = os.environ.get("CORE_API_KEY", "")
+_CORE_ENABLED = os.environ.get("CORE_ENABLED", "true").lower() in ("true", "1", "yes")
+_CORE_TIMEOUT = int(os.environ.get("CORE_RETRIEVAL_TIMEOUT", "15"))
+
 # ---------------------------------------------------------------------------
 # Normalized evidence schema
 # ---------------------------------------------------------------------------
@@ -463,6 +468,65 @@ def search_entrez(query: str, max_results: int = 5) -> list[Evidence]:
         )
 
     return results
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CORE API — full-text open access papers (57M+ full texts)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _search_core(query: str, limit: int = 10) -> list[Evidence]:
+    """Search CORE for open access papers with full text."""
+    if not _CORE_ENABLED:
+        return []
+
+    params = urllib.parse.urlencode({
+        "q": f"{query} AND _exists_:fullText",
+        "limit": limit,
+    })
+    url = f"https://api.core.ac.uk/v3/search/works?{params}"
+
+    headers = {"Accept": "application/json"}
+    if _CORE_API_KEY:
+        headers["Authorization"] = f"Bearer {_CORE_API_KEY}"
+
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        resp = urllib.request.urlopen(req, timeout=_CORE_TIMEOUT)
+        data = json.loads(resp.read())
+    except Exception as exc:
+        logger.warning(f"CORE search failed: {exc}")
+        return []
+
+    results = []
+    for hit in data.get("results", []):
+        title = (hit.get("title") or "").strip()
+        if len(title) < 5:
+            continue
+        authors_list = hit.get("authors") or []
+        first = authors_list[0].get("name", "") if authors_list else ""
+        authors_str = f"{first} et al." if len(authors_list) > 1 else first
+        doi = hit.get("doi") or ""
+        download_url = hit.get("downloadUrl") or ""
+        url_source = hit.get("sourceUrl") or ""
+        year = hit.get("yearPublished")
+        abstract = (hit.get("abstract") or "")[:500]
+
+        results.append(Evidence(
+            source_type="paper",
+            title=title,
+            authors=authors_str,
+            year=year,
+            url=download_url or url_source,
+            doi=doi,
+            abstract=abstract,
+            claim_used_for="",
+            confidence=0.85 if download_url else 0.75,
+            provider="core",
+        ))
+
+    logger.info(f"CORE: {len(results)} results for '{query[:60]}'")
+    return results
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -934,7 +998,11 @@ def retrieve_literature(
             search_tasks.append(("gbif", search_gbif_literature, query, max_per_source))
         search_tasks.append(("entrez", search_entrez, query, max_per_source))
 
-    # Source 5: EcoAgent RAG (via Hermes)
+    # Source 5: CORE — full-text open access papers (57M+)
+    if _CORE_ENABLED:
+        search_tasks.append(("core", search_core, query, max_per_source))
+
+    # Source 6: EcoAgent RAG (via Hermes)
     if _ecoagent_available():
         search_tasks.append(
             ("ecoagent", search_ecoagent_literature, query, max_per_source)
