@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { MathJax } from "better-react-mathjax";
 import "./App.css";
 import { ThemeToggle } from "./components/ThemeToggle";
@@ -547,7 +548,11 @@ function App() {
                     <div className="message-content">
                       <MathJax>
                         <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
                           components={{
+                            table({ children }) {
+                              return <div className="output-table-wrap"><table>{children}</table></div>;
+                            },
                             code({ node, inline, className, children, ...props }) {
                               if (inline) {
                                 return <code className="inline-code" {...props}>{children}</code>;
@@ -588,7 +593,11 @@ function App() {
                     <div className="message-content">
                       <MathJax>
                         <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
                           components={{
+                            table({ children }) {
+                              return <div className="output-table-wrap"><table>{children}</table></div>;
+                            },
                             code({ node, inline, className, children, ...props }) {
                               if (inline) {
                                 return <code className="inline-code" {...props}>{children}</code>;
