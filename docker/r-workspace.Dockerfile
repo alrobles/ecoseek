@@ -56,7 +56,7 @@ COPY r-workspace/server.py /opt/r-workspace/server.py
 
 EXPOSE 8787
 
-HEALTHCHECK --interval=15s --timeout=5s --retries=3 --start_period=10s \
+HEALTHCHECK --interval=15s --timeout=5s --retries=3 --start-period=10s \
     CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8787/health')" || exit 1
 
 CMD ["python3", "/opt/r-workspace/server.py"]
