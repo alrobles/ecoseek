@@ -1,10 +1,10 @@
 import React, { useState, useCallback } from "react";
 
 /**
- * LiteraturePanel — GBIF literature search powered by Meilisearch.
+ * LiteraturePanel — GBIF literature search with Quick + Smart mode.
  * 
- * Searches 62,000 ecological papers in <50ms with typo-tolerant matching.
- * Results include title, abstract, year, and keywords.
+ * Quick: Meilisearch keyword search (<50ms, 62K papers)
+ * Smart: LLM query expansion + semantic re-ranking (5-10s)
  * "Cite in chat" injects the paper into the chat input for Emily to use.
  */
 export function LiteraturePanel({ onCitePaper, isLocalEmily }) {
@@ -13,22 +13,25 @@ export function LiteraturePanel({ onCitePaper, isLocalEmily }) {
   const [totalHits, setTotalHits] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [searchMode, setSearchMode] = useState("quick");
   const [filters, setFilters] = useState({ hasAbstract: false, minYear: 0 });
 
-  const doSearch = useCallback(async () => {
+  const doSearch = useCallback(async (mode) => {
     if (!query.trim()) return;
     setLoading(true);
     setError(null);
+    setSearchMode(mode);
 
+    const endpoint = mode === "smart" ? "/v1/smart-search" : "/v1/search";
     const body = {
       q: query,
-      limit: 20,
+      limit: mode === "smart" ? 10 : 20,
       filter_has_abstract: filters.hasAbstract,
       min_year: filters.minYear || 0,
     };
 
     try {
-      const resp = await fetch("/v1/search", {
+      const resp = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -55,7 +58,7 @@ export function LiteraturePanel({ onCitePaper, isLocalEmily }) {
   }, [query, filters]);
 
   const handleKeyDown = (e) => {
-    if (e.key === "Enter") doSearch();
+    if (e.key === "Enter") doSearch(searchMode);
   };
 
   const handleCite = (paper) => {
@@ -71,7 +74,8 @@ export function LiteraturePanel({ onCitePaper, isLocalEmily }) {
           <span role="img" aria-label="books">📚</span> GBIF Literature
         </h3>
         <p className="literature-subtitle">
-          62,000 ecological papers • Instant search
+          62,000 ecological papers
+          {searchMode === "smart" && " • AI-powered"}
         </p>
       </div>
 
@@ -86,11 +90,22 @@ export function LiteraturePanel({ onCitePaper, isLocalEmily }) {
             onKeyDown={handleKeyDown}
           />
           <button
-            className="search-btn"
-            onClick={doSearch}
+            className={`search-btn quick-btn ${searchMode === "quick" ? "active-mode" : ""}`}
+            onClick={() => doSearch("quick")}
             disabled={loading || !query.trim()}
+            title="Quick search — keyword-based, instant results"
           >
-            {loading ? "..." : "🔍"}
+            <span className="btn-icon">⚡</span>
+            <span className="btn-label">Quick</span>
+          </button>
+          <button
+            className={`search-btn smart-btn ${searchMode === "smart" ? "active-mode" : ""}`}
+            onClick={() => doSearch("smart")}
+            disabled={loading || !query.trim()}
+            title="Smart search — AI-powered semantic re-ranking"
+          >
+            <span className="btn-icon">🧠</span>
+            <span className="btn-label">Smart</span>
           </button>
         </div>
 
@@ -114,12 +129,23 @@ export function LiteraturePanel({ onCitePaper, isLocalEmily }) {
             <option value="2020">2020+</option>
             <option value="2018">2018+</option>
           </select>
+          {searchMode === "smart" && (
+            <span className="smart-indicator">🧠 AI re-ranking active</span>
+          )}
         </div>
       </div>
 
+      {loading && (
+        <div className="literature-loading">
+          {searchMode === "smart" 
+            ? "🧠 Expanding query + re-ranking with AI..." 
+            : "⚡ Searching..."}
+        </div>
+      )}
+
       {error && <div className="literature-error">⚠️ {error}</div>}
 
-      {totalHits > 0 && (
+      {totalHits > 0 && !loading && (
         <div className="literature-count">
           {totalHits.toLocaleString()} results
         </div>
@@ -154,7 +180,7 @@ export function LiteraturePanel({ onCitePaper, isLocalEmily }) {
 
         {!loading && query && results.length === 0 && !error && (
           <div className="literature-empty">
-            No papers found. Try different keywords.
+            No papers found. Try different keywords or Smart search.
           </div>
         )}
       </div>
