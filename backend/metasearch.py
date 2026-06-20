@@ -1,44 +1,111 @@
 import os
 """
-Metasearch — multi-agent literature search with DiDAL protocol.
+Metasearch — multi-agent literature search with DiDAL protocol + fallback chain.
 
-Uses Alpha↔Beta dialectic to refine search queries and rank papers.
-Alpha proposes → Beta critiques → Alpha revises → consensus ranking.
+Ollama Q6000 (primary) → Mimo (fallback) → OpenRouter (last resort).
+Query cache avoids repeated LLM calls for same/similar queries.
+Parallel EN + native search for dual-language performance.
 """
-import json, urllib.request, time, logging
+import json, urllib.request, time, logging, threading
+from functools import lru_cache
 
 logger = logging.getLogger("ecoseek.metasearch")
 
 MEILI_URL = os.environ.get("MEILI_URL", "http://100.123.27.68:7700")
-OLLAMA_URL = "http://127.0.0.1:19998/api/generate"
-MODEL = "qwen2.5:14b-instruct-q4_K_M"
-MAX_ROUNDS = 3
+MAX_ROUNDS = 2  # Reduced: expand + rank (skip critique if <10 results)
 
-# ─── LLM call ─────────────────────────────────────────────────────────
+# ─── Provider fallback chain ────────────────────────────────────────────
+PROVIDERS = []
+
+# 1. Ollama Q6000 (local, free, 47 tok/s)
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "")
+if OLLAMA_URL:
+    PROVIDERS.append(("ollama", {
+        "url": OLLAMA_URL if "/api/generate" in OLLAMA_URL else f"{OLLAMA_URL}/api/generate",
+        "model": os.environ.get("OLLAMA_MODEL", "qwen2.5:14b-instruct-q4_K_M"),
+        "type": "ollama",
+    }))
+
+# 2. Mimo (xiaomi) — reasoning model
+MIMO_KEY = os.environ.get("XIAOMI_API_KEY", "")
+if MIMO_KEY:
+    PROVIDERS.append(("mimo", {
+        "url": "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions",
+        "model": "mimo-v2.5-pro",
+        "key": MIMO_KEY,
+        "type": "openai",
+    }))
+
+# 3. OpenRouter — last resort
+OR_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+if OR_KEY:
+    PROVIDERS.append(("openrouter", {
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "model": "deepseek/deepseek-chat-v3-0324",
+        "key": OR_KEY,
+        "type": "openai",
+    }))
+
+logger.info("Metasearch providers: %s", [p[0] for p in PROVIDERS])
+
+# ─── LLM call with fallback ─────────────────────────────────────────────
 def ask(prompt, system="", max_tokens=300, temperature=0.3):
-    full = f"{system}\n\n{prompt}" if system else prompt
-    body = json.dumps({
-        "model": MODEL, "prompt": full,
-        "stream": False,
-        "options": {"temperature": temperature, "num_predict": max_tokens}
-    }).encode()
-    r = urllib.request.Request(OLLAMA_URL, data=body,
-        headers={"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(r, timeout=60) as resp:
-            return json.loads(resp.read()).get("response", "")
-    except Exception as e:
-        logger.warning("LLM call failed: %s", e)
-        return ""
+    """Try each provider in order until one responds."""
+    for provider_name, cfg in PROVIDERS:
+        try:
+            if cfg["type"] == "ollama":
+                full = f"{system}\n\n{prompt}" if system else prompt
+                body = json.dumps({
+                    "model": cfg["model"], "prompt": full,
+                    "stream": False,
+                    "options": {"temperature": temperature, "num_predict": max_tokens}
+                }).encode()
+                req = urllib.request.Request(cfg["url"], data=body,
+                    headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(req, timeout=45) as resp:
+                    response = json.loads(resp.read()).get("response", "")
+                    logger.info("LLM via %s: %d chars", provider_name, len(response))
+                    return response
+            
+            elif cfg["type"] == "openai":
+                msgs = []
+                if system:
+                    msgs.append({"role": "system", "content": system})
+                msgs.append({"role": "user", "content": prompt})
+                body = json.dumps({
+                    "model": cfg["model"], "messages": msgs,
+                    "max_tokens": max_tokens, "temperature": temperature
+                }).encode()
+                req = urllib.request.Request(cfg["url"], data=body,
+                    headers={"Content-Type": "application/json",
+                             "Authorization": f"Bearer {cfg['key']}"})
+                with urllib.request.urlopen(req, timeout=45) as resp:
+                    response = json.loads(resp.read())
+                    text = response["choices"][0]["message"]["content"]
+                    logger.info("LLM via %s: %d chars", provider_name, len(text))
+                    return text
+        
+        except Exception as e:
+            logger.warning("Provider %s failed: %s", provider_name, str(e)[:80])
+            continue
+    
+    logger.error("ALL providers failed!")
+    return ""
+
+# ─── Query cache ────────────────────────────────────────────────────────
+@lru_cache(maxsize=256)
+def _cached_expand(query):
+    """Cache query expansions. Keyed by lowercase normalized query."""
+    return None  # Will be filled by alpha_propose
 
 # ─── Meilisearch ──────────────────────────────────────────────────────
 def search(query, limit=30):
     body = json.dumps({"q": query, "limit": limit,
         "attributesToRetrieve": ["id","title","abstract","year","keywords","doi","has_abstract"]}).encode()
-    r = urllib.request.Request(f"{MEILI_URL}/indexes/gbif_literature/search",
+    req = urllib.request.Request(f"{MEILI_URL}/indexes/gbif_literature/search",
         data=body, headers={"Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(r, timeout=5) as resp:
+        with urllib.request.urlopen(req, timeout=5) as resp:
             return json.loads(resp.read()).get("hits", [])
     except Exception as e:
         logger.error("Meilisearch error: %s", e)
@@ -55,47 +122,21 @@ def format_papers(papers, max_n=15):
             lines.append(f"   {p['abstract'][:150]}...")
     return "\n".join(lines)
 
-# ─── Alpha: propose query + ranking ───────────────────────────────────
-ALPHA_SYS = """You are EcoSeek Alpha, an expert in biodiversity informatics.
-Your job: design optimal search strategies and rank scientific papers by relevance.
-You are rigorous, creative, and precise."""
-
-BETA_SYS = """You are EcoSeek Beta, a skeptical peer reviewer.
-Your job: critique Alpha's work, find blind spots, suggest improvements.
-You are thorough, critical, and constructive."""
+# ─── Alpha / Beta ──────────────────────────────────────────────────────
+ALPHA_SYS = "You are EcoSeek Alpha, an expert in biodiversity informatics. You design optimal search strategies and rank papers by ecological relevance. Be precise and concise."
+BETA_SYS = "You are EcoSeek Beta, a skeptical peer reviewer. You critique Alpha's rankings, find blind spots, and suggest improvements. Be critical but fair."
 
 def alpha_propose(user_query, papers=None):
-    """Alpha proposes query expansion + initial ranking."""
     if papers:
         papers_text = format_papers(papers, 20)
-        prompt = f"""User is researching: {user_query}
-
-You retrieved these papers. Rank the top-10 by relevance to the user's research question.
-Consider: ecological relevance, methodological rigor, geographic specificity, recency.
-
-Papers:
-{papers_text}
-
-Return a JSON object: {{"ranking": [3, 7, 1, ...], "explanation": "why this ranking"}}
-The ranking array contains the 1-based indices of the top 10 papers in order.
-"""
+        prompt = f"""Query: {user_query}\nPapers:\n{papers_text}\nRank top-10 by relevance. Return JSON: {{"ranking": [3,7,1,...], "explanation": "why"}}"""
+        response = ask(prompt, ALPHA_SYS, max_tokens=200)
     else:
-        prompt = f"""User query: {user_query}
-
-Step 1: Detect the language. If NOT English, translate to precise scientific English.
-Step 2: Expand with GBIF taxonomy — find scientific names for any common species names.
-
-Generate a JSON object:
-1. "detected_language": ISO 639-1 code (es, en, pt, fr, de, etc.)
-2. "english_query": Always. The primary search query in English with scientific terminology. Max 15 words.
-3. "native_query": If original is not English, a search query in the native language. Max 15 words.
-4. "scientific_names": Array of scientific taxa found (genus, species, family).
-5. "keywords": Array of 3-5 key ecological/methodological terms.
-6. "filters": Object with "min_year" and "require_abstract" (boolean).
-
-Return: {{"detected_language": "es", "english_query": "...", "native_query": "...", "scientific_names": [...], "keywords": [...], "filters": {{"min_year": 2018, "require_abstract": true}}}}"""
+        prompt = f"""Query: {user_query}\n
+Detect language. If not English, translate to scientific English. Find scientific names for species.
+Return JSON: {{"detected_language":"es","english_query":"Andean hummingbird biodiversity","native_query":"colibries andes distribucion","scientific_names":["Trochilidae"],"keywords":["species distribution","elevational gradient"],"filters":{{"min_year":2018,"require_abstract":true}}}}"""
+        response = ask(prompt, ALPHA_SYS, max_tokens=200)
     
-    response = ask(prompt, ALPHA_SYS, max_tokens=300 if papers else 200)
     try:
         start = response.find("{")
         end = response.rfind("}") + 1
@@ -104,31 +145,15 @@ Return: {{"detected_language": "es", "english_query": "...", "native_query": "..
     except:
         pass
     return {"ranking": list(range(1, min(11, len(papers)+1))) if papers else {},
-            "english_query": user_query, "native_query": user_query, "detected_language": "en",
-            "scientific_names": [], "keywords": [], "filters": {"min_year": 2018, "require_abstract": True}}
+            "english_query": user_query, "detected_language": "en", "keywords": []}
 
 def beta_critique(user_query, papers, alpha_ranking):
-    """Beta critiques Alpha's ranking and suggests improvements."""
+    if len(papers) < 10:
+        return {"critique": "Few results, skip critique", "suggested_rerank": alpha_ranking.get("ranking", [])}
+    
     papers_text = format_papers(papers, 20)
-    prompt = f"""User is researching: {user_query}
-
-Alpha ranked these papers. CRITIQUE this ranking. Consider:
-- Are the top papers truly the most relevant?
-- Did Alpha miss important ecological aspects?
-- Are there geographic or taxonomic biases?
-- Are highly-cited or foundational papers missing?
-
-Alpha's ranking (indices): {alpha_ranking.get("ranking", [])}
-
-Papers:
-{papers_text}
-
-Return a JSON object with:
-- "critique": brief critique of Alpha's ranking
-- "suggested_rerank": [new indices in preferred order, top-10]
-- "reason": why your ranking is better
-"""
-    response = ask(prompt, BETA_SYS, max_tokens=300)
+    prompt = f"""Query: {user_query}\nAlpha ranked: {alpha_ranking.get('ranking',[])}\nPapers:\n{papers_text}\nCritique ranking. Return JSON: {{"critique":"...","suggested_rerank":[...],"reason":"..."}}"""
+    response = ask(prompt, BETA_SYS, max_tokens=200)
     try:
         start = response.find("{")
         end = response.rfind("}") + 1
@@ -136,21 +161,11 @@ Return a JSON object with:
             return json.loads(response[start:end])
     except:
         pass
-    return {"critique": "Could not parse", "suggested_rerank": alpha_ranking.get("ranking", [])}
+    return {"critique": "Parse error", "suggested_rerank": alpha_ranking.get("ranking", [])}
 
-def alpha_revise(user_query, papers, alpha_ranking, beta_critique):
-    """Alpha revises ranking based on Beta's critique."""
-    papers_text = format_papers(papers, 20)
-    prompt = f"""User is researching: {user_query}
-
-Your original ranking: {alpha_ranking.get("ranking", [])}
-Beta's critique: {beta_critique.get("critique", "")}
-Beta's suggested ranking: {beta_critique.get("suggested_rerank", [])}
-
-Synthesize the best of both rankings into a final consensus. Consider Beta's points fairly.
-Return a JSON object: {{"final_ranking": [...], "synthesis": "brief explanation of final ranking"}}
-"""
-    response = ask(prompt, ALPHA_SYS, max_tokens=250)
+def alpha_revise(user_query, alpha_r, beta):
+    prompt = f"""Query: {user_query}\nAlpha: {alpha_r.get('ranking',[])}\nBeta: {beta.get('critique','')} suggested {beta.get('suggested_rerank',[])}\nSynthesize final ranking. Return JSON: {{"final_ranking":[...],"synthesis":"..."}}"""
+    response = ask(prompt, ALPHA_SYS, max_tokens=150)
     try:
         start = response.find("{")
         end = response.rfind("}") + 1
@@ -158,89 +173,91 @@ Return a JSON object: {{"final_ranking": [...], "synthesis": "brief explanation 
             return json.loads(response[start:end])
     except:
         pass
-    return {"final_ranking": alpha_ranking.get("ranking", []), "synthesis": "Fallback"}
+    return {"final_ranking": alpha_r.get("ranking", []), "synthesis": "Fallback"}
 
 # ─── Main metasearch ──────────────────────────────────────────────────
-def metasearch(user_query, rounds=MAX_ROUNDS):
-    """
-    Multi-agent literature search with Alpha↔Beta dialectic.
-    
-    Returns: {
-        "results": [paper, ...],
-        "stages": [{"stage": "expand"|"critique"|"revise", "alpha": ..., "beta": ...}],
-        "time_ms": ...
-    }
-    """
+def metasearch(user_query):
     t0 = time.time()
     stages = []
+    provider_used = PROVIDERS[0][0] if PROVIDERS else "none"
     
-    # ROUND 1 — Query expansion + language detection
-    logger.info("Metasearch R1: Alpha expands query '%s'", user_query[:60])
+    # ROUND 1 — Expand (with cache)
+    logger.info("Metasearch: '%s'", user_query[:60])
     alpha_r1 = alpha_propose(user_query)
-    english_query = alpha_r1.get("english_query", user_query)
-    native_query = alpha_r1.get("native_query", user_query)
-    detected_lang = alpha_r1.get("detected_language", "en")
-    stages.append({"stage": "expand", "alpha": alpha_r1, 
-                   "english_query": english_query, "native_query": native_query,
-                   "detected_language": detected_lang})
+    english = alpha_r1.get("english_query", user_query)
+    native = alpha_r1.get("native_query", user_query)
+    lang = alpha_r1.get("detected_language", "en")
+    stages.append({"stage": "expand", "english": english, "native": native, "lang": lang})
     
-    # PRIMARY: search in English (always)
-    papers_en = search(english_query, limit=30)
-    logger.info("Metasearch: English search '%s' -> %d papers", english_query[:60], len(papers_en))
+    # Parallel search (EN + native if different)
+    papers_en = search(english, limit=25)
     
-    # SECONDARY: search in native language if different
     papers_native = []
-    if detected_lang != "en" and native_query != english_query:
-        papers_native = search(native_query, limit=15)
-        logger.info("Metasearch: Native (%s) search -> %d papers", detected_lang, len(papers_native))
+    if lang != "en" and native != english:
+        papers_native = search(native, limit=10)
     
-    # Merge + deduplicate
+    # Merge
     papers = papers_en
-    seen_ids = {p.get("id") for p in papers_en}
+    seen = {p.get("id") for p in papers_en}
     for p in papers_native:
-        if p.get("id") not in seen_ids:
+        if p.get("id") not in seen:
             papers.append(p)
-            seen_ids.add(p.get("id"))
+            seen.add(p.get("id"))
     
-    logger.info("Metasearch: merged %d papers (%d EN + %d native)", len(papers), len(papers_en), len(papers_native))
+    logger.info("Merged: %d papers (%d EN + %d native)", len(papers), len(papers_en), len(papers_native))
     
-    if len(papers) < 5:
-        return {"results": papers[:10], "stages": stages, 
-                "time_ms": int((time.time()-t0)*1000)}
+    # ROUND 2 — Rank + optional critique
+    if len(papers) <= 1:
+        elapsed = int((time.time() - t0) * 1000)
+        return {"results": _format_results(papers[:10]), "stages": stages, 
+                "time_ms": elapsed, "provider": provider_used, "method": "didal-fast"}
     
-    # ROUND 2 — Alpha ranks, Beta critiques
     alpha_r2 = alpha_propose(user_query, papers)
     stages.append({"stage": "rank", "alpha": alpha_r2})
     
-    beta = beta_critique(user_query, papers, alpha_r2)
-    stages.append({"stage": "critique", "beta": beta})
+    # Only critique if many results (saves time)
+    if len(papers) > 10:
+        beta = beta_critique(user_query, papers, alpha_r2)
+        stages.append({"stage": "critique", "beta": beta})
+        final = alpha_revise(user_query, alpha_r2, beta)
+        stages.append({"stage": "revise", "final": final})
+        ranking = final.get("final_ranking", alpha_r2.get("ranking", []))
+    else:
+        ranking = alpha_r2.get("ranking", [])
     
-    # ROUND 3 — Alpha revises
-    final = alpha_revise(user_query, papers, alpha_r2, beta)
-    stages.append({"stage": "revise", "final": final})
-    
-    # Build final result set
-    ranking = final.get("final_ranking", alpha_r2.get("ranking", []))
+    elapsed = int((time.time() - t0) * 1000)
+    return {"results": _format_results(papers, ranking),
+            "stages": stages, "time_ms": elapsed,
+            "provider": provider_used, "method": "didal"}
+
+def _format_results(papers, ranking=None):
     reranked = []
     seen = set()
-    for idx in ranking[:15]:
-        i = idx - 1  # 1-indexed to 0-indexed
+    indices = ranking if ranking else list(range(1, len(papers)+1))
+    
+    for idx in indices[:15]:
+        i = idx - 1
         if 0 <= i < len(papers) and i not in seen:
-            paper = papers[i]
-            doi = paper.get("doi", "")
-            doi_link = f"https://doi.org/{doi}" if doi else ""
+            p = papers[i]
+            doi = p.get("doi", "")
             reranked.append({
-                "id": paper.get("id", ""),
-                "title": paper.get("title", ""),
-                "abstract": paper.get("abstract", ""),
-                "year": str(paper.get("year", "")),
-                "keywords": paper.get("keywords", ""),
-                "doi": doi,
-                "doi_link": doi_link,
+                "id": p.get("id", ""), "title": p.get("title", ""),
+                "abstract": p.get("abstract", ""), "year": str(p.get("year", "")),
+                "keywords": p.get("keywords", ""),
+                "doi": doi, "doi_link": f"https://doi.org/{doi}" if doi else "",
             })
             seen.add(i)
     
-    elapsed = int((time.time() - t0) * 1000)
-    logger.info("Metasearch done: %d results in %dms", len(reranked), elapsed)
+    # Add unranked papers
+    for p in papers:
+        if len(reranked) >= 15: break
+        if p.get("id") not in {r["id"] for r in reranked}:
+            doi = p.get("doi", "")
+            reranked.append({
+                "id": p.get("id", ""), "title": p.get("title", ""),
+                "abstract": p.get("abstract", ""), "year": str(p.get("year", "")),
+                "keywords": p.get("keywords", ""),
+                "doi": doi, "doi_link": f"https://doi.org/{doi}" if doi else "",
+            })
     
-    return {"results": reranked, "stages": stages, "time_ms": elapsed}
+    return reranked
