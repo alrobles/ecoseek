@@ -130,16 +130,11 @@ def expand_query(user_query):
         logger.info("Cache hit for: %s", user_query[:40])
         return cached
     
-    prompt = f"""You are an expert in biodiversity informatics. Rewrite the following search query to find relevant ecological literature in English.
+    prompt = f"""Translate to English scientific search terms. Include geographic region. Output ONLY the query, nothing else.
 
 User query: {user_query}
 
-Generate:
-1. SCIENTIFIC_QUERY: A precise English query with scientific species names, ecological terms, and methodology keywords for searching GBIF-cited ecological papers.
-2. The query should mention specific taxa (scientific names), geographic regions, ecological processes, and analytical methods if relevant.
-3. Keep it concise (max 15 words).
-
-SCIENTIFIC_QUERY: """
+Query: """
     expanded = ask(prompt, max_tokens=200)
     # Extract just the query line
     for line in expanded.split("\n"):
@@ -155,9 +150,13 @@ def rerank_papers(user_query, papers):
     """Use LLM to score and re-rank papers based on relevance to user intent."""
     papers_text = ""
     for i, p in enumerate(papers[:20]):
+        abstract = p.get("abstract", "") or ""
         papers_text += f"{i+1}. [{p.get('year','?')}] {p['title'][:120]}\n"
+        if abstract:
+            papers_text += f"   {abstract[:150]}...\n"
     
-    prompt = f"""As an ecological literature expert, rank these papers by relevance to the query. Return ONLY a JSON array with indices of the top 10 most relevant papers.
+    prompt = f"""As an ecological literature expert, rank these papers by relevance to the query. CRITICAL: geographic match is the #1 priority. A paper about mammals in Colombia is NOT relevant if the query asks about mammals in Spain. Papers must match BOTH the topic AND the geographic region.
+Return ONLY a JSON array with indices of the top 10 most relevant papers.
 
 QUERY: {user_query}
 

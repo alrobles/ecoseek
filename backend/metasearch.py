@@ -159,19 +159,25 @@ def format_papers(papers, max_n=15):
     for i, p in enumerate(papers[:max_n]):
         kw = p.get("keywords","") or ""
         if len(kw) > 60: kw = kw[:57] + "..."
-        lines.append(f"{i+1}. [{p.get('year','?')}] {p['title'][:100]}")
+        abstract = p.get("abstract", "") or ""
+        lines.append(f"{i+1}. [{p.get('year','?')}] {p['title'][:120]}")
         if p.get("abstract"):
-            lines.append(f"   {p['abstract'][:150]}...")
+            lines.append(f"   {abstract[:200]}...")
     return "\n".join(lines)
 
 # ─── Alpha / Beta ──────────────────────────────────────────────────────
-ALPHA_SYS = "You are EcoSeek Alpha, an expert in biodiversity informatics. You design optimal search strategies and rank papers by ecological relevance. Be precise and concise."
+ALPHA_SYS = "You are EcoSeek Alpha, an expert in biodiversity informatics. CRITICAL RULES: 1) Output ONLY the requested JSON. No explanations, no thinking, no markdown. 2) Geographic match is #1 priority for ranking. 3) Be precise and concise."
 BETA_SYS = "You are EcoSeek Beta, a skeptical peer reviewer. You critique Alpha's rankings, find blind spots, and suggest improvements. Be critical but fair."
 
 def alpha_propose(user_query, papers=None):
     if papers:
         papers_text = format_papers(papers, 20)
-        prompt = f"""Query: {user_query}\nPapers:\n{papers_text}\nRank top-10 by relevance. Return JSON: {{"ranking": [3,7,1,...], "explanation": "why"}}"""
+        prompt = f"""Rank papers by relevance to query. Geographic match is #1 priority.
+
+Query: {user_query}
+{papers_text}
+
+Output ONLY JSON: {{"ranking": [3,7,1,...]}}"""
         response = ask(prompt, ALPHA_SYS, max_tokens=200)
     else:
         # Check cache first
@@ -179,10 +185,10 @@ def alpha_propose(user_query, papers=None):
         if cached:
             logger.info("Cache hit for query: %s", user_query[:40])
             return cached
-        prompt = f"""Query: {user_query}
+        prompt = f"""Translate this query to English scientific search terms. Include the geographic region. Output ONLY valid JSON, nothing else.
+Query: {user_query}
 
-Detect language. If not English, translate to scientific English. Find scientific names for species.
-Return JSON: {{"detected_language":"es","english_query":"Andean hummingbird biodiversity","native_query":"colibries andes distribucion","scientific_names":["Trochilidae"],"keywords":["species distribution","elevational gradient"],"filters":{{"min_year":2018,"require_abstract":true}}}}"""
+{{"detected_language":"es","english_query":"mammals biodiversity Spain Iberian Peninsula","native_query":"mamiferos España","geographic_context":"Spain","scientific_names":["Mammalia"],"keywords":["biodiversity"],"filters":{{}}}}"""
         response = ask(prompt, ALPHA_SYS, max_tokens=200)
     
     try:
