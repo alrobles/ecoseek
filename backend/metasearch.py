@@ -79,16 +79,22 @@ Return a JSON object: {{"ranking": [3, 7, 1, ...], "explanation": "why this rank
 The ranking array contains the 1-based indices of the top 10 papers in order.
 """
     else:
-        prompt = f"""User wants to research: {user_query}
+        prompt = f"""User query: {user_query}
 
-Generate a JSON object with:
-1. "expanded_query": A precise search query with scientific terminology, species names, ecological methods, and geographic terms. Must be in English. Max 15 words.
-2. "keywords": Array of 3-5 key scientific terms for keyword search.
-3. "filters": Object with "min_year" (suggest a minimum year for relevance) and "require_abstract" (boolean).
+Step 1: Detect the language. If NOT English, translate to precise scientific English.
+Step 2: Expand with GBIF taxonomy — find scientific names for any common species names.
 
-Return: {{"expanded_query": "...", "keywords": [...], "filters": {{"min_year": 2020, "require_abstract": true}}}}"""
+Generate a JSON object:
+1. "detected_language": ISO 639-1 code (es, en, pt, fr, de, etc.)
+2. "english_query": Always. The primary search query in English with scientific terminology. Max 15 words.
+3. "native_query": If original is not English, a search query in the native language. Max 15 words.
+4. "scientific_names": Array of scientific taxa found (genus, species, family).
+5. "keywords": Array of 3-5 key ecological/methodological terms.
+6. "filters": Object with "min_year" and "require_abstract" (boolean).
+
+Return: {{"detected_language": "es", "english_query": "...", "native_query": "...", "scientific_names": [...], "keywords": [...], "filters": {{"min_year": 2018, "require_abstract": true}}}}"""
     
-    response = ask(prompt, ALPHA_SYS, max_tokens=250 if papers else 150)
+    response = ask(prompt, ALPHA_SYS, max_tokens=300 if papers else 200)
     try:
         start = response.find("{")
         end = response.rfind("}") + 1
@@ -97,7 +103,8 @@ Return: {{"expanded_query": "...", "keywords": [...], "filters": {{"min_year": 2
     except:
         pass
     return {"ranking": list(range(1, min(11, len(papers)+1))) if papers else {},
-            "expanded_query": user_query, "keywords": []}
+            "english_query": user_query, "native_query": user_query, "detected_language": "en",
+            "scientific_names": [], "keywords": [], "filters": {"min_year": 2018, "require_abstract": True}}
 
 def beta_critique(user_query, papers, alpha_ranking):
     """Beta critiques Alpha's ranking and suggests improvements."""
@@ -166,15 +173,35 @@ def metasearch(user_query, rounds=MAX_ROUNDS):
     t0 = time.time()
     stages = []
     
-    # ROUND 1 — Query expansion
+    # ROUND 1 — Query expansion + language detection
     logger.info("Metasearch R1: Alpha expands query '%s'", user_query[:60])
     alpha_r1 = alpha_propose(user_query)
-    expanded = alpha_r1.get("expanded_query", user_query)
-    stages.append({"stage": "expand", "alpha": alpha_r1, "expanded_query": expanded})
+    english_query = alpha_r1.get("english_query", user_query)
+    native_query = alpha_r1.get("native_query", user_query)
+    detected_lang = alpha_r1.get("detected_language", "en")
+    stages.append({"stage": "expand", "alpha": alpha_r1, 
+                   "english_query": english_query, "native_query": native_query,
+                   "detected_language": detected_lang})
     
-    # Search with expanded query
-    papers = search(expanded, limit=30)
-    logger.info("Metasearch: Meilisearch returned %d papers", len(papers))
+    # PRIMARY: search in English (always)
+    papers_en = search(english_query, limit=30)
+    logger.info("Metasearch: English search '%s' -> %d papers", english_query[:60], len(papers_en))
+    
+    # SECONDARY: search in native language if different
+    papers_native = []
+    if detected_lang != "en" and native_query != english_query:
+        papers_native = search(native_query, limit=15)
+        logger.info("Metasearch: Native (%s) search -> %d papers", detected_lang, len(papers_native))
+    
+    # Merge + deduplicate
+    papers = papers_en
+    seen_ids = {p.get("id") for p in papers_en}
+    for p in papers_native:
+        if p.get("id") not in seen_ids:
+            papers.append(p)
+            seen_ids.add(p.get("id"))
+    
+    logger.info("Metasearch: merged %d papers (%d EN + %d native)", len(papers), len(papers_en), len(papers_native))
     
     if len(papers) < 5:
         return {"results": papers[:10], "stages": stages, 
@@ -198,13 +225,17 @@ def metasearch(user_query, rounds=MAX_ROUNDS):
     for idx in ranking[:15]:
         i = idx - 1  # 1-indexed to 0-indexed
         if 0 <= i < len(papers) and i not in seen:
+            paper = papers[i]
+            doi = paper.get("doi", "")
+            doi_link = f"https://doi.org/{doi}" if doi else ""
             reranked.append({
-                "id": papers[i].get("id", ""),
-                "title": papers[i].get("title", ""),
-                "abstract": papers[i].get("abstract", ""),
-                "year": str(papers[i].get("year", "")),
-                "keywords": papers[i].get("keywords", ""),
-                "doi": papers[i].get("doi", ""),
+                "id": paper.get("id", ""),
+                "title": paper.get("title", ""),
+                "abstract": paper.get("abstract", ""),
+                "year": str(paper.get("year", "")),
+                "keywords": paper.get("keywords", ""),
+                "doi": doi,
+                "doi_link": doi_link,
             })
             seen.add(i)
     
