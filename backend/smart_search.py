@@ -1,31 +1,131 @@
 """Smart Search — LLM-powered literature retrieval for ecoSeek.
-Uses Ollama Qwen2.5 14B for query expansion + semantic re-ranking.
+
+Uses provider fallback chain: Mimo mimo-v2.5 → Ollama → OpenRouter.
+Query expansion + semantic re-ranking for better results.
 """
-import json, urllib.request, sys, os
+import json, urllib.request, sys, os, logging
 
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://r22r35n01:56593/api/generate")
+logger = logging.getLogger("ecoseek.smart_search")
+
 MEILI_URL = os.environ.get("MEILI_URL", "http://alpha:7700")
-MODEL = os.environ.get("SMART_MODEL", "qwen2.5:14b-instruct-q4_K_M")
 
-def query_ollama(prompt, max_tokens=300):
-    body = json.dumps({
-        "model": MODEL,
-        "prompt": prompt,
-        "stream": False,
-        "options": {"temperature": 0.3, "num_predict": max_tokens}
-    }).encode()
-    req = urllib.request.Request(OLLAMA_URL, data=body, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        return json.loads(r.read())["response"]
+# ─── Provider fallback chain (same as metasearch) ──────────────────────
+PROVIDERS = []
 
+# 1. Mimo mimo-v2.5 (xiaomi) — fastest
+MIMO_KEY = os.environ.get("XIAOMI_API_KEY", "")
+if MIMO_KEY:
+    PROVIDERS.append(("mimo", {
+        "url": "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions",
+        "model": "mimo-v2.5",
+        "key": MIMO_KEY,
+        "type": "openai",
+    }))
+
+# 2. Ollama — fallback
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "")
+if OLLAMA_URL:
+    PROVIDERS.append(("ollama", {
+        "url": OLLAMA_URL if "/api/generate" in OLLAMA_URL else f"{OLLAMA_URL}/api/generate",
+        "model": os.environ.get("SMART_MODEL", "qwen2.5:14b-instruct-q4_K_M"),
+        "type": "ollama",
+    }))
+
+# 3. OpenRouter — last resort
+OR_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+if OR_KEY:
+    PROVIDERS.append(("openrouter", {
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "model": "deepseek/deepseek-chat-v3-0324",
+        "key": OR_KEY,
+        "type": "openai",
+    }))
+
+logger.info("Smart search providers: %s", [p[0] for p in PROVIDERS])
+
+# ─── LLM call with fallback ─────────────────────────────────────────────
+def ask(prompt, system="", max_tokens=300, temperature=0.3):
+    """Try each provider in order until one responds."""
+    for provider_name, cfg in PROVIDERS:
+        try:
+            if cfg["type"] == "ollama":
+                full = f"{system}\n\n{prompt}" if system else prompt
+                body = json.dumps({
+                    "model": cfg["model"], "prompt": full,
+                    "stream": False,
+                    "options": {"temperature": temperature, "num_predict": max_tokens}
+                }).encode()
+                req = urllib.request.Request(cfg["url"], data=body,
+                    headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    response = json.loads(resp.read()).get("response", "")
+                    logger.info("LLM via %s: %d chars", provider_name, len(response))
+                    return response
+            
+            elif cfg["type"] == "openai":
+                msgs = []
+                if system:
+                    msgs.append({"role": "system", "content": system})
+                msgs.append({"role": "user", "content": prompt})
+                body = json.dumps({
+                    "model": cfg["model"], "messages": msgs,
+                    "max_tokens": max_tokens, "temperature": temperature,
+                    "reasoning_effort": "low"
+                }).encode()
+                req = urllib.request.Request(cfg["url"], data=body,
+                    headers={"Content-Type": "application/json",
+                             "Authorization": f"Bearer {cfg['key']}"})
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    response = json.loads(resp.read())
+                    text = response["choices"][0]["message"]["content"]
+                    # Reasoning models may put output in reasoning_content
+                    if not text:
+                        text = response["choices"][0]["message"].get("reasoning_content", "")
+                    logger.info("LLM via %s: %d chars", provider_name, len(text))
+                    return text
+        
+        except Exception as e:
+            logger.warning("Provider %s failed: %s", provider_name, str(e)[:80])
+            continue
+    
+    logger.error("ALL providers failed!")
+    return ""
+
+# ─── Query cache ────────────────────────────────────────────────────────
+_expand_cache = {}
+
+def _cache_get(query):
+    key = query.strip().lower()
+    return _expand_cache.get(key)
+
+def _cache_set(query, result):
+    key = query.strip().lower()
+    if len(_expand_cache) >= 512:
+        oldest = next(iter(_expand_cache))
+        del _expand_cache[oldest]
+    _expand_cache[key] = result
+
+# ─── Meilisearch ──────────────────────────────────────────────────────
 def search_meili(query, limit=50):
-    body = json.dumps({"q": query, "limit": limit, "attributesToRetrieve": ["id","title","abstract","year","keywords","doi","has_abstract"]}).encode()
-    req = urllib.request.Request(f"{MEILI_URL}/indexes/gbif_literature/search", data=body, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=10) as r:
-        return json.loads(r.read())
+    body = json.dumps({"q": query, "limit": limit,
+        "attributesToRetrieve": ["id","title","abstract","year","keywords","doi","has_abstract"]}).encode()
+    req = urllib.request.Request(f"{MEILI_URL}/indexes/gbif_literature/search",
+        data=body, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read())
+    except Exception as e:
+        logger.error("Meilisearch error: %s", e)
+        return {"hits": []}
 
 def expand_query(user_query):
     """Use LLM to rewrite the user query with scientific terminology."""
+    # Check cache first
+    cached = _cache_get(user_query)
+    if cached:
+        logger.info("Cache hit for: %s", user_query[:40])
+        return cached
+    
     prompt = f"""You are an expert in biodiversity informatics. Rewrite the following search query to find relevant ecological literature in English.
 
 User query: {user_query}
@@ -36,12 +136,15 @@ Generate:
 3. Keep it concise (max 15 words).
 
 SCIENTIFIC_QUERY: """
-    expanded = query_ollama(prompt, 100)
+    expanded = ask(prompt, max_tokens=200)
     # Extract just the query line
     for line in expanded.split("\n"):
         line = line.strip()
         if line and not line.startswith("#") and "SCIENTIFIC_QUERY" not in line and len(line) > 5:
-            return line.strip('"').strip()
+            result = line.strip('"').strip()
+            _cache_set(user_query, result)
+            return result
+    _cache_set(user_query, user_query)
     return user_query  # fallback
 
 def rerank_papers(user_query, papers):
@@ -59,7 +162,7 @@ PAPERS:
 
 Return: {{"ranking": [3, 7, 1, ...]}} — indices of top 10 papers in order of relevance.
 """
-    response = query_ollama(prompt, 200)
+    response = ask(prompt, max_tokens=200)
     try:
         # Extract JSON
         start = response.find("{")
