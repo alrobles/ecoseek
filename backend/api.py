@@ -504,6 +504,63 @@ async def search_papers(req: SearchRequest):  # returns SearchResponse | JSONRes
     )
 
 
+@app.post("/v1/smart-search", summary="AI-powered semantic literature search")
+async def smart_search_papers(req: SearchRequest):
+    """
+    Smart search with LLM-powered query expansion + semantic re-ranking.
+    
+    Uses the Q6000 Ollama cluster to:
+    1. Expand the query with scientific terminology
+    2. Search Meilisearch for top-50 papers
+    3. Re-rank results based on semantic relevance to user intent
+    
+    Slower (~5-10s) but much more accurate than keyword search.
+    """
+    if not config.MEILI_ENABLED:
+        return JSONResponse(status_code=503, content={"detail": "Meilisearch not enabled."})
+    
+    try:
+        from smart_search import expand_query, rerank_papers, search_meili
+        
+        # 1. Expand query with LLM
+        log.info("Smart search: expanding query '%s'", req.q[:80])
+        expanded = expand_query(req.q)
+        log.info("Smart search: expanded to '%s'", expanded[:100])
+        
+        # 2. Search Meilisearch
+        meili_results = search_meili(expanded, limit=50)
+        papers = meili_results.get("hits", [])
+        log.info("Smart search: Meilisearch returned %d hits", len(papers))
+        
+        # 3. Re-rank with LLM
+        if len(papers) > 10:
+            papers = rerank_papers(req.q, papers)
+            log.info("Smart search: re-ranked to %d papers", len(papers))
+        
+        # Format results
+        results: list[SearchResult] = []
+        for hit in papers[:req.limit]:
+            results.append(SearchResult(
+                id=hit.get("id", ""),
+                title=hit.get("title", ""),
+                abstract=hit.get("abstract", ""),
+                year=str(hit.get("year", "")),
+                keywords=hit.get("keywords", ""),
+                doi=hit.get("doi", ""),
+            ))
+        
+        return SearchResponse(
+            success=True,
+            query=req.q,
+            total_hits=len(papers),
+            processing_time_ms=meili_results.get("processingTimeMs", 0),
+            results=results,
+        )
+    except Exception as exc:
+        log.error("Smart search failed: %s", exc)
+        return JSONResponse(status_code=502, content={"detail": f"Smart search error: {exc}"})
+
+
 @app.get("/", summary="Health check")
 async def health() -> Dict[str, str]:
     """Returns immediately with status=ok. Used by docker healthcheck."""
