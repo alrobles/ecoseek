@@ -2827,6 +2827,57 @@ mjx-container[display="true"] {
   cursor: not-allowed;
 }
 
+.quick-btn {
+  background: #2563eb;
+  color: white;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.smart-btn {
+  background: #7c3aed;
+  color: white;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.quick-btn:hover { background: #1d4ed8; }
+.smart-btn:hover { background: #6d28d9; }
+
+.btn-icon { font-size: 14px; }
+.btn-label { font-weight: 500; }
+
+.active-mode {
+  box-shadow: 0 0 0 2px var(--foreground);
+}
+
+.smart-indicator {
+  font-size: 10px;
+  color: #7c3aed;
+  font-weight: 500;
+}
+
+.literature-loading {
+  padding: 12px;
+  text-align: center;
+  color: var(--accent);
+  font-size: 13px;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 .search-filters {
   display: flex;
   gap: 10px;
