@@ -8,6 +8,7 @@ import { ResizableLayout } from "./components/ResizableLayout";
 import { CodeBlock } from "./components/CodeBlock";
 import { RenderPreview, DiDALPanel } from "./components/RenderPreview";
 import { FilesPanel } from "./components/FilesPanel";
+import { LiteraturePanel } from "./components/LiteraturePanel";
 import { ReactComponent as EcoSeekLogo } from "./ecoseek-logo.svg";
 import emilyAvatar from "./emily-avatar.png";
 import emilyThinking from "./emily-avatar-thinking.gif";
@@ -51,7 +52,7 @@ function App() {
   const [isOnline, setIsOnline] = useState(false);
   const [remoteStatus, setRemoteStatus] = useState(null);
   const [expandedReasoning, setExpandedReasoning] = useState(new Set());
-  const [rightPanelTab, setRightPanelTab] = useState("output");
+  const [rightPanelTab, setRightPanelTab] = useState("literature");
   const [streamingContent, setStreamingContent] = useState("");
   const [streamingReasoning, setStreamingReasoning] = useState("");
   const [activeToolCalls, setActiveToolCalls] = useState([]);
@@ -752,6 +753,12 @@ function App() {
           <div className="computer-section">
             <div className="panel-tabs">
               <button
+                className={`panel-tab ${rightPanelTab === "literature" ? "active" : ""}`}
+                onClick={() => setRightPanelTab("literature")}
+              >
+                📚 Literature
+              </button>
+              <button
                 className={`panel-tab ${rightPanelTab === "output" ? "active" : ""}`}
                 onClick={() => setRightPanelTab("output")}
               >
@@ -784,6 +791,15 @@ function App() {
               </button>
             </div>
             <div className="content">
+              {rightPanelTab === "literature" && (
+                <LiteraturePanel
+                  onCitePaper={(ctx) => {
+                    setQuery(ctx + query);
+                    setRightPanelTab("output");
+                  }}
+                  isLocalEmily={IS_LOCAL_EMILY}
+                />
+              )}
               {rightPanelTab === "output" && (
                 <RenderPreview messages={messages} streamingContent={streamingContent} isLoading={isLoading} didalStages={didalStages} />
               )}

@@ -2760,3 +2760,191 @@ mjx-container[display="true"] {
   color: var(--foreground);
   font-weight: 500;
 }
+
+/* ── Literature Panel ─────────────────────────────────────────────── */
+.literature-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.literature-header {
+  padding: 0 0 12px 0;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 12px;
+}
+
+.literature-header h3 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--foreground);
+}
+
+.literature-subtitle {
+  margin: 4px 0 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.literature-search {
+  margin-bottom: 12px;
+}
+
+.search-input-wrap {
+  display: flex;
+  gap: 6px;
+}
+
+.literature-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 13px;
+  background: var(--panel-bg);
+  color: var(--foreground);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.literature-input:focus {
+  border-color: var(--accent);
+}
+
+.search-btn {
+  padding: 8px 12px;
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  color: white;
+}
+
+.search-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.search-filters {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+  font-size: 11px;
+}
+
+.filter-check {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.filter-year {
+  padding: 2px 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--panel-bg);
+  color: var(--foreground);
+  font-size: 11px;
+}
+
+.literature-error {
+  padding: 8px 12px;
+  background: var(--error-bg, #fef2f2);
+  border: 1px solid var(--error-border, #fecaca);
+  border-radius: 6px;
+  color: var(--error, #dc2626);
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+.literature-count {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.literature-results {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.literature-card {
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  transition: border-color 0.15s;
+}
+
+.literature-card:hover {
+  border-color: var(--accent);
+}
+
+.literature-card-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.literature-year {
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 600;
+  background: var(--accent-bg, #eef2ff);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.literature-keywords {
+  font-size: 10px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.literature-title {
+  margin: 0 0 4px 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--foreground);
+  line-height: 1.4;
+}
+
+.literature-abstract {
+  margin: 0 0 8px 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.cite-btn {
+  padding: 4px 10px;
+  background: none;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--accent);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.cite-btn:hover {
+  background: var(--accent);
+  color: white;
+}
+
+.literature-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+}
