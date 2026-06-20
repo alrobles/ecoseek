@@ -3,7 +3,7 @@ Uses Ollama Qwen2.5 14B for query expansion + semantic re-ranking.
 """
 import json, urllib.request, sys, os
 
-OLLAMA_URL = os.environ.get("OLLAMA_SMART_URL", "http://r22r35n01:56593/api/generate")
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://r22r35n01:56593/api/generate")
 MEILI_URL = os.environ.get("MEILI_URL", "http://alpha:7700")
 MODEL = os.environ.get("SMART_MODEL", "qwen2.5:14b-instruct-q4_K_M")
 
