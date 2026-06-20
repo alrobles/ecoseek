@@ -2851,6 +2851,8 @@ mjx-container[display="true"] {
 
 .quick-btn:hover { background: #1d4ed8; }
 .smart-btn:hover { background: #6d28d9; }
+.meta-btn { background: #059669; color: white; display: flex; align-items: center; gap: 4px; padding: 8px 10px; font-size: 12px; white-space: nowrap; }
+.meta-btn:hover { background: #047857; }
 
 .btn-icon { font-size: 14px; }
 .btn-label { font-weight: 500; }
