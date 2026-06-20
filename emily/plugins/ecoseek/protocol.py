@@ -120,6 +120,121 @@ def _emit_progress(stage: str, detail: str = "") -> None:
 # HTTP helper
 # ---------------------------------------------------------------------------
 
+# Local LLM fallback — uses same provider chain as metasearch.py
+# Activated when Beta (hermes.ecoseek.org) is unreachable
+_LOCAL_PROVIDERS: list[tuple[str, dict]] = []
+
+
+def _init_local_providers() -> list[tuple[str, dict]]:
+    """Build local LLM provider chain from environment (same as metasearch.py)."""
+    if _LOCAL_PROVIDERS:
+        return _LOCAL_PROVIDERS
+
+    providers = []
+    mimo_key = os.environ.get("XIAOMI_API_KEY", "")
+    if mimo_key:
+        providers.append(("mimo", {
+            "url": "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions",
+            "model": "mimo-v2.5",
+            "key": mimo_key,
+        }))
+
+    or_key = os.environ.get("OPENROUTER_API_KEY", "")
+    if or_key:
+        providers.append(("openrouter", {
+            "url": "https://openrouter.ai/api/v1/chat/completions",
+            "model": "deepseek/deepseek-chat-v3-0324",
+            "key": or_key,
+        }))
+
+    ollama_url = os.environ.get("OLLAMA_URL", "")
+    if ollama_url:
+        providers.append(("ollama", {
+            "url": ollama_url if "/api/generate" in ollama_url else f"{ollama_url}/api/generate",
+            "model": os.environ.get("OLLAMA_MODEL", "deepseek-r1:14b"),
+        }))
+
+    _LOCAL_PROVIDERS.extend(providers)
+    return _LOCAL_PROVIDERS
+
+
+def _local_llm_call(system_prompt: str, user_content: str, max_tokens: int = 1500) -> dict:
+    """Call a local LLM provider as fallback when Beta is unreachable.
+
+    Tries providers in order: Mimo → OpenRouter → Ollama.
+    Returns same format as _beta_call.
+    """
+    import urllib.request
+    import urllib.error
+
+    providers = _init_local_providers()
+    if not providers:
+        return {"content": "", "usage": {}, "model": "none", "error": "no_local_providers"}
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content},
+    ]
+
+    for name, cfg in providers:
+        try:
+            if "key" in cfg:
+                # OpenAI-compatible API
+                body = json.dumps({
+                    "model": cfg["model"],
+                    "messages": messages,
+                    "max_tokens": max_tokens,
+                    "temperature": 0.3,
+                }).encode()
+                req = urllib.request.Request(
+                    cfg["url"],
+                    data=body,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {cfg['key']}",
+                    },
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    data = json.loads(resp.read())
+                    content = data["choices"][0]["message"]["content"]
+                    logger.info("local_llm[%s]: %d chars", name, len(content))
+                    return {
+                        "content": content,
+                        "usage": data.get("usage", {}),
+                        "model": data.get("model", cfg["model"]),
+                        "local_fallback": True,
+                    }
+            else:
+                # Ollama API
+                body = json.dumps({
+                    "model": cfg["model"],
+                    "prompt": f"{system_prompt}\n\n{user_content}",
+                    "stream": False,
+                    "options": {"temperature": 0.3, "num_predict": max_tokens},
+                }).encode()
+                req = urllib.request.Request(
+                    cfg["url"],
+                    data=body,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    data = json.loads(resp.read())
+                    content = data.get("response", "")
+                    logger.info("local_llm[%s]: %d chars", name, len(content))
+                    return {
+                        "content": content,
+                        "usage": {},
+                        "model": cfg["model"],
+                        "local_fallback": True,
+                    }
+        except Exception as exc:
+            logger.warning("local_llm[%s] failed: %s", name, str(exc)[:100])
+            continue
+
+    return {"content": "", "usage": {}, "model": "none", "error": "all_local_providers_failed"}
+
 
 def _beta_call(
     system_prompt: str,
@@ -163,13 +278,22 @@ def _beta_call(
     if trace:
         payload["hermes"] = {"trace": True}
 
-    data = http_post_json(
-        url,
-        payload=payload,
-        headers=headers,
-        timeout=timeout or _TIMEOUT,
-        retries=retries,
-    )
+    try:
+        data = http_post_json(
+            url,
+            payload=payload,
+            headers=headers,
+            timeout=timeout or _TIMEOUT,
+            retries=retries,
+        )
+    except Exception as exc:
+        # Remote unreachable — fall back to local LLM
+        logger.warning("beta_call failed (%s), trying local fallback", str(exc)[:100])
+        local_result = _local_llm_call(system_prompt, user_content, max_tokens=1500)
+        if local_result.get("content"):
+            record_llm_call({}, local_result.get("model", "local"), {}, stage="local_fallback")
+            return local_result
+        raise  # re-raise if local also failed
 
     content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
     usage = data.get("usage", {})
@@ -897,16 +1021,14 @@ def run_didal_protocol(
         )
 
     # Fast-fail if Hermes is unreachable (cached 30s)
-    if not _hermes_is_healthy():
-        return json.dumps(
-            {
-                "success": False,
-                "error": "hermes_unreachable",
-                "message": "Hermes at {} is not responding. Check Cloudflare tunnel.".format(
-                    _REMOTE_URL
-                ),
-            }
+    # BUT: fall back to local self-critique mode instead of failing
+    _beta_available = _hermes_is_healthy()
+    if not _beta_available:
+        logger.warning(
+            "Hermes at %s unreachable — falling back to local self-critique mode",
+            _REMOTE_URL,
         )
+        _emit_progress("Fallback", "Beta unreachable, using local LLM self-critique")
 
     if not _DIDAL_ENABLED and force_mode != "direct":
         # Feature flag off — fallback to direct
