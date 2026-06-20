@@ -26,12 +26,12 @@ if MIMO_KEY:
         "type": "openai",
     }))
 
-# 2. Ollama Q6000 (local, free, 47 tok/s) — fallback
+# 2. Ollama deepseek-r1:14b (cluster, reasoning model) — fallback
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "")
 if OLLAMA_URL:
     PROVIDERS.append(("ollama", {
         "url": OLLAMA_URL if "/api/generate" in OLLAMA_URL else f"{OLLAMA_URL}/api/generate",
-        "model": os.environ.get("OLLAMA_MODEL", "qwen2.5:14b-instruct-q4_K_M"),
+        "model": os.environ.get("OLLAMA_MODEL", "deepseek-r1:14b"),
         "type": "ollama",
     }))
 
@@ -62,7 +62,11 @@ def ask(prompt, system="", max_tokens=300, temperature=0.3):
                 req = urllib.request.Request(cfg["url"], data=body,
                     headers={"Content-Type": "application/json"})
                 with urllib.request.urlopen(req, timeout=20) as resp:
-                    response = json.loads(resp.read()).get("response", "")
+                    data = json.loads(resp.read())
+                    response = data.get("response", "")
+                    # Reasoning models put output in 'thinking' field
+                    if not response:
+                        response = data.get("thinking", "")
                     logger.info("LLM via %s: %d chars", provider_name, len(response))
                     return response
             
@@ -243,8 +247,7 @@ def metasearch(user_query):
     papers = _parallel_search(queries, limit=25)
     
     logger.info("Merged: %d papers from %d queries", len(papers), len(queries))
-    
-    # ROUND 2 — Rank + optional critique
+    # ROUND 2 — Rank (skip critique/revise for speed)
     if len(papers) <= 1:
         elapsed = int((time.time() - t0) * 1000)
         return {"results": _format_results(papers[:10]), "stages": stages, 
@@ -252,21 +255,12 @@ def metasearch(user_query):
     
     alpha_r2 = alpha_propose(user_query, papers)
     stages.append({"stage": "rank", "alpha": alpha_r2})
-    
-    # Only critique if many results (saves time)
-    if len(papers) > 10:
-        beta = beta_critique(user_query, papers, alpha_r2)
-        stages.append({"stage": "critique", "beta": beta})
-        final = alpha_revise(user_query, alpha_r2, beta)
-        stages.append({"stage": "revise", "final": final})
-        ranking = final.get("final_ranking", alpha_r2.get("ranking", []))
-    else:
-        ranking = alpha_r2.get("ranking", [])
+    ranking = alpha_r2.get("ranking", [])
     
     elapsed = int((time.time() - t0) * 1000)
     return {"results": _format_results(papers, ranking),
             "stages": stages, "time_ms": elapsed,
-            "provider": provider_used, "method": "didal"}
+            "provider": provider_used, "method": "didal-fast"}
 
 def _format_results(papers, ranking=None):
     reranked = []

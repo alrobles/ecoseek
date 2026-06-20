@@ -22,12 +22,12 @@ if MIMO_KEY:
         "type": "openai",
     }))
 
-# 2. Ollama — fallback
+# 2. Ollama deepseek-r1:14b (cluster) — fallback
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "")
 if OLLAMA_URL:
     PROVIDERS.append(("ollama", {
         "url": OLLAMA_URL if "/api/generate" in OLLAMA_URL else f"{OLLAMA_URL}/api/generate",
-        "model": os.environ.get("SMART_MODEL", "qwen2.5:14b-instruct-q4_K_M"),
+        "model": os.environ.get("SMART_MODEL", "deepseek-r1:14b"),
         "type": "ollama",
     }))
 
@@ -58,7 +58,11 @@ def ask(prompt, system="", max_tokens=300, temperature=0.3):
                 req = urllib.request.Request(cfg["url"], data=body,
                     headers={"Content-Type": "application/json"})
                 with urllib.request.urlopen(req, timeout=15) as resp:
-                    response = json.loads(resp.read()).get("response", "")
+                    data = json.loads(resp.read())
+                    response = data.get("response", "")
+                    # Reasoning models put output in 'thinking' field
+                    if not response:
+                        response = data.get("thinking", "")
                     logger.info("LLM via %s: %d chars", provider_name, len(response))
                     return response
             
