@@ -22,7 +22,7 @@ export function LiteraturePanel({ onCitePaper, isLocalEmily }) {
     setError(null);
     setSearchMode(mode);
 
-    const endpoint = mode === "smart" ? "/v1/smart-search" : "/v1/search";
+    const endpoint = mode === "smart" ? "/v1/smart-search" : mode === "meta" ? "/v1/metasearch" : "/v1/search";
     const body = {
       q: query,
       limit: mode === "smart" ? 10 : 20,
@@ -106,6 +106,15 @@ export function LiteraturePanel({ onCitePaper, isLocalEmily }) {
           >
             <span className="btn-icon">🧠</span>
             <span className="btn-label">Smart</span>
+          </button>
+          <button
+            className={`search-btn meta-btn ${searchMode === "meta" ? "active-mode" : ""}`}
+            onClick={() => doSearch("meta")}
+            disabled={loading || !query.trim()}
+            title="Meta search — Alpha↔Beta dialectical AI debate for best results"
+          >
+            <span className="btn-icon">🔬</span>
+            <span className="btn-label">Meta</span>
           </button>
         </div>
 
