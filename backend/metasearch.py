@@ -1,3 +1,4 @@
+import os
 """
 Metasearch — multi-agent literature search with DiDAL protocol.
 
@@ -8,7 +9,7 @@ import json, urllib.request, time, logging
 
 logger = logging.getLogger("ecoseek.metasearch")
 
-MEILI_URL = "http://alpha:7700"
+MEILI_URL = os.environ.get("MEILI_URL", "http://100.123.27.68:7700")
 OLLAMA_URL = "http://127.0.0.1:19998/api/generate"
 MODEL = "qwen2.5:14b-instruct-q4_K_M"
 MAX_ROUNDS = 3
