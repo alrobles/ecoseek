@@ -409,6 +409,101 @@ async def _route(req: QueryRequest) -> QueryResponse:
 # ── Endpoints ───────────────────────────────────────────────────────────────
 
 
+class SearchRequest(BaseModel):
+    """Search GBIF ecological literature via Meilisearch."""
+    q: str = Field(..., description="Search query")
+    limit: int = Field(default=10, ge=1, le=100, description="Max results")
+    offset: int = Field(default=0, ge=0, description="Pagination offset")
+    filter_has_abstract: bool = Field(default=False, description="Only papers with abstract >200 chars")
+    min_year: int = Field(default=0, description="Minimum publication year")
+
+
+class SearchResult(BaseModel):
+    """A single literature search result."""
+    id: str
+    title: str
+    abstract: str
+    year: str
+    keywords: str
+    doi: str
+
+
+class SearchResponse(BaseModel):
+    """Meilisearch literature search response."""
+    success: bool
+    query: str
+    total_hits: int
+    processing_time_ms: int
+    results: list[SearchResult]
+
+
+@app.post("/v1/search", response_model=SearchResponse, summary="Search GBIF ecological literature")
+async def search_papers(req: SearchRequest):  # returns SearchResponse | JSONResponse
+    """
+    Full-text search across 62,000 GBIF-cited ecological papers.
+
+    Powered by Meilisearch — returns results in <100ms with typo-tolerant,
+    relevance-ranked matching. Filters available for abstract presence and
+    minimum publication year.
+    """
+    if not config.MEILI_ENABLED:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Meilisearch is not enabled. Set MEILI_ENABLED=true."},
+        )
+
+    # Build Meilisearch query
+    meili_query: dict[str, Any] = {
+        "q": req.q,
+        "limit": req.limit,
+        "offset": req.offset,
+        "attributesToRetrieve": ["id", "title", "abstract", "year", "keywords", "doi"],
+    }
+
+    filters: list[str] = []
+    if req.filter_has_abstract:
+        filters.append("has_abstract = true")
+    if req.min_year > 0:
+        filters.append(f"year >= {req.min_year}")
+    if filters:
+        meili_query["filter"] = " AND ".join(filters)
+
+    try:
+        async with httpx.AsyncClient(timeout=config.UPSTREAM_TIMEOUT_S) as client:
+            resp = await client.post(
+                f"{config.MEILI_URL}/indexes/{config.MEILI_INDEX}/search",
+                json=meili_query,
+                headers={"Content-Type": "application/json"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as exc:
+        log.error("Meilisearch search failed: %s", exc)
+        return JSONResponse(
+            status_code=502,
+            content={"detail": f"Meilisearch unavailable: {exc}"},
+        )
+
+    results: list[SearchResult] = []
+    for hit in data.get("hits", []):
+        results.append(SearchResult(
+            id=hit.get("id", ""),
+            title=hit.get("title", ""),
+            abstract=hit.get("abstract", ""),
+            year=str(hit.get("year", "")),
+            keywords=hit.get("keywords", ""),
+            doi=hit.get("doi", ""),
+        ))
+
+    return SearchResponse(
+        success=True,
+        query=req.q,
+        total_hits=data.get("estimatedTotalHits", 0),
+        processing_time_ms=data.get("processingTimeMs", 0),
+        results=results,
+    )
+
+
 @app.get("/", summary="Health check")
 async def health() -> Dict[str, str]:
     """Returns immediately with status=ok. Used by docker healthcheck."""
