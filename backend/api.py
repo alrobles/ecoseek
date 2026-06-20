@@ -561,6 +561,33 @@ async def smart_search_papers(req: SearchRequest):
         return JSONResponse(status_code=502, content={"detail": f"Smart search error: {exc}"})
 
 
+@app.post("/v1/metasearch", summary="Multi-agent dialectical literature search")
+async def metasearch_papers(req: SearchRequest):
+    """
+    Alpha↔Beta dialectical search — multiple Hermes agents debate and refine.
+    
+    Alpha proposes query expansion + ranking.
+    Beta critiques and suggests improvements.
+    Alpha revises → consensus final ranking.
+    
+    Slower (~15-30s) but highest quality results with dialectical reasoning.
+    """
+    try:
+        from metasearch import metasearch
+        result = metasearch(req.q)
+        return JSONResponse(content={
+            "success": True,
+            "query": req.q,
+            "total_hits": len(result["results"]),
+            "processing_time_ms": result["time_ms"],
+            "results": result["results"][:req.limit],
+            "method": "didal",
+        })
+    except Exception as exc:
+        log.error("Metasearch failed: %s", exc)
+        return JSONResponse(status_code=502, content={"detail": str(exc)})
+
+
 @app.get("/", summary="Health check")
 async def health() -> Dict[str, str]:
     """Returns immediately with status=ok. Used by docker healthcheck."""
