@@ -1,22 +1,20 @@
 import os
 """
-Metasearch — multi-agent literature search with DiDAL protocol + fallback chain.
+Metasearch — fast literature search with geographic relevance.
 
-Mimo mimo-v2.5 (primary, ~1.8s) → Ollama (fallback) → OpenRouter (last resort).
-Query cache avoids repeated LLM calls for same/similar queries.
-Parallel EN + native search for dual-language performance.
+Single LLM call for ranking (expand is heuristic, no LLM needed).
+Geographic post-filtering for better relevance.
 """
-import json, urllib.request, time, logging, threading
+import json, urllib.request, time, logging, threading, re
 
 logger = logging.getLogger("ecoseek.metasearch")
 
 MEILI_URL = os.environ.get("MEILI_URL", "http://100.123.27.68:7700")
-MAX_ROUNDS = 2  # Reduced: expand + rank (skip critique if <10 results)
 
 # ─── Provider fallback chain ────────────────────────────────────────────
 PROVIDERS = []
 
-# 1. Mimo mimo-v2.5 (xiaomi) — fastest, ~1.8s avg, TTFT 0.97s
+# 1. Mimo mimo-v2.5 (xiaomi) — fastest
 MIMO_KEY = os.environ.get("XIAOMI_API_KEY", "")
 if MIMO_KEY:
     PROVIDERS.append(("mimo", {
@@ -26,7 +24,7 @@ if MIMO_KEY:
         "type": "openai",
     }))
 
-# 2. Ollama deepseek-r1:14b (cluster, reasoning model) — fallback
+# 2. Ollama deepseek-r1:14b (cluster) — fallback
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "")
 if OLLAMA_URL:
     PROVIDERS.append(("ollama", {
@@ -48,7 +46,7 @@ if OR_KEY:
 logger.info("Metasearch providers: %s", [p[0] for p in PROVIDERS])
 
 # ─── LLM call with fallback ─────────────────────────────────────────────
-def ask(prompt, system="", max_tokens=300, temperature=0.3):
+def ask(prompt, system="", max_tokens=200, temperature=0.3):
     """Try each provider in order until one responds."""
     for provider_name, cfg in PROVIDERS:
         try:
@@ -64,7 +62,6 @@ def ask(prompt, system="", max_tokens=300, temperature=0.3):
                 with urllib.request.urlopen(req, timeout=20) as resp:
                     data = json.loads(resp.read())
                     response = data.get("response", "")
-                    # Reasoning models put output in 'thinking' field
                     if not response:
                         response = data.get("thinking", "")
                     logger.info("LLM via %s: %d chars", provider_name, len(response))
@@ -86,7 +83,6 @@ def ask(prompt, system="", max_tokens=300, temperature=0.3):
                 with urllib.request.urlopen(req, timeout=20) as resp:
                     response = json.loads(resp.read())
                     text = response["choices"][0]["message"]["content"]
-                    # Reasoning models may put output in reasoning_content
                     if not text:
                         text = response["choices"][0]["message"].get("reasoning_content", "")
                     logger.info("LLM via %s: %d chars", provider_name, len(text))
@@ -103,22 +99,91 @@ def ask(prompt, system="", max_tokens=300, temperature=0.3):
 _expand_cache = {}
 
 def _cache_get(query):
-    """Return cached expansion for normalized query, or None."""
     key = query.strip().lower()
     return _expand_cache.get(key)
 
 def _cache_set(query, result):
-    """Store expansion result in cache (bounded to 512 entries)."""
     key = query.strip().lower()
     if len(_expand_cache) >= 512:
         oldest = next(iter(_expand_cache))
         del _expand_cache[oldest]
     _expand_cache[key] = result
 
+# ─── Heuristic translate (no LLM needed) ───────────────────────────────
+# Common ecological terms in Spanish/Portuguese/French → English
+ECO_DICT = {
+    "mamiferos": "mammals", "mamíferos": "mammals",
+    "aves": "birds", "peces": "fish", "reptiles": "reptiles",
+    "anfibios": "amphibians", "insectos": "insects",
+    "plantas": "plants", "árboles": "trees",
+    "biodiversidad": "biodiversity", "distribución": "distribution",
+    "conservación": "conservation", "ecología": "ecology",
+    "hábitat": "habitat", "especie": "species", "especies": "species",
+    "género": "genus", "familia": "family",
+    "bosque": "forest", "selva": "jungle", "montaña": "mountain",
+    "río": "river", "lago": "lake", "mar": "sea", "océano": "ocean",
+    "clima": "climate", "cambio": "change", "amenaza": "threat",
+    "endémico": "endemic", "amenazado": "threatened",
+    "invasor": "invasive", "nativo": "native",
+    "de": "of", "del": "of the", "en": "in", "el": "the", "la": "the",
+    "los": "the", "las": "the", "un": "a", "una": "a",
+    "y": "and", "o": "or", "del": "of the",
+    "mammifères": "mammals", "oiseaux": "birds", "biodiversité": "biodiversity",
+    "espèces": "species", "habitat": "habitat", "conservation": "conservation",
+}
+
+# Known geographic terms
+GEO_TERMS = {
+    "españa": "Spain", "spain": "Spain", "iberian": "Iberian",
+    "colombia": "Colombia", "mexico": "Mexico", "brasil": "Brazil",
+    "argentina": "Argentina", "peru": "Peru", "chile": "Chile",
+    "ecuador": "Ecuador", "venezuela": "Venezuela", "bolivia": "Bolivia",
+    "costa rica": "Costa Rica", "panama": "Panama", "guatemala": "Guatemala",
+    "honduras": "Honduras", "nicaragua": "Nicaragua", "cuba": "Cuba",
+    "europa": "Europe", "europe": "Europe", "africa": "Africa",
+    "asia": "Asia", "amazonas": "Amazon", "amazon": "Amazon",
+    "andes": "Andes", "caribe": "Caribbean", "mediterraneo": "Mediterranean",
+    "tropical": "tropical", "neotropical": "Neotropical",
+}
+
+def _extract_geographic(query_lower):
+    """Extract geographic context from query."""
+    for term, english in GEO_TERMS.items():
+        if term in query_lower:
+            return english
+    return ""
+
+def _heuristic_translate(query):
+    """Fast translate without LLM. Returns (english_query, geo_context)."""
+    query_lower = query.lower().strip()
+    geo = _extract_geographic(query_lower)
+    
+    words = re.findall(r'\w+', query_lower)
+    translated = []
+    for w in words:
+        if w in ECO_DICT:
+            translated.append(ECO_DICT[w])
+        elif len(w) > 2:  # keep short words as-is
+            translated.append(w)
+    
+    english = " ".join(translated)
+    if geo and geo.lower() not in english.lower():
+        english += f" {geo}"
+    
+    return english, geo
+
 # ─── Meilisearch ──────────────────────────────────────────────────────
-def search(query, limit=30):
-    body = json.dumps({"q": query, "limit": limit,
-        "attributesToRetrieve": ["id","title","abstract","year","keywords","doi","has_abstract"]}).encode()
+def search(query, limit=30, geo_filter=None):
+    """Search Meilisearch. If geo_filter is set (ISO code), filter by country."""
+    payload = {
+        "q": query,
+        "limit": limit,
+        "attributesToRetrieve": ["id","title","abstract","year","keywords","doi","has_abstract","countries_of_coverage","country_names_coverage","topics","language"],
+    }
+    # Add geographic filter if available
+    if geo_filter:
+        payload["filter"] = f'country_names_coverage = "{geo_filter}"'
+    body = json.dumps(payload).encode()
     req = urllib.request.Request(f"{MEILI_URL}/indexes/gbif_literature/search",
         data=body, headers={"Content-Type": "application/json"})
     try:
@@ -128,19 +193,18 @@ def search(query, limit=30):
         logger.error("Meilisearch error: %s", e)
         return []
 
-def _parallel_search(queries, limit=25):
+def _parallel_search(queries, limit=25, geo_filter=None):
     """Run multiple Meilisearch queries in parallel, return merged hits."""
     results = [None] * len(queries)
     threads = []
     def _do_search(idx, q):
-        results[idx] = search(q, limit=limit)
+        results[idx] = search(q, limit=limit, geo_filter=geo_filter)
     for i, q in enumerate(queries):
         t = threading.Thread(target=_do_search, args=(i, q))
         threads.append(t)
         t.start()
     for t in threads:
         t.join()
-    # Merge and deduplicate
     merged = []
     seen = set()
     for hits in results:
@@ -153,120 +217,104 @@ def _parallel_search(queries, limit=25):
                 seen.add(pid)
     return merged
 
+# ─── Geographic post-filter ────────────────────────────────────────────
+def _geo_boost(papers, geo_context):
+    """Boost papers that mention the geographic context in title/abstract."""
+    if not geo_context:
+        return papers
+    
+    geo_lower = geo_context.lower()
+    boosted = []
+    rest = []
+    
+    for p in papers:
+        text = ((p.get("title","") or "") + " " + (p.get("abstract","") or "")).lower()
+        if geo_lower in text:
+            boosted.append(p)
+        else:
+            rest.append(p)
+    
+    logger.info("Geo filter: %d/%d papers mention '%s'", len(boosted), len(papers), geo_context)
+    return boosted + rest
+
 # ─── Paper formatting ─────────────────────────────────────────────────
-def format_papers(papers, max_n=15):
+def format_papers(papers, max_n=20):
     lines = []
     for i, p in enumerate(papers[:max_n]):
-        kw = p.get("keywords","") or ""
-        if len(kw) > 60: kw = kw[:57] + "..."
         abstract = p.get("abstract", "") or ""
-        lines.append(f"{i+1}. [{p.get('year','?')}] {p['title'][:120]}")
-        if p.get("abstract"):
+        title = p.get("title", "") or ""
+        lines.append(f"{i+1}. [{p.get('year','?')}] {title[:120]}")
+        if abstract:
             lines.append(f"   {abstract[:200]}...")
     return "\n".join(lines)
 
-# ─── Alpha / Beta ──────────────────────────────────────────────────────
-ALPHA_SYS = "You are EcoSeek Alpha, an expert in biodiversity informatics. CRITICAL RULES: 1) Output ONLY the requested JSON. No explanations, no thinking, no markdown. 2) Geographic match is #1 priority for ranking. 3) Be precise and concise."
-BETA_SYS = "You are EcoSeek Beta, a skeptical peer reviewer. You critique Alpha's rankings, find blind spots, and suggest improvements. Be critical but fair."
+# ─── Single LLM call for ranking ──────────────────────────────────────
+RANK_SYS = "You rank ecological papers. Output ONLY a JSON array of indices. Geographic relevance to the query is #1 priority. No explanations."
 
-def alpha_propose(user_query, papers=None):
-    if papers:
-        papers_text = format_papers(papers, 20)
-        prompt = f"""Rank papers by relevance to query. Geographic match is #1 priority.
-
-Query: {user_query}
+def rank_papers(user_query, papers):
+    """Single LLM call to rank papers by relevance."""
+    papers_text = format_papers(papers, 20)
+    prompt = f"""Query: {user_query}
 {papers_text}
 
+Rank top-10 by relevance. Geographic match to query is #1 priority.
 Output ONLY JSON: {{"ranking": [3,7,1,...]}}"""
-        response = ask(prompt, ALPHA_SYS, max_tokens=200)
-    else:
-        # Check cache first
-        cached = _cache_get(user_query)
-        if cached:
-            logger.info("Cache hit for query: %s", user_query[:40])
-            return cached
-        prompt = f"""Translate this query to English scientific search terms. Include the geographic region. Output ONLY valid JSON, nothing else.
-Query: {user_query}
-
-{{"detected_language":"es","english_query":"mammals biodiversity Spain Iberian Peninsula","native_query":"mamiferos España","geographic_context":"Spain","scientific_names":["Mammalia"],"keywords":["biodiversity"],"filters":{{}}}}"""
-        response = ask(prompt, ALPHA_SYS, max_tokens=200)
     
+    response = ask(prompt, RANK_SYS, max_tokens=100)
     try:
         start = response.find("{")
         end = response.rfind("}") + 1
         if start >= 0 and end > start:
-            result = json.loads(response[start:end])
-            if not papers:
-                _cache_set(user_query, result)
-            return result
+            return json.loads(response[start:end]).get("ranking", [])
     except:
         pass
-    return {"ranking": list(range(1, min(11, len(papers)+1))) if papers else {},
-            "english_query": user_query, "detected_language": "en", "keywords": []}
-
-def beta_critique(user_query, papers, alpha_ranking):
-    if len(papers) < 10:
-        return {"critique": "Few results, skip critique", "suggested_rerank": alpha_ranking.get("ranking", [])}
-    
-    papers_text = format_papers(papers, 20)
-    prompt = f"""Query: {user_query}\nAlpha ranked: {alpha_ranking.get('ranking',[])}\nPapers:\n{papers_text}\nCritique ranking. Return JSON: {{"critique":"...","suggested_rerank":[...],"reason":"..."}}"""
-    response = ask(prompt, BETA_SYS, max_tokens=200)
-    try:
-        start = response.find("{")
-        end = response.rfind("}") + 1
-        if start >= 0 and end > start:
-            return json.loads(response[start:end])
-    except:
-        pass
-    return {"critique": "Parse error", "suggested_rerank": alpha_ranking.get("ranking", [])}
-
-def alpha_revise(user_query, alpha_r, beta):
-    prompt = f"""Query: {user_query}\nAlpha: {alpha_r.get('ranking',[])}\nBeta: {beta.get('critique','')} suggested {beta.get('suggested_rerank',[])}\nSynthesize final ranking. Return JSON: {{"final_ranking":[...],"synthesis":"..."}}"""
-    response = ask(prompt, ALPHA_SYS, max_tokens=200)
-    try:
-        start = response.find("{")
-        end = response.rfind("}") + 1
-        if start >= 0 and end > start:
-            return json.loads(response[start:end])
-    except:
-        pass
-    return {"final_ranking": alpha_r.get("ranking", []), "synthesis": "Fallback"}
+    return []
 
 # ─── Main metasearch ──────────────────────────────────────────────────
 def metasearch(user_query):
     t0 = time.time()
-    stages = []
     provider_used = PROVIDERS[0][0] if PROVIDERS else "none"
     
-    # ROUND 1 — Expand (with cache)
-    logger.info("Metasearch: '%s'", user_query[:60])
-    alpha_r1 = alpha_propose(user_query)
-    english = alpha_r1.get("english_query", user_query)
-    native = alpha_r1.get("native_query", user_query)
-    lang = alpha_r1.get("detected_language", "en")
-    stages.append({"stage": "expand", "english": english, "native": native, "lang": lang})
+    # STEP 1 — Heuristic translate (instant, no LLM)
+    cached = _cache_get(user_query)
+    if cached:
+        english, geo = cached["english_query"], cached.get("geographic_context", "")
+        logger.info("Cache hit: '%s' → '%s'", user_query[:40], english[:40])
+    else:
+        english, geo = _heuristic_translate(user_query)
+        _cache_set(user_query, {"english_query": english, "geographic_context": geo})
+        logger.info("Translated: '%s' → '%s' (geo=%s)", user_query[:40], english[:40], geo)
     
-    # Parallel search (EN + native if different)
+    # STEP 2 — Parallel Meilisearch (EN + original if different)
+    # Try with geographic filter first, then without if too few results
     queries = [english]
-    if lang != "en" and native != english:
-        queries.append(native)
-    papers = _parallel_search(queries, limit=25)
+    if english.lower() != user_query.lower():
+        queries.append(user_query)
     
-    logger.info("Merged: %d papers from %d queries", len(papers), len(queries))
-    # ROUND 2 — Rank (skip critique/revise for speed)
-    if len(papers) <= 1:
+    papers = _parallel_search(queries, limit=30, geo_filter=geo)
+    if len(papers) < 5 and geo:
+        logger.info("Too few geo-filtered results (%d), retrying without filter", len(papers))
+        papers = _parallel_search(queries, limit=30)
+    
+    logger.info("Meilisearch: %d papers from %d queries", len(papers), len(queries))
+    
+    if not papers:
         elapsed = int((time.time() - t0) * 1000)
-        return {"results": _format_results(papers[:10]), "stages": stages, 
-                "time_ms": elapsed, "provider": provider_used, "method": "didal-fast"}
+        return {"results": [], "time_ms": elapsed, "provider": provider_used, "method": "fast"}
     
-    alpha_r2 = alpha_propose(user_query, papers)
-    stages.append({"stage": "rank", "alpha": alpha_r2})
-    ranking = alpha_r2.get("ranking", [])
+    # STEP 3 — Geographic boost (instant, no LLM)
+    papers = _geo_boost(papers, geo)
+    
+    # STEP 4 — Single LLM call for ranking (if enough papers)
+    if len(papers) > 3:
+        ranking = rank_papers(user_query, papers)
+        results = _format_results(papers, ranking)
+    else:
+        results = _format_results(papers)
     
     elapsed = int((time.time() - t0) * 1000)
-    return {"results": _format_results(papers, ranking),
-            "stages": stages, "time_ms": elapsed,
-            "provider": provider_used, "method": "didal-fast"}
+    return {"results": results[:15], "time_ms": elapsed,
+            "provider": provider_used, "method": "fast"}
 
 def _format_results(papers, ranking=None):
     reranked = []
@@ -286,7 +334,6 @@ def _format_results(papers, ranking=None):
             })
             seen.add(i)
     
-    # Add unranked papers
     for p in papers:
         if len(reranked) >= 15: break
         if p.get("id") not in {r["id"] for r in reranked}:
