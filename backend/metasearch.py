@@ -2,12 +2,11 @@ import os
 """
 Metasearch — multi-agent literature search with DiDAL protocol + fallback chain.
 
-Ollama Q6000 (primary) → Mimo (fallback) → OpenRouter (last resort).
+Mimo mimo-v2.5 (primary, ~1.8s) → Ollama (fallback) → OpenRouter (last resort).
 Query cache avoids repeated LLM calls for same/similar queries.
 Parallel EN + native search for dual-language performance.
 """
 import json, urllib.request, time, logging, threading
-from functools import lru_cache
 
 logger = logging.getLogger("ecoseek.metasearch")
 
@@ -17,23 +16,23 @@ MAX_ROUNDS = 2  # Reduced: expand + rank (skip critique if <10 results)
 # ─── Provider fallback chain ────────────────────────────────────────────
 PROVIDERS = []
 
-# 1. Ollama Q6000 (local, free, 47 tok/s)
+# 1. Mimo mimo-v2.5 (xiaomi) — fastest, ~1.8s avg, TTFT 0.97s
+MIMO_KEY = os.environ.get("XIAOMI_API_KEY", "")
+if MIMO_KEY:
+    PROVIDERS.append(("mimo", {
+        "url": "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions",
+        "model": "mimo-v2.5",
+        "key": MIMO_KEY,
+        "type": "openai",
+    }))
+
+# 2. Ollama Q6000 (local, free, 47 tok/s) — fallback
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "")
 if OLLAMA_URL:
     PROVIDERS.append(("ollama", {
         "url": OLLAMA_URL if "/api/generate" in OLLAMA_URL else f"{OLLAMA_URL}/api/generate",
         "model": os.environ.get("OLLAMA_MODEL", "qwen2.5:14b-instruct-q4_K_M"),
         "type": "ollama",
-    }))
-
-# 2. Mimo (xiaomi) — reasoning model
-MIMO_KEY = os.environ.get("XIAOMI_API_KEY", "")
-if MIMO_KEY:
-    PROVIDERS.append(("mimo", {
-        "url": "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions",
-        "model": "mimo-v2.5-pro",
-        "key": MIMO_KEY,
-        "type": "openai",
     }))
 
 # 3. OpenRouter — last resort
@@ -62,7 +61,7 @@ def ask(prompt, system="", max_tokens=300, temperature=0.3):
                 }).encode()
                 req = urllib.request.Request(cfg["url"], data=body,
                     headers={"Content-Type": "application/json"})
-                with urllib.request.urlopen(req, timeout=45) as resp:
+                with urllib.request.urlopen(req, timeout=20) as resp:
                     response = json.loads(resp.read()).get("response", "")
                     logger.info("LLM via %s: %d chars", provider_name, len(response))
                     return response
@@ -74,14 +73,18 @@ def ask(prompt, system="", max_tokens=300, temperature=0.3):
                 msgs.append({"role": "user", "content": prompt})
                 body = json.dumps({
                     "model": cfg["model"], "messages": msgs,
-                    "max_tokens": max_tokens, "temperature": temperature
+                    "max_tokens": max_tokens, "temperature": temperature,
+                    "reasoning_effort": "low"
                 }).encode()
                 req = urllib.request.Request(cfg["url"], data=body,
                     headers={"Content-Type": "application/json",
                              "Authorization": f"Bearer {cfg['key']}"})
-                with urllib.request.urlopen(req, timeout=45) as resp:
+                with urllib.request.urlopen(req, timeout=20) as resp:
                     response = json.loads(resp.read())
                     text = response["choices"][0]["message"]["content"]
+                    # Reasoning models may put output in reasoning_content
+                    if not text:
+                        text = response["choices"][0]["message"].get("reasoning_content", "")
                     logger.info("LLM via %s: %d chars", provider_name, len(text))
                     return text
         
@@ -93,10 +96,20 @@ def ask(prompt, system="", max_tokens=300, temperature=0.3):
     return ""
 
 # ─── Query cache ────────────────────────────────────────────────────────
-@lru_cache(maxsize=256)
-def _cached_expand(query):
-    """Cache query expansions. Keyed by lowercase normalized query."""
-    return None  # Will be filled by alpha_propose
+_expand_cache = {}
+
+def _cache_get(query):
+    """Return cached expansion for normalized query, or None."""
+    key = query.strip().lower()
+    return _expand_cache.get(key)
+
+def _cache_set(query, result):
+    """Store expansion result in cache (bounded to 512 entries)."""
+    key = query.strip().lower()
+    if len(_expand_cache) >= 512:
+        oldest = next(iter(_expand_cache))
+        del _expand_cache[oldest]
+    _expand_cache[key] = result
 
 # ─── Meilisearch ──────────────────────────────────────────────────────
 def search(query, limit=30):
@@ -110,6 +123,31 @@ def search(query, limit=30):
     except Exception as e:
         logger.error("Meilisearch error: %s", e)
         return []
+
+def _parallel_search(queries, limit=25):
+    """Run multiple Meilisearch queries in parallel, return merged hits."""
+    results = [None] * len(queries)
+    threads = []
+    def _do_search(idx, q):
+        results[idx] = search(q, limit=limit)
+    for i, q in enumerate(queries):
+        t = threading.Thread(target=_do_search, args=(i, q))
+        threads.append(t)
+        t.start()
+    for t in threads:
+        t.join()
+    # Merge and deduplicate
+    merged = []
+    seen = set()
+    for hits in results:
+        if not hits:
+            continue
+        for p in hits:
+            pid = p.get("id")
+            if pid not in seen:
+                merged.append(p)
+                seen.add(pid)
+    return merged
 
 # ─── Paper formatting ─────────────────────────────────────────────────
 def format_papers(papers, max_n=15):
@@ -132,7 +170,13 @@ def alpha_propose(user_query, papers=None):
         prompt = f"""Query: {user_query}\nPapers:\n{papers_text}\nRank top-10 by relevance. Return JSON: {{"ranking": [3,7,1,...], "explanation": "why"}}"""
         response = ask(prompt, ALPHA_SYS, max_tokens=200)
     else:
-        prompt = f"""Query: {user_query}\n
+        # Check cache first
+        cached = _cache_get(user_query)
+        if cached:
+            logger.info("Cache hit for query: %s", user_query[:40])
+            return cached
+        prompt = f"""Query: {user_query}
+
 Detect language. If not English, translate to scientific English. Find scientific names for species.
 Return JSON: {{"detected_language":"es","english_query":"Andean hummingbird biodiversity","native_query":"colibries andes distribucion","scientific_names":["Trochilidae"],"keywords":["species distribution","elevational gradient"],"filters":{{"min_year":2018,"require_abstract":true}}}}"""
         response = ask(prompt, ALPHA_SYS, max_tokens=200)
@@ -141,7 +185,10 @@ Return JSON: {{"detected_language":"es","english_query":"Andean hummingbird biod
         start = response.find("{")
         end = response.rfind("}") + 1
         if start >= 0 and end > start:
-            return json.loads(response[start:end])
+            result = json.loads(response[start:end])
+            if not papers:
+                _cache_set(user_query, result)
+            return result
     except:
         pass
     return {"ranking": list(range(1, min(11, len(papers)+1))) if papers else {},
@@ -165,7 +212,7 @@ def beta_critique(user_query, papers, alpha_ranking):
 
 def alpha_revise(user_query, alpha_r, beta):
     prompt = f"""Query: {user_query}\nAlpha: {alpha_r.get('ranking',[])}\nBeta: {beta.get('critique','')} suggested {beta.get('suggested_rerank',[])}\nSynthesize final ranking. Return JSON: {{"final_ranking":[...],"synthesis":"..."}}"""
-    response = ask(prompt, ALPHA_SYS, max_tokens=150)
+    response = ask(prompt, ALPHA_SYS, max_tokens=200)
     try:
         start = response.find("{")
         end = response.rfind("}") + 1
@@ -190,21 +237,12 @@ def metasearch(user_query):
     stages.append({"stage": "expand", "english": english, "native": native, "lang": lang})
     
     # Parallel search (EN + native if different)
-    papers_en = search(english, limit=25)
-    
-    papers_native = []
+    queries = [english]
     if lang != "en" and native != english:
-        papers_native = search(native, limit=10)
+        queries.append(native)
+    papers = _parallel_search(queries, limit=25)
     
-    # Merge
-    papers = papers_en
-    seen = {p.get("id") for p in papers_en}
-    for p in papers_native:
-        if p.get("id") not in seen:
-            papers.append(p)
-            seen.add(p.get("id"))
-    
-    logger.info("Merged: %d papers (%d EN + %d native)", len(papers), len(papers_en), len(papers_native))
+    logger.info("Merged: %d papers from %d queries", len(papers), len(queries))
     
     # ROUND 2 — Rank + optional critique
     if len(papers) <= 1:
