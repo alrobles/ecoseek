@@ -107,6 +107,10 @@ services:
       UPSTREAM_TIMEOUT_S: "${UPSTREAM_TIMEOUT_S:-120}"
       LOCAL_LLM_URL: "${LOCAL_LLM_URL:-}"
       LOCAL_LLM_API_KEY: "${LOCAL_LLM_API_KEY:-}"
+      # Meilisearch (literature search)
+      MEILI_URL: "${MEILI_URL:-http://meilisearch:7700}"
+      MEILI_ENABLED: "${MEILI_ENABLED:-true}"
+      MEILI_INDEX: "${MEILI_INDEX:-gbif_literature}"
       # Phoenix / OpenTelemetry tracing
       PHOENIX_ENABLED: "${PHOENIX_ENABLED:-false}"
       PHOENIX_ENDPOINT: "${PHOENIX_ENDPOINT:-http://phoenix:6006/v1/traces}"
