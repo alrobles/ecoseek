@@ -32,6 +32,8 @@ suppressPackageStartupMessages({
   library(sf)
   library(arrow)
   library(maxentcpp)
+  library(duckdb)
+  library(DBI)
 })
 
 # ── CLI argument parsing ──────────────────────────────────────────────
@@ -246,17 +248,87 @@ filter_env_iqr <- function(occ_env, bioclim_vars, env_iqr_factor = 1.5) {
 
 
 # ── Step 7: Build M mask from ecoregions (Barve et al. 2011) ─────────
-# Spatial join of presence points to ecoregions → keep ecoregions with
-# sufficient point density → dissolve into single M polygon.
-# M restricts both background sampling and prediction area.
+# Uses DuckDB spatial index when available (milliseconds).
+# Falls back to shapefile with bbox filter (slower).
 build_m_mask <- function(occ, ecoregions_dir, ecoregion_pct = 0.05) {
   cat("[7/10] Building M mask from ecoregions...\n")
 
-  # Disable S2 to avoid invalid geometry errors in ecoregion shapefiles
   old_s2 <- sf::sf_use_s2()
   sf::sf_use_s2(FALSE)
   on.exit(sf::sf_use_s2(old_s2))
 
+  db_path <- file.path(ecoregions_dir, "ecoregions.duckdb")
+  use_duckdb <- file.exists(db_path) && requireNamespace("duckdb", quietly = TRUE)
+
+  if (use_duckdb) {
+    cat(sprintf("  Using DuckDB spatial index: %s\n", basename(db_path)))
+    result <- build_m_mask_duckdb(occ, db_path, ecoregion_pct)
+  } else {
+    cat("  DuckDB not available, falling back to shapefile...\n")
+    result <- build_m_mask_shapefile(occ, ecoregions_dir, ecoregion_pct)
+  }
+  result
+}
+
+build_m_mask_duckdb <- function(occ, db_path, ecoregion_pct = 0.05) {
+  con <- DBI::dbConnect(duckdb::duckdb(), dbdir = db_path, read_only = TRUE)
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE))
+  DBI::dbExecute(con, "LOAD spatial;")
+
+  # Build point list for SQL IN clause
+  pts_sql <- paste(
+    sprintf("(%f, %f)", occ$long, occ$lat),
+    collapse = ", "
+  )
+
+  # Spatial join via DuckDB: find ecoregion for each point
+  query <- sprintf("
+    WITH pts AS (
+      SELECT column0 AS lon, column1 AS lat
+      FROM (VALUES %s)
+    )
+    SELECT p.lon, p.lat, e.ECO_NAME
+    FROM pts p, ecoregions e
+    WHERE ST_Contains(e.geom, ST_Point(p.lon, p.lat))
+  ", pts_sql)
+
+  t0 <- proc.time()[3]
+  join_result <- DBI::dbGetQuery(con, query)
+  dt <- proc.time()[3] - t0
+  cat(sprintf("  DuckDB spatial join: %d matches in %.1fs\n",
+              nrow(join_result), dt))
+
+  if (nrow(join_result) == 0) {
+    cat("  Warning: no points matched ecoregions, using convex hull\n")
+    pts_sf <- sf::st_as_sf(occ, coords = c("long", "lat"), crs = 4326)
+    hull <- sf::st_buffer(sf::st_convex_hull(sf::st_union(pts_sf)), dist = 2)
+    return(terra::vect(hull))
+  }
+
+  # Select ecoregions with enough points
+  freq <- table(join_result$ECO_NAME)
+  n_total <- nrow(occ)
+  keep <- names(freq[freq >= max(1, ceiling(n_total * ecoregion_pct))])
+  if (length(keep) == 0) keep <- names(freq[freq > 0])
+  cat(sprintf("  %d ecoregions selected (of %d with points)\n",
+              length(keep), length(freq)))
+
+  # Retrieve geometries for selected ecoregions from DuckDB
+  eco_names_sql <- paste(sprintf("'%s'", gsub("'", "''", keep)), collapse = ", ")
+  eco_wkt <- DBI::dbGetQuery(con, sprintf("
+    SELECT ECO_NAME, ST_AsText(geom) AS wkt
+    FROM ecoregions
+    WHERE ECO_NAME IN (%s)
+  ", eco_names_sql))
+
+  # Convert WKT geometries to sf → union → vect
+  geoms <- sf::st_as_sfc(eco_wkt$wkt, crs = 4326)
+  m_poly <- sf::st_union(sf::st_make_valid(geoms))
+  cat(sprintf("  M mask built from %d ecoregion(s)\n", length(keep)))
+  terra::vect(m_poly)
+}
+
+build_m_mask_shapefile <- function(occ, ecoregions_dir, ecoregion_pct = 0.05) {
   shp_path <- file.path(ecoregions_dir, "Ecoregions2017.shp")
   if (!file.exists(shp_path)) {
     shp_candidates <- list.files(ecoregions_dir, pattern = "\\.shp$",
@@ -270,11 +342,8 @@ build_m_mask <- function(occ, ecoregions_dir, ecoregion_pct = 0.05) {
     }
     shp_path <- shp_candidates[1]
   }
-  cat(sprintf("  Loading ecoregions: %s\n", basename(shp_path)))
 
   pts_sf <- sf::st_as_sf(occ, coords = c("long", "lat"), crs = 4326)
-
-  # Crop ecoregions to occurrence bounding box (+ 5° buffer) before full load
   bbox <- sf::st_bbox(pts_sf)
   bbox_buf <- sf::st_bbox(c(
     xmin = max(bbox["xmin"] - 5, -180),
@@ -283,52 +352,25 @@ build_m_mask <- function(occ, ecoregions_dir, ecoregion_pct = 0.05) {
     ymax = min(bbox["ymax"] + 5, 90)
   ), crs = sf::st_crs(4326))
   wkt_filter <- sf::st_as_text(sf::st_as_sfc(bbox_buf))
-  cat(sprintf("  Reading ecoregions within bbox: [%.1f, %.1f, %.1f, %.1f]\n",
-              bbox_buf["xmin"], bbox_buf["ymin"], bbox_buf["xmax"], bbox_buf["ymax"]))
 
   eco <- sf::st_read(shp_path, wkt_filter = wkt_filter, quiet = TRUE)
-  if (nrow(eco) == 0) {
-    cat("  Warning: no ecoregions in bbox, trying full load...\n")
-    eco <- sf::st_read(shp_path, quiet = TRUE)
-  }
+  if (nrow(eco) == 0) eco <- sf::st_read(shp_path, quiet = TRUE)
   eco <- sf::st_make_valid(eco)
-  cat(sprintf("  Loaded %d ecoregion polygons\n", nrow(eco)))
-
-  if (!identical(sf::st_crs(eco)$epsg, 4326L)) {
-    eco <- sf::st_transform(eco, 4326)
-  }
+  if (!identical(sf::st_crs(eco)$epsg, 4326L)) eco <- sf::st_transform(eco, 4326)
 
   join <- sf::st_join(pts_sf, eco, join = sf::st_intersects)
-
-  # Find the best ecoregion ID column
-  eco_col <- intersect(c("ECO_NAME", "ECO_ID", "eco_name", "eco_id"), names(join))
-  if (length(eco_col) == 0) {
-    chr_cols <- names(join)[vapply(sf::st_drop_geometry(join),
-                                   is.character, logical(1))]
-    eco_col <- if (length(chr_cols) > 0) chr_cols[1] else names(join)[3]
-  } else {
-    eco_col <- eco_col[1]
+  eco_col <- intersect(c("ECO_NAME", "ECO_ID"), names(join))
+  eco_col <- if (length(eco_col) > 0) eco_col[1] else {
+    chr_cols <- names(join)[vapply(sf::st_drop_geometry(join), is.character, logical(1))]
+    if (length(chr_cols) > 0) chr_cols[1] else names(join)[3]
   }
-  cat(sprintf("  Ecoregion ID column: %s\n", eco_col))
-
-  # Remove points that didn't fall in any ecoregion
   join <- join[!is.na(join[[eco_col]]), ]
-
   freq <- table(join[[eco_col]])
-  n_total <- nrow(occ)
-  keep <- names(freq[freq >= max(1, ceiling(n_total * ecoregion_pct))])
-
-  if (length(keep) == 0) {
-    cat("  Warning: no ecoregions pass threshold, using all with any points\n")
-    keep <- names(freq[freq > 0])
-  }
+  keep <- names(freq[freq >= max(1, ceiling(nrow(occ) * ecoregion_pct))])
+  if (length(keep) == 0) keep <- names(freq[freq > 0])
 
   m_eco <- eco[eco[[eco_col]] %in% keep, ]
-  m_poly <- sf::st_union(m_eco)
-  m_poly <- sf::st_make_valid(m_poly)
-
-  cat(sprintf("  %d ecoregions selected (of %d with points)\n",
-              length(keep), length(freq)))
+  m_poly <- sf::st_make_valid(sf::st_union(m_eco))
   terra::vect(m_poly)
 }
 
