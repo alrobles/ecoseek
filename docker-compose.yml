@@ -392,6 +392,8 @@ services:
     profiles: ["frontend"]
     ports:
       - "127.0.0.1:${FRONTEND_PORT:-4000}:80"
+    volumes:
+      - r-workspace-data:/workspace:ro
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
