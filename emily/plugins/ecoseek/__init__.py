@@ -1474,12 +1474,14 @@ RUN_NICHE_MODEL_SCHEMA = {
     "description": (
         "Run the ellipsoidal niche modeling pipeline for a species. "
         "10-step algorithm: (1) Get GBIF occurrences, (2) filter unique, "
-        "(3) remove outliers (IQR), (4) extract ERA5-bioclim (all 19 vars per cell), "
+        "(3) remove outliers (IQR), (4) extract ERA5-bioclim variables, "
         "(5) deduplicate coords, (6) fit nicher ellipsoid (presence_only), "
         "(7) build M mask from ecoregions (>5% threshold), "
         "(8) crop bioclim with M mask, (9) project ellipse, "
-        "(10) write suitability GeoTIFF. "
-        "Uses nicher package with ERA5-bioclim and WWF ecoregions. "
+        "(10) write suitability GeoTIFF + PNG map. "
+        "Supports FLEXIBLE variable selection — pass any subset of bio01-bio19 "
+        "via bioclim_vars (e.g. 'bio01,bio04,bio12' for 3 vars). "
+        "Returns markdown with embedded suitability map and download links. "
         "Data sources: GBIF parquet (260GB local) or GBIF API."
     ),
     "parameters": {
@@ -1503,7 +1505,11 @@ RUN_NICHE_MODEL_SCHEMA = {
             },
             "bioclim_vars": {
                 "type": "string",
-                "description": "Comma-separated bioclim vars (default: bio01-bio19).",
+                "description": (
+                    "Comma-separated bioclim variable names. Pass ANY subset of "
+                    "bio01-bio19 (e.g. 'bio01,bio04,bio12' for 3 vars). "
+                    "Default: all 19 (bio01-bio19)."
+                ),
             },
             "bioclim_year": {
                 "type": "integer",
@@ -1523,12 +1529,15 @@ RUN_MAXENT_MODEL_SCHEMA = {
     "description": (
         "Run the MaxEnt species distribution modeling pipeline via maxentcpp (C++17). "
         "10-step algorithm: (1) Get GBIF occurrences, (2) filter unique, "
-        "(3) remove outliers (IQR), (4) extract ERA5-bioclim (all 19 vars per cell), "
+        "(3) remove outliers (IQR), (4) extract ERA5-bioclim variables, "
         "(5) deduplicate coords, (6) fit MaxEnt with feature transformations "
         "(linear, quadratic, hinge, product, threshold), "
         "(7) build M mask from ecoregions, (8) crop bioclim with M mask, "
-        "(9) project cloglog prediction, (10) write suitability GeoTIFF + diagnostics. "
-        "Returns AUC, percent contribution, permutation importance. "
+        "(9) project cloglog prediction, (10) write suitability PNG + GeoTIFF + diagnostics. "
+        "Supports FLEXIBLE variable selection — pass any subset of bio01-bio19 "
+        "via bioclim_vars (e.g. 'bio01,bio04,bio12' for 3 vars). "
+        "Returns markdown with embedded suitability map, AUC, variable importance, "
+        "and download links for CSV/TIF files. "
         "Data sources: GBIF parquet (260GB local) or GBIF API."
     ),
     "parameters": {
@@ -1564,7 +1573,11 @@ RUN_MAXENT_MODEL_SCHEMA = {
             },
             "bioclim_vars": {
                 "type": "string",
-                "description": "Comma-separated bioclim vars (default: bio01-bio19).",
+                "description": (
+                    "Comma-separated bioclim variable names. Pass ANY subset of "
+                    "bio01-bio19 (e.g. 'bio01,bio04,bio12' for 3 vars). "
+                    "Default: all 19 (bio01-bio19)."
+                ),
             },
             "bioclim_year": {
                 "type": "integer",

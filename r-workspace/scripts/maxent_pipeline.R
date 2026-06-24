@@ -326,10 +326,21 @@ write_outputs <- function(pred_raster, maxent_result, occ_env, species,
 
   paths <- list()
 
-  # Suitability PNG
+  # Suitability PNG — publication-quality map
   png_path <- file.path(output_dir, paste0(sp_clean, "_suitability.png"))
-  grDevices::png(png_path, width = 800, height = 600)
-  terra::plot(pred_raster, main = paste(species, "- MaxEnt Suitability (cloglog)"))
+  grDevices::png(png_path, width = 1000, height = 700, res = 120)
+  suit_cols <- grDevices::colorRampPalette(
+    c("#2166AC", "#67A9CF", "#D1E5F0", "#FDDBC7", "#EF8A62", "#B2182B")
+  )(100)
+  terra::plot(pred_raster, col = suit_cols, range = c(0, 1),
+              main = paste0(species, "\nMaxEnt habitat suitability"),
+              plg = list(title = "Suitability", title.cex = 0.8),
+              mar = c(3, 3, 3, 5))
+  # overlay occurrence points
+  if (exists("occ_env") && nrow(occ_env) > 0) {
+    graphics::points(occ_env$decimalLongitude, occ_env$decimalLatitude,
+                     pch = 16, cex = 0.4, col = grDevices::adjustcolor("black", 0.5))
+  }
   grDevices::dev.off()
   paths$suitability_png <- png_path
 

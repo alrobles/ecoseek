@@ -392,6 +392,8 @@ services:
     profiles: ["frontend"]
     ports:
       - "127.0.0.1:${FRONTEND_PORT:-4000}:80"
+    volumes:
+      - r-workspace-data:/workspace:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/"]
@@ -421,6 +423,7 @@ services:
       DEMO_HERMES_KEY: "${DEMO_HERMES_KEY:-}"
     volumes:
       - ./frontend/nginx-demo.conf:/tmp/nginx-demo.conf.template:ro
+      - r-workspace-data:/workspace:ro
     command: >
       /bin/sh -c "envsubst '$$DEMO_HERMES_KEY' < /tmp/nginx-demo.conf.template
       > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
