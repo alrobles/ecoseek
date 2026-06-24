@@ -272,15 +272,33 @@ build_m_mask <- function(occ, ecoregions_dir, ecoregion_pct = 0.05) {
   }
   cat(sprintf("  Loading ecoregions: %s\n", basename(shp_path)))
 
-  eco <- sf::st_read(shp_path, quiet = TRUE)
-  eco <- sf::st_make_valid(eco)
   pts_sf <- sf::st_as_sf(occ, coords = c("long", "lat"), crs = 4326)
+
+  # Crop ecoregions to occurrence bounding box (+ 5° buffer) before full load
+  bbox <- sf::st_bbox(pts_sf)
+  bbox_buf <- sf::st_bbox(c(
+    xmin = max(bbox["xmin"] - 5, -180),
+    ymin = max(bbox["ymin"] - 5, -90),
+    xmax = min(bbox["xmax"] + 5, 180),
+    ymax = min(bbox["ymax"] + 5, 90)
+  ), crs = sf::st_crs(4326))
+  wkt_filter <- sf::st_as_text(sf::st_as_sfc(bbox_buf))
+  cat(sprintf("  Reading ecoregions within bbox: [%.1f, %.1f, %.1f, %.1f]\n",
+              bbox_buf["xmin"], bbox_buf["ymin"], bbox_buf["xmax"], bbox_buf["ymax"]))
+
+  eco <- sf::st_read(shp_path, wkt_filter = wkt_filter, quiet = TRUE)
+  if (nrow(eco) == 0) {
+    cat("  Warning: no ecoregions in bbox, trying full load...\n")
+    eco <- sf::st_read(shp_path, quiet = TRUE)
+  }
+  eco <- sf::st_make_valid(eco)
+  cat(sprintf("  Loaded %d ecoregion polygons\n", nrow(eco)))
 
   if (!identical(sf::st_crs(eco)$epsg, 4326L)) {
     eco <- sf::st_transform(eco, 4326)
   }
 
-  join <- sf::st_join(pts_sf, eco, join = sf::st_within)
+  join <- sf::st_join(pts_sf, eco, join = sf::st_intersects)
 
   # Find the best ecoregion ID column
   eco_col <- intersect(c("ECO_NAME", "ECO_ID", "eco_name", "eco_id"), names(join))
