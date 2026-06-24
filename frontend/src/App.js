@@ -8,6 +8,7 @@ import { ResizableLayout } from "./components/ResizableLayout";
 import { CodeBlock } from "./components/CodeBlock";
 import { RenderPreview, DiDALPanel } from "./components/RenderPreview";
 import { FilesPanel } from "./components/FilesPanel";
+import { ResultsPanel } from "./components/ResultsPanel";
 import { LiteraturePanel } from "./components/LiteraturePanel";
 import { ReactComponent as EcoSeekLogo } from "./ecoseek-logo.svg";
 import emilyAvatar from "./emily-avatar.png";
@@ -400,6 +401,7 @@ function App() {
 
               // Extract classification and trace_id from didal_protocol results
               if (result.toolCalls) {
+                let hasModelResult = false;
                 for (const tc of result.toolCalls) {
                   if (tc.name === "didal_protocol" || tc.name === "classify_prompt") {
                     try {
@@ -410,7 +412,11 @@ function App() {
                       if (parsed?.judge) setLastJudgeResult(parsed.judge);
                     } catch (_) { /* ignore parse errors */ }
                   }
+                  if (tc.name === "run_maxent_model" || tc.name === "run_niche_model") {
+                    hasModelResult = true;
+                  }
                 }
+                if (hasModelResult) setRightPanelTab("results");
               }
 
               setTimeout(() => setActiveToolCalls([]), 3000);
@@ -829,6 +835,12 @@ function App() {
                 Terminal
               </button>
               <button
+                className={`panel-tab ${rightPanelTab === "results" ? "active" : ""}`}
+                onClick={() => setRightPanelTab("results")}
+              >
+                Results
+              </button>
+              <button
                 className={`panel-tab ${rightPanelTab === "files" ? "active" : ""}`}
                 onClick={() => setRightPanelTab("files")}
               >
@@ -875,6 +887,9 @@ function App() {
                     <p>Or manually: <code>docker run -d --name ecoseek-terminal -p 8001:7681 tsl0922/ttyd:latest bash</code></p>
                   </div>
                 </div>
+              )}
+              {rightPanelTab === "results" && (
+                <ResultsPanel messages={messages} />
               )}
               {rightPanelTab === "files" && (
                 <FilesPanel />
