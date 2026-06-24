@@ -1341,7 +1341,74 @@ body {
   background: var(--accent);
   color: white;
   letter-spacing: 0.5px;
-  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+}
+
+.demo-badge-warning {
+  background: #dc2626;
+  animation: pulse-warning 1s ease-in-out infinite;
+}
+
+@keyframes pulse-warning {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* ── Demo landing page ─────────────────────────────────────────────── */
+
+.demo-landing {
+  max-width: 440px;
+}
+
+.demo-start-button {
+  background: linear-gradient(135deg, #10b981, #059669) !important;
+  color: white !important;
+  font-size: 1.05rem !important;
+  padding: 14px 32px !important;
+}
+
+.demo-start-button:hover {
+  background: linear-gradient(135deg, #059669, #047857) !important;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(16, 185, 129, 0.35);
+}
+
+.demo-cooldown-notice {
+  background: rgba(220, 38, 38, 0.12);
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  border-radius: 12px;
+  padding: 1.2rem;
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+.demo-cooldown-notice .cooldown-icon {
+  font-size: 2rem;
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.demo-cooldown-notice p {
+  color: #f87171;
+  font-size: 0.9rem;
+  margin: 0.25rem 0;
+}
+
+.demo-cooldown-notice .cooldown-timer {
+  font-size: 1.1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.demo-cooldown-notice .cooldown-timer strong {
+  color: #fca5a5;
+  font-size: 1.3rem;
+}
+
+.login-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
 }
 
 /* ── Welcome message ──────────────────────────────────────────────── */
