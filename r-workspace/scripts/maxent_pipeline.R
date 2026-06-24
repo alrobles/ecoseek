@@ -256,9 +256,13 @@ build_m_mask <- function(occ, ecoregions_dir, ecoregion_pct = 0.05) {
   on.exit(sf::sf_use_s2(old_s2))
 
   rds_path <- file.path(ecoregions_dir, "ecoregions.rds")
+  rds_path_ws <- "/workspace/ecoregions/ecoregions.rds"
   if (file.exists(rds_path)) {
-    cat(sprintf("  Using pre-indexed RDS: %s\n", basename(rds_path)))
+    cat(sprintf("  Using pre-indexed RDS: %s\n", rds_path))
     result <- build_m_mask_rds(occ, rds_path, ecoregion_pct)
+  } else if (file.exists(rds_path_ws)) {
+    cat(sprintf("  Using pre-indexed RDS: %s\n", rds_path_ws))
+    result <- build_m_mask_rds(occ, rds_path_ws, ecoregion_pct)
   } else {
     cat("  RDS not found, falling back to shapefile...\n")
     result <- build_m_mask_shapefile(occ, ecoregions_dir, ecoregion_pct)

@@ -25,8 +25,12 @@ while (i <= length(args)) {
   }
 }
 
+# Output goes to writable workspace (Toshiba is mounted read-only in Docker)
+out_dir <- "/workspace/ecoregions"
+if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
+
 shp_path <- file.path(shp_dir, "Ecoregions2017.shp")
-rds_path <- file.path(shp_dir, "ecoregions.rds")
+rds_path <- file.path(out_dir, "ecoregions.rds")
 
 if (!file.exists(shp_path)) {
   shp_candidates <- list.files(shp_dir, pattern = "\\.shp$",
