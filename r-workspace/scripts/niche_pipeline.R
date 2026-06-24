@@ -244,6 +244,10 @@ build_m_mask <- function(occ_filtered, ecoregions_dir, ecoregion_pct = 0.05) {
   cat(sprintf("[7/10] Building M mask (ecoregion threshold=%.0f%%)...\n",
               ecoregion_pct * 100))
 
+  old_s2 <- sf::sf_use_s2()
+  sf::sf_use_s2(FALSE)
+  on.exit(sf::sf_use_s2(old_s2))
+
   shp_path <- file.path(ecoregions_dir, "Ecoregions2017.shp")
   if (!file.exists(shp_path)) {
     shp_files <- list.files(ecoregions_dir, pattern = "\\.shp$",
@@ -255,6 +259,7 @@ build_m_mask <- function(occ_filtered, ecoregions_dir, ecoregion_pct = 0.05) {
   }
   cat(sprintf("  Using ecoregion shapefile: %s\n", basename(shp_path)))
   ecoregions <- st_read(shp_path, quiet = TRUE)
+  ecoregions <- st_make_valid(ecoregions)
 
   pts_sf <- st_as_sf(occ_filtered, coords = c("lon", "lat"), crs = 4326)
 
