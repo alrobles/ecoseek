@@ -241,30 +241,28 @@ def run_niche_model(
     species: str,
     num_starts: int = 20,
     iqr_factor: float = 1.5,
+    env_iqr_factor: float = 1.5,
     ecoregion_pct: float = 0.05,
     bioclim_vars: str = "bio01,bio02,bio03,bio04,bio05,bio06,bio07,bio08,bio09,bio10,bio11,bio12,bio13,bio14,bio15,bio16,bio17,bio18,bio19",
     bioclim_year: int = 2020,
     use_gbif_api: bool = False,
     task_id: str | None = None,
 ) -> str:
-    """Run the niche modeling pipeline for a species.
+    """Run the niche modeling pipeline (Barve et al. 2011 compliant).
 
-    Executes the 10-step ellipsoidal niche modeling algorithm:
-    1. Get GBIF occurrences (from parquet or API)
-    2. Filter unique records
-    3. Remove outliers (IQR)
-    4. Extract ERA5-bioclim variables (flexible subset)
-    5. Deduplicate coordinates
-    6. Fit nicher ellipsoid (presence_only)
-    7. Build M mask from ecoregions (>5% points threshold)
-    8. Crop bioclim rasters with M mask
-    9. Project nicher ellipse onto cropped raster
-    10. Write suitability GeoTIFF + PNG map + summary
+    10-step algorithm with M mask before model fitting:
+    1-3. Get GBIF occurrences, filter unique, remove geographic outliers
+    4-5. Extract ERA5-bioclim, deduplicate coordinates
+    6. Environmental IQR filtering (remove bioclim outliers)
+    7-8. Build M mask from ecoregions, crop rasters to M
+    9. Fit nicher ellipsoid (presence_only)
+    10. Project on M-cropped rasters + write outputs
 
     Args:
         species: Scientific name (e.g., "Panthera onca").
         num_starts: Multi-start optimization restarts (default: 20).
-        iqr_factor: IQR multiplier for outlier removal (default: 1.5).
+        iqr_factor: IQR multiplier for geographic outlier removal (default: 1.5).
+        env_iqr_factor: IQR multiplier for environmental outlier removal (default: 1.5).
         ecoregion_pct: Min fraction of points to keep an ecoregion (default: 0.05).
         bioclim_vars: Comma-separated ERA5-bioclim variable names.
             Pass any subset (e.g. "bio01,bio04,bio12"). Default: all 19.
@@ -290,13 +288,14 @@ source("/workspace/scripts/niche_pipeline.R")
 opts <- list(
   species       = "{species}",
   bioclim_dir   = Sys.getenv("BIOCLIM_DIR", "/media/reumanlab/TOSHIBA_EXT/era5-bioclim"),
-  ecoregions    = Sys.getenv("ECOREGIONS_DIR", "/home/a474r867/work/ecoregions"),
+  ecoregions    = Sys.getenv("ECOREGIONS_DIR", "/media/reumanlab/TOSHIBA_EXT/ecoregions"),
   gbif_parquet  = Sys.getenv("GBIF_PARQUET", "/media/reumanlab/TOSHIBA_EXT/gbifdata/occurrence/2026-06-01/occurrence.parquet"),
   output_dir    = "/workspace/jobs/niche_{species.replace(" ", "_")}",
   bioclim_vars  = c({vars_r}),
   bioclim_year  = {bioclim_year}L,
   num_starts    = {num_starts}L,
   iqr_factor    = {iqr_factor},
+  env_iqr_factor = {env_iqr_factor},
   ecoregion_pct = {ecoregion_pct},
   use_gbif_api  = {"TRUE" if use_gbif_api else "FALSE"},
   gbif_limit    = 50000L
@@ -309,20 +308,19 @@ tryCatch({{
   occ <- remove_outliers_iqr(occ, opts$iqr_factor)
   result <- extract_bioclim(occ, opts$bioclim_dir, opts$bioclim_vars, opts$bioclim_year)
   occ_env <- deduplicate_coords(result$occ)
-  fit <- fit_nicher_ellipsoid(occ_env, result$vars, opts$num_starts)
-  m_mask <- build_m_mask(occ, opts$ecoregions, opts$ecoregion_pct)
+  occ_env <- filter_env_iqr(occ_env, result$vars, opts$env_iqr_factor)
+  m_mask <- build_m_mask(occ_env, opts$ecoregions, opts$ecoregion_pct)
   env_masked <- crop_bioclim_with_mask(result$stack, m_mask)
-  sp_clean <- gsub("[^a-zA-Z0-9]", "_", opts$species)
-  out_path <- file.path(opts$output_dir, paste0(sp_clean, "_suitability.tif"))
+  fit <- fit_nicher_ellipsoid(occ_env, result$vars, opts$num_starts)
   dir.create(opts$output_dir, recursive = TRUE, showWarnings = FALSE)
-  suit <- project_nicher(fit, env_masked, out_path)
-  paths <- write_outputs(suit, fit, occ_env, opts$species, opts$output_dir)
+  paths <- project_and_write(fit, env_masked, occ_env, opts$species, opts$output_dir)
   cat("\\n[RESULT_JSON]", jsonlite::toJSON(list(
     success = TRUE,
     species = opts$species,
     n_points = nrow(occ_env),
     variables = result$vars,
     neg_loglik = fit$best$value,
+    m_mask = "ecoregion",
     output_dir = opts$output_dir,
     files = paths
   ), auto_unbox = TRUE), "\\n")
@@ -346,6 +344,7 @@ def run_maxent_model(
     n_hinges: int = 15,
     max_iter: int = 500,
     iqr_factor: float = 1.5,
+    env_iqr_factor: float = 1.5,
     ecoregion_pct: float = 0.05,
     bioclim_vars: str = "bio01,bio02,bio03,bio04,bio05,bio06,bio07,bio08,bio09,bio10,bio11,bio12,bio13,bio14,bio15,bio16,bio17,bio18,bio19",
     bioclim_year: int = 2020,
@@ -353,27 +352,24 @@ def run_maxent_model(
     seed: int = 42,
     task_id: str | None = None,
 ) -> str:
-    """Run the MaxEnt SDM pipeline for a species via maxentcpp.
+    """Run MaxEnt SDM pipeline (Barve et al. 2011 compliant).
 
-    Executes the 10-step MaxEnt algorithm:
-    1. Get GBIF occurrences (from parquet or API)
-    2. Filter unique records
-    3. Remove outliers (IQR)
-    4. Extract ERA5-bioclim variables (flexible subset)
-    5. Deduplicate coordinates
-    6. Fit MaxEnt via maxentcpp::maxent_run()
-    7. Build M mask from ecoregions (>5% points threshold)
-    8. Crop bioclim rasters with M mask
-    9. Project MaxEnt model (cloglog) onto cropped raster
-    10. Write suitability PNG + GeoTIFF + diagnostics
+    10-step algorithm with M mask before model fitting:
+    1-3. Get GBIF occurrences, filter unique, remove geographic outliers
+    4-5. Extract ERA5-bioclim, deduplicate coordinates
+    6. Environmental IQR filtering (remove bioclim outliers)
+    7-8. Build M mask from ecoregions, crop rasters to M
+    9. Fit MaxEnt with background WITHIN M
+    10. Project on M-cropped rasters + write outputs
 
     Args:
         species: Scientific name (e.g., "Panthera onca").
-        n_background: Number of background points (default: 10000).
+        n_background: Number of background points within M (default: 10000).
         feature_types: Comma-separated feature types (default: linear,quadratic,hinge).
         n_hinges: Number of hinge knots (default: 15).
         max_iter: Maximum training iterations (default: 500).
-        iqr_factor: IQR multiplier for outlier removal (default: 1.5).
+        iqr_factor: IQR multiplier for geographic outlier removal (default: 1.5).
+        env_iqr_factor: IQR multiplier for environmental outlier removal (default: 1.5).
         ecoregion_pct: Min fraction of points to keep an ecoregion (default: 0.05).
         bioclim_vars: Comma-separated ERA5-bioclim variable names.
             Pass any subset (e.g. "bio01,bio04,bio12"). Default: all 19.
@@ -402,7 +398,7 @@ source("/workspace/scripts/maxent_pipeline.R")
 opts <- list(
   species       = "{species}",
   bioclim_dir   = Sys.getenv("BIOCLIM_DIR", "/media/reumanlab/TOSHIBA_EXT/era5-bioclim"),
-  ecoregions    = Sys.getenv("ECOREGIONS_DIR", "/home/a474r867/work/ecoregions"),
+  ecoregions    = Sys.getenv("ECOREGIONS_DIR", "/media/reumanlab/TOSHIBA_EXT/ecoregions"),
   gbif_parquet  = Sys.getenv("GBIF_PARQUET", "/media/reumanlab/TOSHIBA_EXT/gbifdata/occurrence/2026-06-01/occurrence.parquet"),
   output_dir    = "/workspace/jobs/maxent_{species.replace(" ", "_")}",
   bioclim_vars  = c({vars_r}),
@@ -412,6 +408,7 @@ opts <- list(
   n_hinges      = {n_hinges}L,
   max_iter      = {max_iter}L,
   iqr_factor    = {iqr_factor},
+  env_iqr_factor = {env_iqr_factor},
   ecoregion_pct = {ecoregion_pct},
   use_gbif_api  = {"TRUE" if use_gbif_api else "FALSE"},
   gbif_limit    = 50000L,
@@ -425,21 +422,17 @@ tryCatch({{
   occ <- remove_outliers_iqr(occ, opts$iqr_factor)
   result <- extract_bioclim(occ, opts$bioclim_dir, opts$bioclim_vars, opts$bioclim_year)
   occ_env <- deduplicate_coords(result$occ)
-
+  occ_env <- filter_env_iqr(occ_env, result$vars, opts$env_iqr_factor)
+  m_mask <- build_m_mask(occ_env, opts$ecoregions, opts$ecoregion_pct)
+  env_masked <- crop_bioclim_with_mask(result$stack, m_mask)
+  dir.create(opts$output_dir, recursive = TRUE, showWarnings = FALSE)
   maxent_result <- fit_maxent_model(
-    occ_env, result$stack, result$vars, opts$output_dir,
+    occ_env, env_masked, result$vars, opts$output_dir,
     opts$species, opts$n_background, opts$feature_types,
     opts$n_hinges, opts$max_iter, opts$seed
   )
-
-  m_mask <- build_m_mask(occ, opts$ecoregions, opts$ecoregion_pct)
-  env_masked <- crop_bioclim_with_mask(result$stack, m_mask)
-
-  sp_clean <- gsub("[^a-zA-Z0-9]", "_", opts$species)
-  out_path <- file.path(opts$output_dir, paste0(sp_clean, "_suitability.tif"))
-  pred_raster <- project_maxent(maxent_result, env_masked, result$vars, out_path)
-  paths <- write_outputs(pred_raster, maxent_result, occ_env,
-                         opts$species, opts$output_dir)
+  out <- project_and_write(maxent_result, env_masked, result$vars,
+                           occ_env, opts$species, opts$output_dir)
 
   cat("\\n[RESULT_JSON]", jsonlite::toJSON(list(
     success = TRUE,
@@ -450,8 +443,9 @@ tryCatch({{
     variables = result$vars,
     auc = maxent_result$evaluation$auc,
     training_gain = maxent_result$fit_result$loss,
+    m_mask = "ecoregion",
     output_dir = opts$output_dir,
-    files = paths
+    files = out$paths
   ), auto_unbox = TRUE), "\\n")
 }}, error = function(e) {{
   cat("\\n[RESULT_JSON]", jsonlite::toJSON(list(
