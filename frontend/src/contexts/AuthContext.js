@@ -3,11 +3,20 @@ import { getSession, saveSession, clearSession, fetchMe, startLogin } from "../a
 
 const AuthContext = createContext();
 
+const IS_DEMO = process.env.REACT_APP_DEMO_MODE === "true";
+
+const DEMO_USER = {
+  login: "Demo",
+  name: "Demo User",
+  avatarUrl: null,
+};
+
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(IS_DEMO ? DEMO_USER : null);
+  const [loading, setLoading] = useState(!IS_DEMO);
 
   const checkAuth = useCallback(async () => {
+    if (IS_DEMO) return;
     const session = getSession();
     if (!session?.session_id) {
       setUser(null);
@@ -29,10 +38,12 @@ export const AuthProvider = ({ children }) => {
   }, [checkAuth]);
 
   const login = () => {
+    if (IS_DEMO) return;
     startLogin(window.location.origin + "/callback");
   };
 
   const handleCallback = () => {
+    if (IS_DEMO) return;
     const params = new URLSearchParams(window.location.search);
     const sid = params.get("session_id");
     if (sid) {
@@ -43,6 +54,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = () => {
+    if (IS_DEMO) return;
     clearSession();
     setUser(null);
   };
