@@ -258,16 +258,33 @@ build_m_mask <- function(occ_filtered, ecoregions_dir, ecoregion_pct = 0.05) {
     shp_path <- shp_files[1]
   }
   cat(sprintf("  Using ecoregion shapefile: %s\n", basename(shp_path)))
-  ecoregions <- st_read(shp_path, quiet = TRUE)
-  ecoregions <- st_make_valid(ecoregions)
 
   pts_sf <- st_as_sf(occ_filtered, coords = c("lon", "lat"), crs = 4326)
+
+  bbox <- st_bbox(pts_sf)
+  bbox_buf <- st_bbox(c(
+    xmin = max(bbox["xmin"] - 5, -180),
+    ymin = max(bbox["ymin"] - 5, -90),
+    xmax = min(bbox["xmax"] + 5, 180),
+    ymax = min(bbox["ymax"] + 5, 90)
+  ), crs = st_crs(4326))
+  wkt_filter <- st_as_text(st_as_sfc(bbox_buf))
+  cat(sprintf("  Reading ecoregions within bbox: [%.1f, %.1f, %.1f, %.1f]\n",
+              bbox_buf["xmin"], bbox_buf["ymin"], bbox_buf["xmax"], bbox_buf["ymax"]))
+
+  ecoregions <- st_read(shp_path, wkt_filter = wkt_filter, quiet = TRUE)
+  if (nrow(ecoregions) == 0) {
+    cat("  Warning: no ecoregions in bbox, trying full load...\n")
+    ecoregions <- st_read(shp_path, quiet = TRUE)
+  }
+  ecoregions <- st_make_valid(ecoregions)
+  cat(sprintf("  Loaded %d ecoregion polygons\n", nrow(ecoregions)))
 
   if (!identical(st_crs(ecoregions)$epsg, 4326L)) {
     ecoregions <- st_transform(ecoregions, crs = 4326)
   }
 
-  intersection <- st_join(pts_sf, ecoregions, join = st_within)
+  intersection <- st_join(pts_sf, ecoregions, join = st_intersects)
 
   # Find the ecoregion ID column
   eco_id_col <- NULL
