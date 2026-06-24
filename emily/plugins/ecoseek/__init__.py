@@ -1472,14 +1472,14 @@ R_WORKSPACE_STATUS_SCHEMA = {
 RUN_NICHE_MODEL_SCHEMA = {
     "name": "run_niche_model",
     "description": (
-        "Run the ellipsoidal niche modeling pipeline for a species. "
-        "10-step algorithm: (1) Get GBIF occurrences, (2) filter unique, "
-        "(3) remove outliers (IQR), (4) extract ERA5-bioclim (all 19 vars per cell), "
-        "(5) deduplicate coords, (6) fit nicher ellipsoid (presence_only), "
-        "(7) build M mask from ecoregions (>5% threshold), "
-        "(8) crop bioclim with M mask, (9) project ellipse, "
-        "(10) write suitability GeoTIFF. "
-        "Uses nicher package with ERA5-bioclim and WWF ecoregions. "
+        "Run the ellipsoidal niche modeling pipeline (Barve et al. 2011 compliant). "
+        "10-step algorithm: (1-3) Get GBIF occurrences, filter unique, remove geographic outliers, "
+        "(4-5) extract ERA5-bioclim, deduplicate coords, "
+        "(6) environmental IQR filtering on bioclim values, "
+        "(7-8) build M mask from One Earth ecoregions 2017, crop rasters to M, "
+        "(9) fit nicher ellipsoid (presence_only), "
+        "(10) project on M-cropped rasters + write outputs. "
+        "M mask restricts prediction to species' accessible area. "
         "Data sources: GBIF parquet (260GB local) or GBIF API."
     ),
     "parameters": {
@@ -1495,7 +1495,11 @@ RUN_NICHE_MODEL_SCHEMA = {
             },
             "iqr_factor": {
                 "type": "number",
-                "description": "IQR multiplier for outlier removal (default: 1.5).",
+                "description": "IQR multiplier for geographic outlier removal (default: 1.5).",
+            },
+            "env_iqr_factor": {
+                "type": "number",
+                "description": "IQR multiplier for environmental outlier removal (default: 1.5).",
             },
             "ecoregion_pct": {
                 "type": "number",
@@ -1521,13 +1525,13 @@ RUN_NICHE_MODEL_SCHEMA = {
 RUN_MAXENT_MODEL_SCHEMA = {
     "name": "run_maxent_model",
     "description": (
-        "Run the MaxEnt species distribution modeling pipeline via maxentcpp (C++17). "
-        "10-step algorithm: (1) Get GBIF occurrences, (2) filter unique, "
-        "(3) remove outliers (IQR), (4) extract ERA5-bioclim (all 19 vars per cell), "
-        "(5) deduplicate coords, (6) fit MaxEnt with feature transformations "
-        "(linear, quadratic, hinge, product, threshold), "
-        "(7) build M mask from ecoregions, (8) crop bioclim with M mask, "
-        "(9) project cloglog prediction, (10) write suitability GeoTIFF + diagnostics. "
+        "Run MaxEnt SDM pipeline via maxentcpp (Barve et al. 2011 compliant). "
+        "10-step algorithm: (1-3) Get GBIF occurrences, filter unique, remove geographic outliers, "
+        "(4-5) extract ERA5-bioclim, deduplicate coords, "
+        "(6) environmental IQR filtering on bioclim values, "
+        "(7-8) build M mask from One Earth ecoregions 2017, crop rasters to M, "
+        "(9) fit MaxEnt with background WITHIN M (linear, quadratic, hinge features), "
+        "(10) project cloglog on M-cropped rasters + write outputs. "
         "Returns AUC, percent contribution, permutation importance. "
         "Data sources: GBIF parquet (260GB local) or GBIF API."
     ),
@@ -1540,7 +1544,7 @@ RUN_MAXENT_MODEL_SCHEMA = {
             },
             "n_background": {
                 "type": "integer",
-                "description": "Number of background points (default: 10000).",
+                "description": "Number of background points within M (default: 10000).",
             },
             "feature_types": {
                 "type": "string",
@@ -1556,7 +1560,11 @@ RUN_MAXENT_MODEL_SCHEMA = {
             },
             "iqr_factor": {
                 "type": "number",
-                "description": "IQR multiplier for outlier removal (default: 1.5).",
+                "description": "IQR multiplier for geographic outlier removal (default: 1.5).",
+            },
+            "env_iqr_factor": {
+                "type": "number",
+                "description": "IQR multiplier for environmental outlier removal (default: 1.5).",
             },
             "ecoregion_pct": {
                 "type": "number",
@@ -1746,6 +1754,7 @@ def register(ctx) -> None:
             species=args.get("species", ""),
             num_starts=args.get("num_starts", 20),
             iqr_factor=args.get("iqr_factor", 1.5),
+            env_iqr_factor=args.get("env_iqr_factor", 1.5),
             ecoregion_pct=args.get("ecoregion_pct", 0.05),
             bioclim_vars=args.get(
                 "bioclim_vars",
@@ -1769,6 +1778,7 @@ def register(ctx) -> None:
             n_hinges=args.get("n_hinges", 15),
             max_iter=args.get("max_iter", 500),
             iqr_factor=args.get("iqr_factor", 1.5),
+            env_iqr_factor=args.get("env_iqr_factor", 1.5),
             ecoregion_pct=args.get("ecoregion_pct", 0.05),
             bioclim_vars=args.get(
                 "bioclim_vars",
