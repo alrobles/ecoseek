@@ -417,8 +417,13 @@ services:
     profiles: ["demo"]
     ports:
       - "127.0.0.1:${DEMO_FRONTEND_PORT:-4001}:80"
+    environment:
+      DEMO_HERMES_KEY: "${DEMO_HERMES_KEY:-}"
     volumes:
-      - ./frontend/nginx-demo.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./frontend/nginx-demo.conf:/tmp/nginx-demo.conf.template:ro
+    command: >
+      /bin/sh -c "envsubst '$$DEMO_HERMES_KEY' < /tmp/nginx-demo.conf.template
+      > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
