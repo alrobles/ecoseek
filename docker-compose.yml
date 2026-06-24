@@ -402,6 +402,35 @@ services:
     networks:
       - ecoseek-net
 
+  # ── Demo Frontend (public, no login) ──────────────────────────────────
+  # Public demo for hackathons/challenges. No GitHub OAuth, no cluster
+  # access. Chat proxies to demo Hermes on port 8646.
+  demo-frontend:
+    build:
+      context: ./frontend
+      args:
+        REACT_APP_BROKER_URL: "${REACT_APP_BROKER_URL:-https://broker.ecoseek.org}"
+        REACT_APP_EMILY_URL: ""
+        REACT_APP_EMILY_KEY: ""
+        REACT_APP_DEMO_MODE: "true"
+    container_name: demo-frontend
+    profiles: ["demo"]
+    ports:
+      - "127.0.0.1:${DEMO_FRONTEND_PORT:-4001}:80"
+    volumes:
+      - ./frontend/nginx-demo.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - ecoseek-net
+
   # ── R Workspace (rocker/geospatial + HTTP bridge) ───────────────────────
   r-workspace:
     build:
