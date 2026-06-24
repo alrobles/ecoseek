@@ -332,6 +332,25 @@ write_outputs <- function(suit, fit, occ_env, species, output_dir) {
   }
   cat(sprintf("  Raster: %s\n", raster_path))
 
+  # Suitability PNG — publication-quality map
+  png_path <- file.path(output_dir, paste0(species_clean, "_suitability.png"))
+  grDevices::png(png_path, width = 1000, height = 700, res = 120)
+  suit_cols <- grDevices::colorRampPalette(
+    c("#2166AC", "#67A9CF", "#D1E5F0", "#FDDBC7", "#EF8A62", "#B2182B")
+  )(100)
+  terra::plot(suit, col = suit_cols, range = c(0, 1),
+              main = paste0(species, "\nNicher ellipsoidal suitability"),
+              plg = list(title = "Suitability", title.cex = 0.8),
+              mar = c(3, 3, 3, 5))
+  if (nrow(occ_env) > 0) {
+    lon_col <- if ("decimalLongitude" %in% names(occ_env)) "decimalLongitude" else "lon"
+    lat_col <- if ("decimalLatitude" %in% names(occ_env)) "decimalLatitude" else "lat"
+    graphics::points(occ_env[[lon_col]], occ_env[[lat_col]],
+                     pch = 16, cex = 0.4, col = grDevices::adjustcolor("black", 0.5))
+  }
+  grDevices::dev.off()
+  cat(sprintf("  PNG: %s\n", png_path))
+
   # Ellipsoid parameters
   pars <- get_ellipsoid_pars(occ_env[, fit$var_names])
   pars_path <- file.path(output_dir, paste0(species_clean, "_ellipsoid_params.rds"))
@@ -369,10 +388,11 @@ write_outputs <- function(suit, fit, occ_env, species, output_dir) {
 
   cat("\n=== Pipeline complete ===\n")
   invisible(list(
-    raster_path  = raster_path,
-    params_path  = pars_path,
-    occ_path     = occ_path,
-    summary_path = summary_path
+    suitability_png = png_path,
+    suitability_tif = raster_path,
+    ellipsoid_params = pars_path,
+    occurrences_csv  = occ_path,
+    summary_txt      = summary_path
   ))
 }
 
