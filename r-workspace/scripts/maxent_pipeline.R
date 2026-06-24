@@ -393,6 +393,18 @@ fit_maxent_model <- function(occ_env, env_masked, bioclim_vars, output_dir,
   }
   if (nrow(occ_env) < 5) stop("Too few points within M mask extent")
 
+  # Drop points that fall on NA cells in the masked raster
+  pts <- terra::vect(occ_env, geom = c("long", "lat"),
+                     crs = terra::crs(env_masked))
+  vals <- terra::extract(env_masked, pts)
+  complete <- complete.cases(vals[, bioclim_vars, drop = FALSE])
+  if (sum(complete) < nrow(occ_env)) {
+    cat(sprintf("  Dropped %d points on NA raster cells (%d → %d)\n",
+                sum(!complete), nrow(occ_env), sum(complete)))
+    occ_env <- occ_env[complete, ]
+  }
+  if (nrow(occ_env) < 5) stop("Too few points with valid raster values")
+
   occ_df <- data.frame(
     long = occ_env$long,
     lat  = occ_env$lat
