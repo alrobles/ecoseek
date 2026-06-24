@@ -32,8 +32,6 @@ suppressPackageStartupMessages({
   library(sf)
   library(arrow)
   library(maxentcpp)
-  library(duckdb)
-  library(DBI)
 })
 
 # ── CLI argument parsing ──────────────────────────────────────────────
@@ -248,7 +246,7 @@ filter_env_iqr <- function(occ_env, bioclim_vars, env_iqr_factor = 1.5) {
 
 
 # ── Step 7: Build M mask from ecoregions (Barve et al. 2011) ─────────
-# Uses DuckDB spatial index when available (milliseconds).
+# Uses pre-indexed RDS when available (~2s load vs ~30s+ for shapefile).
 # Falls back to shapefile with bbox filter (slower).
 build_m_mask <- function(occ, ecoregions_dir, ecoregion_pct = 0.05) {
   cat("[7/10] Building M mask from ecoregions...\n")
@@ -257,73 +255,47 @@ build_m_mask <- function(occ, ecoregions_dir, ecoregion_pct = 0.05) {
   sf::sf_use_s2(FALSE)
   on.exit(sf::sf_use_s2(old_s2))
 
-  db_path <- file.path(ecoregions_dir, "ecoregions.duckdb")
-  use_duckdb <- file.exists(db_path) && requireNamespace("duckdb", quietly = TRUE)
-
-  if (use_duckdb) {
-    cat(sprintf("  Using DuckDB spatial index: %s\n", basename(db_path)))
-    result <- build_m_mask_duckdb(occ, db_path, ecoregion_pct)
+  rds_path <- file.path(ecoregions_dir, "ecoregions.rds")
+  if (file.exists(rds_path)) {
+    cat(sprintf("  Using pre-indexed RDS: %s\n", basename(rds_path)))
+    result <- build_m_mask_rds(occ, rds_path, ecoregion_pct)
   } else {
-    cat("  DuckDB not available, falling back to shapefile...\n")
+    cat("  RDS not found, falling back to shapefile...\n")
     result <- build_m_mask_shapefile(occ, ecoregions_dir, ecoregion_pct)
   }
   result
 }
 
-build_m_mask_duckdb <- function(occ, db_path, ecoregion_pct = 0.05) {
-  con <- DBI::dbConnect(duckdb::duckdb(), dbdir = db_path, read_only = TRUE)
-  on.exit(DBI::dbDisconnect(con, shutdown = TRUE))
-  DBI::dbExecute(con, "LOAD spatial;")
+build_m_mask_rds <- function(occ, rds_path, ecoregion_pct = 0.05) {
+  t0 <- proc.time()[3]
+  eco <- readRDS(rds_path)
+  dt_load <- proc.time()[3] - t0
+  cat(sprintf("  Loaded %d ecoregions from RDS in %.1fs\n", nrow(eco), dt_load))
 
-  # Build point list for SQL IN clause
-  pts_sql <- paste(
-    sprintf("(%f, %f)", occ$long, occ$lat),
-    collapse = ", "
-  )
-
-  # Spatial join via DuckDB: find ecoregion for each point
-  query <- sprintf("
-    WITH pts AS (
-      SELECT column0 AS lon, column1 AS lat
-      FROM (VALUES %s)
-    )
-    SELECT p.lon, p.lat, e.ECO_NAME
-    FROM pts p, ecoregions e
-    WHERE ST_Contains(e.geom, ST_Point(p.lon, p.lat))
-  ", pts_sql)
+  eco <- sf::st_make_valid(eco)
+  pts_sf <- sf::st_as_sf(occ, coords = c("long", "lat"), crs = 4326)
 
   t0 <- proc.time()[3]
-  join_result <- DBI::dbGetQuery(con, query)
-  dt <- proc.time()[3] - t0
-  cat(sprintf("  DuckDB spatial join: %d matches in %.1fs\n",
-              nrow(join_result), dt))
+  join <- sf::st_join(pts_sf, eco, join = sf::st_intersects)
+  dt_join <- proc.time()[3] - t0
+  cat(sprintf("  Spatial join: %d matches in %.1fs\n",
+              sum(!is.na(join$ECO_NAME)), dt_join))
 
-  if (nrow(join_result) == 0) {
+  join <- join[!is.na(join$ECO_NAME), ]
+  if (nrow(join) == 0) {
     cat("  Warning: no points matched ecoregions, using convex hull\n")
-    pts_sf <- sf::st_as_sf(occ, coords = c("long", "lat"), crs = 4326)
     hull <- sf::st_buffer(sf::st_convex_hull(sf::st_union(pts_sf)), dist = 2)
     return(terra::vect(hull))
   }
 
-  # Select ecoregions with enough points
-  freq <- table(join_result$ECO_NAME)
-  n_total <- nrow(occ)
-  keep <- names(freq[freq >= max(1, ceiling(n_total * ecoregion_pct))])
+  freq <- table(join$ECO_NAME)
+  keep <- names(freq[freq >= max(1, ceiling(nrow(occ) * ecoregion_pct))])
   if (length(keep) == 0) keep <- names(freq[freq > 0])
   cat(sprintf("  %d ecoregions selected (of %d with points)\n",
               length(keep), length(freq)))
 
-  # Retrieve geometries for selected ecoregions from DuckDB
-  eco_names_sql <- paste(sprintf("'%s'", gsub("'", "''", keep)), collapse = ", ")
-  eco_wkt <- DBI::dbGetQuery(con, sprintf("
-    SELECT ECO_NAME, ST_AsText(geom) AS wkt
-    FROM ecoregions
-    WHERE ECO_NAME IN (%s)
-  ", eco_names_sql))
-
-  # Convert WKT geometries to sf → union → vect
-  geoms <- sf::st_as_sfc(eco_wkt$wkt, crs = 4326)
-  m_poly <- sf::st_union(sf::st_make_valid(geoms))
+  m_eco <- eco[eco$ECO_NAME %in% keep, ]
+  m_poly <- sf::st_make_valid(sf::st_union(m_eco))
   cat(sprintf("  M mask built from %d ecoregion(s)\n", length(keep)))
   terra::vect(m_poly)
 }
