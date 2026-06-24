@@ -29,8 +29,9 @@ const IS_DEMO = process.env.REACT_APP_DEMO_MODE === "true";
  */
 const EMILY_KEY = process.env.REACT_APP_EMILY_KEY || "";
 
-/** The endpoint to send chat completions to. */
-const CHAT_URL = IS_LOCAL_EMILY ? EMILY_URL : BROKER_URL;
+/** The endpoint to send chat completions to.
+ *  Demo mode uses relative URLs — nginx proxies /v1/ to Hermes :8646. */
+const CHAT_URL = IS_DEMO ? "" : IS_LOCAL_EMILY ? EMILY_URL : BROKER_URL;
 
 // ── Session helpers ────────────────────────────────────────────────────
 
@@ -93,6 +94,10 @@ export async function fetchMe() {
 
 export async function checkHealth() {
   try {
+    if (IS_DEMO) {
+      const res = await fetch("/health");
+      return res.ok;
+    }
     // Check Emily local health if configured, otherwise check broker
     if (IS_LOCAL_EMILY) {
       const res = await fetch(`${EMILY_URL}/health`);
