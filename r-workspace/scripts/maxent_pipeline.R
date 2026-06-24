@@ -252,6 +252,11 @@ filter_env_iqr <- function(occ_env, bioclim_vars, env_iqr_factor = 1.5) {
 build_m_mask <- function(occ, ecoregions_dir, ecoregion_pct = 0.05) {
   cat("[7/10] Building M mask from ecoregions...\n")
 
+  # Disable S2 to avoid invalid geometry errors in ecoregion shapefiles
+  old_s2 <- sf::sf_use_s2()
+  sf::sf_use_s2(FALSE)
+  on.exit(sf::sf_use_s2(old_s2))
+
   shp_path <- file.path(ecoregions_dir, "Ecoregions2017.shp")
   if (!file.exists(shp_path)) {
     shp_candidates <- list.files(ecoregions_dir, pattern = "\\.shp$",
@@ -268,6 +273,7 @@ build_m_mask <- function(occ, ecoregions_dir, ecoregion_pct = 0.05) {
   cat(sprintf("  Loading ecoregions: %s\n", basename(shp_path)))
 
   eco <- sf::st_read(shp_path, quiet = TRUE)
+  eco <- sf::st_make_valid(eco)
   pts_sf <- sf::st_as_sf(occ, coords = c("long", "lat"), crs = 4326)
 
   if (!identical(sf::st_crs(eco)$epsg, 4326L)) {
