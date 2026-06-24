@@ -6,6 +6,7 @@
 #
 # Extra ecology packages installed on top:
 #   dismo, vegan, ape, picante, phytools, ENMeval, spocc, rgbif, taxize
+#   maxentcpp (C++17 MaxEnt), nicher (ellipsoidal niche models)
 #
 # Build:
 #   docker build -f docker/r-workspace.Dockerfile -t ecoseek-r-workspace .
@@ -37,7 +38,13 @@ RUN install2.r --error --skipinstalled --ncpus -1 \
     sdm \
     biomod2 \
     CoordinateCleaner \
+    remotes \
     && rm -rf /tmp/downloaded_packages/
+
+# Install maxentcpp + nicher from GitHub (real SDM engines)
+RUN Rscript -e "remotes::install_github('alrobles/maxentcpp', upgrade = 'never')" && \
+    Rscript -e "remotes::install_github('alrobles/nicher', upgrade = 'never')" && \
+    rm -rf /tmp/downloaded_packages/
 
 # Python for the HTTP bridge (already in rocker via reticulate, but ensure)
 RUN apt-get update && apt-get install -y --no-install-recommends python3 && \
@@ -45,6 +52,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 && \
 
 # Create workspace and R user library
 RUN mkdir -p /workspace/jobs /workspace/R_libs /workspace/data
+
+# Copy niche modeling pipeline scripts
+COPY r-workspace/scripts/ /workspace/scripts/
 
 ENV R_WORKSPACE_DIR="/workspace"
 ENV R_WORKSPACE_PORT="8787"
