@@ -5,22 +5,23 @@
 #   1. Download/read GBIF occurrence points
 #   2. Filter unique records
 #   3. Remove outliers (IQR on lon/lat)
-#   4. Extract CHELSA bioclim at presence points
+#   4. Extract ERA5-bioclim at presence points
 #   5. Keep unique lon/lat records
 #   6. Fit ellipsoid with nicher (presence_only)
 #   7. Build M mask: intersect points with ecoregions, keep >5% of points
-#   8. Crop CHELSA bioclim with M mask
+#   8. Crop ERA5-bioclim with M mask
 #   9. Project nicher ellipse on cropped raster
 #  10. Write output raster
 #
 # Usage:
 #   Rscript niche_pipeline.R --species "Panthera onca" [options]
 #
-# Required data paths (HPC defaults):
-#   --chelsa_dir   /home/a474r867/work/chelsa_bioclim
+# Required data paths (reumanlab Toshiba defaults):
+#   --bioclim_dir  /media/reumanlab/TOSHIBA_EXT/era5-bioclim
 #   --ecoregions   /home/a474r867/work/ecoregions
-#   --gbif_parquet /home/a474r867/work/gbifdata/data/work/gbifdata/occurrence/2025-06-01/occurrence.parquet
+#   --gbif_parquet /media/reumanlab/TOSHIBA_EXT/gbifdata/occurrence/2026-06-01/occurrence.parquet
 #   --output_dir   ./output
+#   --bioclim_year 2020
 
 suppressPackageStartupMessages({
   library(terra)
@@ -34,11 +35,12 @@ parse_args <- function() {
   args <- commandArgs(trailingOnly = TRUE)
   opts <- list(
     species       = NULL,
-    chelsa_dir    = "/home/a474r867/work/chelsa_bioclim",
+    bioclim_dir   = "/media/reumanlab/TOSHIBA_EXT/era5-bioclim",
     ecoregions    = "/home/a474r867/work/ecoregions",
-    gbif_parquet  = "/home/a474r867/work/gbifdata/data/work/gbifdata/occurrence/2025-06-01/occurrence.parquet",
+    gbif_parquet  = "/media/reumanlab/TOSHIBA_EXT/gbifdata/occurrence/2026-06-01/occurrence.parquet",
     output_dir    = "./output",
     bioclim_vars  = paste0("bio", sprintf("%02d", 1:19)),
+    bioclim_year  = 2020L,
     num_starts    = 20L,
     iqr_factor    = 1.5,
     ecoregion_pct = 0.05,
@@ -49,6 +51,7 @@ parse_args <- function() {
   i <- 1L
   while (i <= length(args)) {
     key <- sub("^--", "", args[i])
+    if (key == "chelsa_dir") key <- "bioclim_dir"  # backward compat
     if (key %in% names(opts)) {
       i <- i + 1L
       opts[[key]] <- args[i]
@@ -56,7 +59,8 @@ parse_args <- function() {
       cat("Usage: Rscript niche_pipeline.R --species \"Genus species\" [options]\n")
       cat("\nOptions:\n")
       cat("  --species        Species name (required)\n")
-      cat("  --chelsa_dir     Path to CHELSA bioclim TIFs\n")
+      cat("  --bioclim_dir    Path to ERA5-bioclim directory\n")
+      cat("  --bioclim_year   Year for bioclim data (default: 2020)\n")
       cat("  --ecoregions     Path to ecoregions shapefiles\n")
       cat("  --gbif_parquet   Path to GBIF occurrence parquet\n")
       cat("  --output_dir     Output directory\n")
@@ -71,6 +75,7 @@ parse_args <- function() {
   }
 
   opts$num_starts    <- as.integer(opts$num_starts)
+  opts$bioclim_year  <- as.integer(opts$bioclim_year)
   opts$iqr_factor    <- as.numeric(opts$iqr_factor)
   opts$ecoregion_pct <- as.numeric(opts$ecoregion_pct)
   opts$gbif_limit    <- as.integer(opts$gbif_limit)
@@ -152,21 +157,22 @@ remove_outliers_iqr <- function(occ, factor = 1.5) {
 }
 
 
-# ── Step 4: Extract CHELSA bioclim at presence points ─────────────────
-extract_bioclim <- function(occ, chelsa_dir, bioclim_vars) {
-  cat("[4/10] Extracting CHELSA bioclim variables...\n")
+# ── Step 4: Extract ERA5-bioclim at presence points ──────────────────
+extract_bioclim <- function(occ, bioclim_dir, bioclim_vars, year = 2020L) {
+  cat(sprintf("[4/10] Extracting ERA5-bioclim variables (year %d)...\n", year))
 
   tif_files <- file.path(
-    chelsa_dir,
-    paste0("CHELSA_", bioclim_vars, "_1981-2010_V.2.1.tif")
+    bioclim_dir, as.character(year),
+    paste0(bioclim_vars, "_", year, ".tif")
   )
   exists_mask <- file.exists(tif_files)
   if (!any(exists_mask)) {
-    stop("No CHELSA TIF files found in ", chelsa_dir)
+    stop("No ERA5-bioclim TIF files found in ", file.path(bioclim_dir, year))
   }
   if (!all(exists_mask)) {
     cat(sprintf("  Warning: missing %d TIFs, using %d available\n",
                 sum(!exists_mask), sum(exists_mask)))
+    cat(sprintf("  Missing: %s\n", paste(basename(tif_files[!exists_mask]), collapse = ", ")))
     tif_files <- tif_files[exists_mask]
     bioclim_vars <- bioclim_vars[exists_mask]
   }
@@ -287,7 +293,7 @@ build_m_mask <- function(occ_filtered, ecoregions_dir, ecoregion_pct = 0.05) {
 
 # ── Step 8: Crop bioclim rasters with M mask ─────────────────────────
 crop_bioclim_with_mask <- function(env_stack, m_mask) {
-  cat("[8/10] Cropping CHELSA bioclim with M mask...\n")
+  cat("[8/10] Cropping ERA5-bioclim with M mask...\n")
 
   m_vect <- vect(m_mask)
   env_cropped <- crop(env_stack, m_vect)
@@ -391,7 +397,7 @@ main <- function() {
   if (length(bioclim_vars) == 1 && grepl(" ", bioclim_vars)) {
     bioclim_vars <- strsplit(bioclim_vars, "\\s+")[[1]]
   }
-  result <- extract_bioclim(occ, opts$chelsa_dir, bioclim_vars)
+  result <- extract_bioclim(occ, opts$bioclim_dir, bioclim_vars, opts$bioclim_year)
   occ_env <- result$occ
   bioclim_vars <- result$vars
   env_stack <- result$stack

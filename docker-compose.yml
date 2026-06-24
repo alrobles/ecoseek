@@ -451,6 +451,7 @@ services:
       R_EXEC_TIMEOUT: "${R_EXEC_TIMEOUT:-300}"
     volumes:
       - r-workspace-data:/workspace
+      - /media/reumanlab/TOSHIBA_EXT:/media/reumanlab/TOSHIBA_EXT:ro
     restart: unless-stopped
     healthcheck:
       test:
