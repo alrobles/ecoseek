@@ -354,6 +354,10 @@ build_m_mask_shapefile <- function(occ, ecoregions_dir, ecoregion_pct = 0.05) {
 # ── Step 8: Crop bioclim rasters with M mask ──────────────────────────
 crop_bioclim_with_mask <- function(env_stack, m_mask) {
   cat("[8/10] Cropping ERA5-bioclim with M mask...\n")
+  if (!identical(terra::crs(env_stack), terra::crs(m_mask))) {
+    cat("  Aligning M mask CRS to raster CRS...\n")
+    m_mask <- terra::project(m_mask, terra::crs(env_stack))
+  }
   env_crop <- terra::crop(env_stack, m_mask)
   env_mask <- terra::mask(env_crop, m_mask)
   n_valid <- sum(!is.na(terra::values(env_mask[[1]])))
@@ -377,6 +381,17 @@ fit_maxent_model <- function(occ_env, env_masked, bioclim_vars, output_dir,
     maxent_grid_from_terra(env_masked[[v]], name = v)
   })
   names(env_grids) <- bioclim_vars
+
+  ext <- terra::ext(env_masked)
+  n_before <- nrow(occ_env)
+  keep <- occ_env$long >= ext[1] & occ_env$long <= ext[2] &
+          occ_env$lat  >= ext[3] & occ_env$lat  <= ext[4]
+  occ_env <- occ_env[keep, ]
+  if (nrow(occ_env) < n_before) {
+    cat(sprintf("  Clipped %d → %d points to raster extent\n",
+                n_before, nrow(occ_env)))
+  }
+  if (nrow(occ_env) < 5) stop("Too few points within M mask extent")
 
   occ_df <- data.frame(
     long = occ_env$long,
