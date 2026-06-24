@@ -13,7 +13,7 @@ import { ReactComponent as EcoSeekLogo } from "./ecoseek-logo.svg";
 import emilyAvatar from "./emily-avatar.png";
 import emilyThinking from "./emily-avatar-thinking.gif";
 import { useAuth } from "./contexts/AuthContext";
-import { chatCompletionStream, checkHealth, checkRemoteHealth, BROKER_URL, CHAT_URL, IS_LOCAL_EMILY, HERMES_REMOTE_URL } from "./api/broker";
+import { chatCompletionStream, checkHealth, checkRemoteHealth, BROKER_URL, CHAT_URL, IS_LOCAL_EMILY, IS_DEMO, HERMES_REMOTE_URL } from "./api/broker";
 import { ToolCallsContainer } from "./components/ToolCallCard";
 import { extractPdfText, validatePdf } from "./utils/pdfExtract";
 
@@ -441,16 +441,21 @@ function App() {
           </div>
         </div>
         <div className="header-actions">
-          <div className="user-info">
-            {user.avatarUrl && (
-              <img
-                src={user.avatarUrl}
-                alt={user.login}
-                className="user-avatar"
-              />
-            )}
-            <span className="user-name">{user.login}</span>
-          </div>
+          {!IS_DEMO && (
+            <div className="user-info">
+              {user.avatarUrl && (
+                <img
+                  src={user.avatarUrl}
+                  alt={user.login}
+                  className="user-avatar"
+                />
+              )}
+              <span className="user-name">{user.login}</span>
+            </div>
+          )}
+          {IS_DEMO && (
+            <span className="demo-badge">Demo</span>
+          )}
           <a
             href="https://github.com/alrobles/ecoseek"
             target="_blank"
@@ -463,9 +468,11 @@ function App() {
             </svg>
           </a>
           <ThemeToggle />
-          <button className="action-button logout-button" onClick={logout}>
-            Sign out
-          </button>
+          {!IS_DEMO && (
+            <button className="action-button logout-button" onClick={logout}>
+              Sign out
+            </button>
+          )}
         </div>
       </header>
 

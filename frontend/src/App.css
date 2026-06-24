@@ -1333,6 +1333,17 @@ body {
   border-color: var(--destructive);
 }
 
+.demo-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 12px;
+  background: var(--accent);
+  color: white;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
 /* ── Welcome message ──────────────────────────────────────────────── */
 
 .welcome-message {
