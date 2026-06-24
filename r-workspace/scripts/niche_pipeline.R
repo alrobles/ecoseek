@@ -349,6 +349,10 @@ crop_bioclim_with_mask <- function(env_stack, m_mask) {
   cat("[8/10] Cropping ERA5-bioclim with M mask...\n")
 
   m_vect <- vect(m_mask)
+  if (!identical(terra::crs(env_stack), terra::crs(m_vect))) {
+    cat("  Aligning M mask CRS to raster CRS...\n")
+    m_vect <- terra::project(m_vect, terra::crs(env_stack))
+  }
   env_cropped <- crop(env_stack, m_vect)
   env_masked <- mask(env_cropped, m_vect)
 
