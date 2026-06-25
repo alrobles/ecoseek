@@ -238,74 +238,109 @@ filter_env_iqr <- function(occ_env, bioclim_vars, env_iqr_factor = 1.5) {
 
 
 # ── Step 7: Build M mask from ecoregions (Barve et al. 2011) ─────────
-# Spatial join of presence points to ecoregions → keep ecoregions with
-# sufficient point density → dissolve into single M polygon.
+# Uses pre-indexed RDS when available (~2s load vs ~30s+ for shapefile).
+# Falls back to shapefile with bbox filter (slower).
 build_m_mask <- function(occ_filtered, ecoregions_dir, ecoregion_pct = 0.05) {
   cat(sprintf("[7/10] Building M mask (ecoregion threshold=%.0f%%)...\n",
               ecoregion_pct * 100))
 
+  old_s2 <- sf::sf_use_s2()
+  sf::sf_use_s2(FALSE)
+  on.exit(sf::sf_use_s2(old_s2))
+
+  rds_path <- file.path(ecoregions_dir, "ecoregions.rds")
+  rds_path_ws <- "/workspace/ecoregions/ecoregions.rds"
+  if (file.exists(rds_path)) {
+    cat(sprintf("  Using pre-indexed RDS: %s\n", rds_path))
+    build_m_mask_rds_niche(occ_filtered, rds_path, ecoregion_pct)
+  } else if (file.exists(rds_path_ws)) {
+    cat(sprintf("  Using pre-indexed RDS: %s\n", rds_path_ws))
+    build_m_mask_rds_niche(occ_filtered, rds_path_ws, ecoregion_pct)
+  } else {
+    cat("  RDS not found, falling back to shapefile...\n")
+    build_m_mask_shapefile_niche(occ_filtered, ecoregions_dir, ecoregion_pct)
+  }
+}
+
+build_m_mask_rds_niche <- function(occ_filtered, rds_path, ecoregion_pct = 0.05) {
+  t0 <- proc.time()[3]
+  eco <- readRDS(rds_path)
+  dt_load <- proc.time()[3] - t0
+  cat(sprintf("  Loaded %d ecoregions from RDS in %.1fs\n", nrow(eco), dt_load))
+
+  eco <- sf::st_make_valid(eco)
+  pts_sf <- sf::st_as_sf(occ_filtered, coords = c("lon", "lat"), crs = 4326)
+
+  t0 <- proc.time()[3]
+  join <- sf::st_join(pts_sf, eco, join = sf::st_intersects)
+  dt_join <- proc.time()[3] - t0
+  cat(sprintf("  Spatial join: %d matches in %.1fs\n",
+              sum(!is.na(join$ECO_NAME)), dt_join))
+
+  join <- join[!is.na(join$ECO_NAME), ]
+  if (nrow(join) == 0) {
+    cat("  Warning: no points matched ecoregions, using convex hull\n")
+    hull <- sf::st_buffer(sf::st_convex_hull(sf::st_union(pts_sf)), dist = 2)
+    return(hull)
+  }
+
+  freq <- table(join$ECO_NAME)
+  keep <- names(freq[freq >= max(1, ceiling(nrow(occ_filtered) * ecoregion_pct))])
+  if (length(keep) == 0) keep <- names(freq[freq > 0])
+  cat(sprintf("  %d ecoregions selected (of %d with points)\n",
+              length(keep), length(freq)))
+
+  m_eco <- eco[eco$ECO_NAME %in% keep, ]
+  m_poly <- sf::st_make_valid(sf::st_union(m_eco))
+  cat(sprintf("  M mask built from %d ecoregion(s)\n", length(keep)))
+  m_poly
+}
+
+build_m_mask_shapefile_niche <- function(occ_filtered, ecoregions_dir, ecoregion_pct = 0.05) {
   shp_path <- file.path(ecoregions_dir, "Ecoregions2017.shp")
   if (!file.exists(shp_path)) {
     shp_files <- list.files(ecoregions_dir, pattern = "\\.shp$",
                             full.names = TRUE, recursive = TRUE)
-    if (length(shp_files) == 0) {
-      stop("No .shp files found in ", ecoregions_dir)
-    }
+    if (length(shp_files) == 0) stop("No .shp files found in ", ecoregions_dir)
     shp_path <- shp_files[1]
   }
-  cat(sprintf("  Using ecoregion shapefile: %s\n", basename(shp_path)))
-  ecoregions <- st_read(shp_path, quiet = TRUE)
 
   pts_sf <- st_as_sf(occ_filtered, coords = c("lon", "lat"), crs = 4326)
+  bbox <- st_bbox(pts_sf)
+  bbox_buf <- st_bbox(c(
+    xmin = max(bbox["xmin"] - 5, -180),
+    ymin = max(bbox["ymin"] - 5, -90),
+    xmax = min(bbox["xmax"] + 5, 180),
+    ymax = min(bbox["ymax"] + 5, 90)
+  ), crs = st_crs(4326))
+  wkt_filter <- st_as_text(st_as_sfc(bbox_buf))
 
+  ecoregions <- st_read(shp_path, wkt_filter = wkt_filter, quiet = TRUE)
+  if (nrow(ecoregions) == 0) ecoregions <- st_read(shp_path, quiet = TRUE)
+  ecoregions <- st_make_valid(ecoregions)
   if (!identical(st_crs(ecoregions)$epsg, 4326L)) {
     ecoregions <- st_transform(ecoregions, crs = 4326)
   }
 
-  intersection <- st_join(pts_sf, ecoregions, join = st_within)
-
-  # Find the ecoregion ID column
+  intersection <- st_join(pts_sf, ecoregions, join = st_intersects)
   eco_id_col <- NULL
-  candidates <- c("ECO_NAME", "ECO_ID", "eco_name", "eco_id",
-                   "BIOME_NAME", "BIOME", "NAME", "name", "OBJECTID")
-  for (cand in candidates) {
-    if (cand %in% names(intersection)) {
-      eco_id_col <- cand
-      break
-    }
+  for (cand in c("ECO_NAME", "ECO_ID", "eco_name", "eco_id")) {
+    if (cand %in% names(intersection)) { eco_id_col <- cand; break }
   }
   if (is.null(eco_id_col)) {
     chr_cols <- names(intersection)[vapply(st_drop_geometry(intersection),
                                            is.character, logical(1))]
     if (length(chr_cols) > 0) eco_id_col <- chr_cols[1]
   }
-  if (is.null(eco_id_col)) {
-    stop("Cannot find ecoregion identifier column in shapefile")
-  }
-  cat(sprintf("  Ecoregion ID column: %s\n", eco_id_col))
-
-  # Remove points outside all ecoregions
+  if (is.null(eco_id_col)) stop("Cannot find ecoregion ID column")
   intersection <- intersection[!is.na(intersection[[eco_id_col]]), ]
 
-  eco_counts <- table(st_drop_geometry(intersection)[[eco_id_col]])
-  total_pts <- nrow(occ_filtered)
-  eco_pct <- eco_counts / total_pts
+  freq <- table(st_drop_geometry(intersection)[[eco_id_col]])
+  keep <- names(freq[freq >= max(1, ceiling(nrow(occ_filtered) * ecoregion_pct))])
+  if (length(keep) == 0) keep <- names(freq[freq > 0])
 
-  keep_ecos <- names(eco_pct[eco_pct >= ecoregion_pct])
-  cat(sprintf("  %d ecoregions total, %d with >= %.0f%% of points\n",
-              length(eco_pct), length(keep_ecos), ecoregion_pct * 100))
-
-  if (length(keep_ecos) == 0) {
-    cat("  Warning: no ecoregions pass threshold, using all with any points\n")
-    keep_ecos <- names(eco_pct[eco_pct > 0])
-  }
-
-  m_mask <- ecoregions[ecoregions[[eco_id_col]] %in% keep_ecos, ]
-  m_mask <- st_union(m_mask)
-  m_mask <- st_make_valid(m_mask)
-
-  cat(sprintf("  M mask covers %d ecoregion(s)\n", length(keep_ecos)))
-  m_mask
+  m_mask <- ecoregions[ecoregions[[eco_id_col]] %in% keep, ]
+  st_make_valid(st_union(m_mask))
 }
 
 
@@ -314,6 +349,10 @@ crop_bioclim_with_mask <- function(env_stack, m_mask) {
   cat("[8/10] Cropping ERA5-bioclim with M mask...\n")
 
   m_vect <- vect(m_mask)
+  if (!identical(terra::crs(env_stack), terra::crs(m_vect))) {
+    cat("  Aligning M mask CRS to raster CRS...\n")
+    m_vect <- terra::project(m_vect, terra::crs(env_stack))
+  }
   env_cropped <- crop(env_stack, m_vect)
   env_masked <- mask(env_cropped, m_vect)
 

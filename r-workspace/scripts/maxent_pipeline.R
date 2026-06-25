@@ -246,12 +246,65 @@ filter_env_iqr <- function(occ_env, bioclim_vars, env_iqr_factor = 1.5) {
 
 
 # ── Step 7: Build M mask from ecoregions (Barve et al. 2011) ─────────
-# Spatial join of presence points to ecoregions → keep ecoregions with
-# sufficient point density → dissolve into single M polygon.
-# M restricts both background sampling and prediction area.
+# Uses pre-indexed RDS when available (~2s load vs ~30s+ for shapefile).
+# Falls back to shapefile with bbox filter (slower).
 build_m_mask <- function(occ, ecoregions_dir, ecoregion_pct = 0.05) {
   cat("[7/10] Building M mask from ecoregions...\n")
 
+  old_s2 <- sf::sf_use_s2()
+  sf::sf_use_s2(FALSE)
+  on.exit(sf::sf_use_s2(old_s2))
+
+  rds_path <- file.path(ecoregions_dir, "ecoregions.rds")
+  rds_path_ws <- "/workspace/ecoregions/ecoregions.rds"
+  if (file.exists(rds_path)) {
+    cat(sprintf("  Using pre-indexed RDS: %s\n", rds_path))
+    result <- build_m_mask_rds(occ, rds_path, ecoregion_pct)
+  } else if (file.exists(rds_path_ws)) {
+    cat(sprintf("  Using pre-indexed RDS: %s\n", rds_path_ws))
+    result <- build_m_mask_rds(occ, rds_path_ws, ecoregion_pct)
+  } else {
+    cat("  RDS not found, falling back to shapefile...\n")
+    result <- build_m_mask_shapefile(occ, ecoregions_dir, ecoregion_pct)
+  }
+  result
+}
+
+build_m_mask_rds <- function(occ, rds_path, ecoregion_pct = 0.05) {
+  t0 <- proc.time()[3]
+  eco <- readRDS(rds_path)
+  dt_load <- proc.time()[3] - t0
+  cat(sprintf("  Loaded %d ecoregions from RDS in %.1fs\n", nrow(eco), dt_load))
+
+  eco <- sf::st_make_valid(eco)
+  pts_sf <- sf::st_as_sf(occ, coords = c("long", "lat"), crs = 4326)
+
+  t0 <- proc.time()[3]
+  join <- sf::st_join(pts_sf, eco, join = sf::st_intersects)
+  dt_join <- proc.time()[3] - t0
+  cat(sprintf("  Spatial join: %d matches in %.1fs\n",
+              sum(!is.na(join$ECO_NAME)), dt_join))
+
+  join <- join[!is.na(join$ECO_NAME), ]
+  if (nrow(join) == 0) {
+    cat("  Warning: no points matched ecoregions, using convex hull\n")
+    hull <- sf::st_buffer(sf::st_convex_hull(sf::st_union(pts_sf)), dist = 2)
+    return(terra::vect(hull))
+  }
+
+  freq <- table(join$ECO_NAME)
+  keep <- names(freq[freq >= max(1, ceiling(nrow(occ) * ecoregion_pct))])
+  if (length(keep) == 0) keep <- names(freq[freq > 0])
+  cat(sprintf("  %d ecoregions selected (of %d with points)\n",
+              length(keep), length(freq)))
+
+  m_eco <- eco[eco$ECO_NAME %in% keep, ]
+  m_poly <- sf::st_make_valid(sf::st_union(m_eco))
+  cat(sprintf("  M mask built from %d ecoregion(s)\n", length(keep)))
+  terra::vect(m_poly)
+}
+
+build_m_mask_shapefile <- function(occ, ecoregions_dir, ecoregion_pct = 0.05) {
   shp_path <- file.path(ecoregions_dir, "Ecoregions2017.shp")
   if (!file.exists(shp_path)) {
     shp_candidates <- list.files(ecoregions_dir, pattern = "\\.shp$",
@@ -265,46 +318,35 @@ build_m_mask <- function(occ, ecoregions_dir, ecoregion_pct = 0.05) {
     }
     shp_path <- shp_candidates[1]
   }
-  cat(sprintf("  Loading ecoregions: %s\n", basename(shp_path)))
 
-  eco <- sf::st_read(shp_path, quiet = TRUE)
   pts_sf <- sf::st_as_sf(occ, coords = c("long", "lat"), crs = 4326)
+  bbox <- sf::st_bbox(pts_sf)
+  bbox_buf <- sf::st_bbox(c(
+    xmin = max(bbox["xmin"] - 5, -180),
+    ymin = max(bbox["ymin"] - 5, -90),
+    xmax = min(bbox["xmax"] + 5, 180),
+    ymax = min(bbox["ymax"] + 5, 90)
+  ), crs = sf::st_crs(4326))
+  wkt_filter <- sf::st_as_text(sf::st_as_sfc(bbox_buf))
 
-  if (!identical(sf::st_crs(eco)$epsg, 4326L)) {
-    eco <- sf::st_transform(eco, 4326)
+  eco <- sf::st_read(shp_path, wkt_filter = wkt_filter, quiet = TRUE)
+  if (nrow(eco) == 0) eco <- sf::st_read(shp_path, quiet = TRUE)
+  eco <- sf::st_make_valid(eco)
+  if (!identical(sf::st_crs(eco)$epsg, 4326L)) eco <- sf::st_transform(eco, 4326)
+
+  join <- sf::st_join(pts_sf, eco, join = sf::st_intersects)
+  eco_col <- intersect(c("ECO_NAME", "ECO_ID"), names(join))
+  eco_col <- if (length(eco_col) > 0) eco_col[1] else {
+    chr_cols <- names(join)[vapply(sf::st_drop_geometry(join), is.character, logical(1))]
+    if (length(chr_cols) > 0) chr_cols[1] else names(join)[3]
   }
-
-  join <- sf::st_join(pts_sf, eco, join = sf::st_within)
-
-  # Find the best ecoregion ID column
-  eco_col <- intersect(c("ECO_NAME", "ECO_ID", "eco_name", "eco_id"), names(join))
-  if (length(eco_col) == 0) {
-    chr_cols <- names(join)[vapply(sf::st_drop_geometry(join),
-                                   is.character, logical(1))]
-    eco_col <- if (length(chr_cols) > 0) chr_cols[1] else names(join)[3]
-  } else {
-    eco_col <- eco_col[1]
-  }
-  cat(sprintf("  Ecoregion ID column: %s\n", eco_col))
-
-  # Remove points that didn't fall in any ecoregion
   join <- join[!is.na(join[[eco_col]]), ]
-
   freq <- table(join[[eco_col]])
-  n_total <- nrow(occ)
-  keep <- names(freq[freq >= max(1, ceiling(n_total * ecoregion_pct))])
-
-  if (length(keep) == 0) {
-    cat("  Warning: no ecoregions pass threshold, using all with any points\n")
-    keep <- names(freq[freq > 0])
-  }
+  keep <- names(freq[freq >= max(1, ceiling(nrow(occ) * ecoregion_pct))])
+  if (length(keep) == 0) keep <- names(freq[freq > 0])
 
   m_eco <- eco[eco[[eco_col]] %in% keep, ]
-  m_poly <- sf::st_union(m_eco)
-  m_poly <- sf::st_make_valid(m_poly)
-
-  cat(sprintf("  %d ecoregions selected (of %d with points)\n",
-              length(keep), length(freq)))
+  m_poly <- sf::st_make_valid(sf::st_union(m_eco))
   terra::vect(m_poly)
 }
 
@@ -312,6 +354,10 @@ build_m_mask <- function(occ, ecoregions_dir, ecoregion_pct = 0.05) {
 # ── Step 8: Crop bioclim rasters with M mask ──────────────────────────
 crop_bioclim_with_mask <- function(env_stack, m_mask) {
   cat("[8/10] Cropping ERA5-bioclim with M mask...\n")
+  if (!identical(terra::crs(env_stack), terra::crs(m_mask))) {
+    cat("  Aligning M mask CRS to raster CRS...\n")
+    m_mask <- terra::project(m_mask, terra::crs(env_stack))
+  }
   env_crop <- terra::crop(env_stack, m_mask)
   env_mask <- terra::mask(env_crop, m_mask)
   n_valid <- sum(!is.na(terra::values(env_mask[[1]])))
@@ -335,6 +381,29 @@ fit_maxent_model <- function(occ_env, env_masked, bioclim_vars, output_dir,
     maxent_grid_from_terra(env_masked[[v]], name = v)
   })
   names(env_grids) <- bioclim_vars
+
+  ext <- terra::ext(env_masked)
+  n_before <- nrow(occ_env)
+  keep <- occ_env$long >= ext[1] & occ_env$long <= ext[2] &
+          occ_env$lat  >= ext[3] & occ_env$lat  <= ext[4]
+  occ_env <- occ_env[keep, ]
+  if (nrow(occ_env) < n_before) {
+    cat(sprintf("  Clipped %d → %d points to raster extent\n",
+                n_before, nrow(occ_env)))
+  }
+  if (nrow(occ_env) < 5) stop("Too few points within M mask extent")
+
+  # Drop points that fall on NA cells in the masked raster
+  pts <- terra::vect(occ_env, geom = c("long", "lat"),
+                     crs = terra::crs(env_masked))
+  vals <- terra::extract(env_masked, pts)
+  complete <- complete.cases(vals[, bioclim_vars, drop = FALSE])
+  if (sum(complete) < nrow(occ_env)) {
+    cat(sprintf("  Dropped %d points on NA raster cells (%d → %d)\n",
+                sum(!complete), nrow(occ_env), sum(complete)))
+    occ_env <- occ_env[complete, ]
+  }
+  if (nrow(occ_env) < 5) stop("Too few points with valid raster values")
 
   occ_df <- data.frame(
     long = occ_env$long,

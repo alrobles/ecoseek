@@ -39,6 +39,7 @@ RUN install2.r --error --skipinstalled --ncpus -1 \
     biomod2 \
     CoordinateCleaner \
     remotes \
+    duckdb \
     && rm -rf /tmp/downloaded_packages/
 
 # Install maxentcpp + nicher from GitHub (real SDM engines)
