@@ -12,7 +12,7 @@ const DEMO_USER = {
 };
 
 // Demo session limits
-const DEMO_SESSION_DURATION = 2 * 60; // 2 minutes in seconds (testing; raise to 15*60 for production)
+const DEMO_SESSION_DURATION = 10 * 60; // 10 minutes
 const DEMO_COOLDOWN_DURATION = 2 * 60; // 2 minutes in seconds (testing; raise to 60*60 for production)
 const DEMO_STORAGE_KEY = "ecoseek_demo_session";
 
