@@ -3089,6 +3089,18 @@ mjx-container[display="true"] {
   color: white;
 }
 
+.cite-btn.cited {
+  border-color: #38A169;
+  color: #68D391;
+  cursor: default;
+  opacity: 0.8;
+}
+
+.cite-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .literature-empty {
   padding: 20px;
   text-align: center;

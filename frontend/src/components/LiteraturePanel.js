@@ -15,6 +15,7 @@ export function LiteraturePanel({ onCitePaper, isLocalEmily }) {
   const [error, setError] = useState(null);
   const [searchMode, setSearchMode] = useState("quick");
   const [filters, setFilters] = useState({ hasAbstract: false, minYear: 0 });
+  const [citedIds, setCitedIds] = useState(new Set());
 
   const doSearch = useCallback(async (mode) => {
     if (!query.trim()) return;
@@ -72,6 +73,7 @@ export function LiteraturePanel({ onCitePaper, isLocalEmily }) {
     if (!onCitePaper) return;
     const ctx = `[PAPER] Title: ${paper.title}\nYear: ${paper.year}\nKeywords: ${paper.keywords}\nAbstract: ${paper.abstract}\n\nUse this paper to answer the following question:\n\n`;
     onCitePaper(ctx);
+    setCitedIds((prev) => new Set([...prev, paper.id]));
   };
 
   return (
@@ -185,11 +187,12 @@ export function LiteraturePanel({ onCitePaper, isLocalEmily }) {
               </p>
             )}
             <button
-              className="cite-btn"
+              className={`cite-btn ${citedIds.has(paper.id) ? "cited" : ""}`}
               onClick={() => handleCite(paper)}
-              title="Inject this paper into the chat for Emily to use"
+              disabled={citedIds.has(paper.id)}
+              title={citedIds.has(paper.id) ? "Already cited" : "Inject this paper into the chat for Emily to use"}
             >
-              📎 Cite in chat
+              {citedIds.has(paper.id) ? "✅ Cited" : "📎 Cite in chat"}
             </button>
           </div>
         ))}
