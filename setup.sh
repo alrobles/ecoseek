@@ -105,6 +105,20 @@ if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
 fi
 export DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY:-}"
 
+# ── Emily API key (shared frontend ↔ Emily backend secret) ───────────────
+# The frontend's nginx injects this as the server-side Bearer token when
+# proxying /v1/ to the Emily backend on port 8642 (EMILY_HERMES_KEY defaults
+# to EMILY_API_KEY in docker-compose.yml). The Emily backend validates it as
+# API_SERVER_KEY. If it is empty the frontend refuses to start, so generate a
+# stable random value here and reuse any existing one across re-runs.
+if [ -z "${EMILY_API_KEY:-}" ] && [ -f .env ]; then
+  EMILY_API_KEY="$(grep -E '^EMILY_API_KEY=' .env 2>/dev/null | head -1 | cut -d= -f2-)"
+fi
+if [ -z "${EMILY_API_KEY:-}" ]; then
+  EMILY_API_KEY="$(openssl rand -hex 24 2>/dev/null || head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+fi
+export EMILY_API_KEY
+
 # ── Generate / update .env ────────────────────────────────────────────────
 # Defaults that docker-compose.yml expects.
 # OLLAMA_MODEL defaults to a small public model so the smoke test can run
@@ -201,6 +215,16 @@ if [ "$OVERWRITE" -eq 1 ]; then
     echo ""
     echo "# BYOK — empty by default; fill in to use DeepSeek cloud"
     echo "DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}"
+    echo ""
+    echo "# Emily API key — shared secret between the frontend proxy and the"
+    echo "# Emily backend (port 8642). The frontend's nginx injects it as the"
+    echo "# server-side Bearer token (EMILY_HERMES_KEY defaults to this), and"
+    echo "# the Emily backend validates it as API_SERVER_KEY. Must be non-empty"
+    echo "# or the frontend refuses to start (avoids silent HTTP 401 on chat)."
+    echo "EMILY_API_KEY=${EMILY_API_KEY}"
+    echo "# Override only if the backend on :8642 uses a different key than"
+    echo "# EMILY_API_KEY (e.g. a host hermes process). Defaults to EMILY_API_KEY."
+    echo "EMILY_HERMES_KEY=${EMILY_HERMES_KEY:-}"
     echo ""
     echo "# NCBI Entrez / PubMed API key (optional)"
     echo "# Without key: 3 req/s. With key: 10 req/s."
