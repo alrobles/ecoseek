@@ -91,7 +91,7 @@ function LoginScreen({ onLogin }) {
 }
 
 function App() {
-  const { user, loading, login, logout, handleCallback, startDemoSession, demoActive, demoRemaining, demoCooldownRemaining } = useAuth();
+  const { user, loading, login, logout, handleCallback, startDemoSession, demoActive, demoRemaining, demoCooldownRemaining, workspaceSessionDir } = useAuth();
   const [query, setQuery] = useState("");
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -870,7 +870,7 @@ function App() {
                 <ResultsPanel messages={messages} />
               )}
               {rightPanelTab === "files" && (
-                <FilesPanel />
+                <FilesPanel sessionDir={workspaceSessionDir} />
               )}
               {rightPanelTab === "didal" && (
                 <DiDALPanel

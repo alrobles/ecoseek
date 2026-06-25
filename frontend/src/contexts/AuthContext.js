@@ -13,8 +13,12 @@ const DEMO_USER = {
 
 // Demo session limits
 const DEMO_SESSION_DURATION = 10 * 60; // 10 minutes
-const DEMO_COOLDOWN_DURATION = 2 * 60; // 2 minutes in seconds (testing; raise to 60*60 for production)
+const DEMO_COOLDOWN_DURATION = 2 * 60; // 2 minutes
 const DEMO_STORAGE_KEY = "ecoseek_demo_session";
+
+function generateSessionId() {
+  return "sess_" + Math.random().toString(36).slice(2, 10);
+}
 
 function getDemoState() {
   try {
@@ -40,6 +44,7 @@ export const AuthProvider = ({ children }) => {
   const [demoActive, setDemoActive] = useState(false);
   const [demoRemaining, setDemoRemaining] = useState(DEMO_SESSION_DURATION);
   const [demoCooldownRemaining, setDemoCooldownRemaining] = useState(0);
+  const [demoSessionId, setDemoSessionId] = useState(null);
   const demoTimerRef = useRef(null);
 
   // Restore demo session on mount
@@ -52,7 +57,6 @@ export const AuthProvider = ({ children }) => {
     const now = Math.floor(Date.now() / 1000);
 
     if (state.cooldownUntil && now < state.cooldownUntil) {
-      // Still in cooldown
       setDemoCooldownRemaining(state.cooldownUntil - now);
       return;
     }
@@ -61,12 +65,11 @@ export const AuthProvider = ({ children }) => {
       const elapsed = now - state.startedAt;
       const remaining = DEMO_SESSION_DURATION - elapsed;
       if (remaining > 0) {
-        // Resume active session
         setUser(DEMO_USER);
         setDemoActive(true);
         setDemoRemaining(remaining);
+        if (state.sessionId) setDemoSessionId(state.sessionId);
       } else {
-        // Session expired — enter cooldown
         const cooldownUntil = state.startedAt + DEMO_SESSION_DURATION + DEMO_COOLDOWN_DURATION;
         if (now < cooldownUntil) {
           saveDemoState({ cooldownUntil });
@@ -84,10 +87,10 @@ export const AuthProvider = ({ children }) => {
     demoTimerRef.current = setInterval(() => {
       setDemoRemaining((prev) => {
         if (prev <= 1) {
-          // Session expired
           clearInterval(demoTimerRef.current);
           setDemoActive(false);
           setUser(null);
+          setDemoSessionId(null);
           const cooldownUntil = Math.floor(Date.now() / 1000) + DEMO_COOLDOWN_DURATION;
           saveDemoState({ cooldownUntil });
           setDemoCooldownRemaining(DEMO_COOLDOWN_DURATION);
@@ -118,11 +121,13 @@ export const AuthProvider = ({ children }) => {
   const startDemoSession = useCallback(() => {
     if (!IS_DEMO) return;
     const now = Math.floor(Date.now() / 1000);
-    saveDemoState({ startedAt: now });
+    const sid = generateSessionId();
+    saveDemoState({ startedAt: now, sessionId: sid });
     setUser(DEMO_USER);
     setDemoActive(true);
     setDemoRemaining(DEMO_SESSION_DURATION);
     setDemoCooldownRemaining(0);
+    setDemoSessionId(sid);
   }, []);
 
   const checkAuth = useCallback(async () => {
@@ -168,6 +173,7 @@ export const AuthProvider = ({ children }) => {
       clearInterval(demoTimerRef.current);
       setDemoActive(false);
       setUser(null);
+      setDemoSessionId(null);
       const cooldownUntil = Math.floor(Date.now() / 1000) + DEMO_COOLDOWN_DURATION;
       saveDemoState({ cooldownUntil });
       setDemoCooldownRemaining(DEMO_COOLDOWN_DURATION);
@@ -176,6 +182,11 @@ export const AuthProvider = ({ children }) => {
     clearSession();
     setUser(null);
   };
+
+  // Compute workspace session dir
+  const workspaceSessionDir = IS_DEMO
+    ? demoSessionId || ""
+    : (user?.login || "").replace(/[^a-zA-Z0-9_-]/g, "_");
 
   return (
     <AuthContext.Provider
@@ -190,6 +201,8 @@ export const AuthProvider = ({ children }) => {
         demoActive,
         demoRemaining,
         demoCooldownRemaining,
+        demoSessionId,
+        workspaceSessionDir,
       }}
     >
       {children}

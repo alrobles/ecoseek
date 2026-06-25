@@ -18,18 +18,21 @@ function formatDate(dateStr) {
 
 const DATA_EXTENSIONS = [".csv", ".tsv", ".json", ".parquet", ".tif", ".tiff", ".png", ".geojson", ".gpkg", ".rds", ".rda"];
 
-export function FilesPanel() {
+export function FilesPanel({ sessionDir }) {
   const [files, setFiles] = useState([]);
   const [path, setPath] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showAll, setShowAll] = useState(false);
 
+  // Build the base URL: workspace/<sessionDir> or just workspace/
+  const basePrefix = sessionDir ? "workspace/" + sessionDir : "workspace";
+
   const fetchFiles = useCallback(async (subpath) => {
     setLoading(true);
     setError(null);
     try {
-      const url = "/workspace/" + (subpath || "");
+      const url = "/" + basePrefix + "/" + (subpath || "");
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -41,7 +44,7 @@ export function FilesPanel() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [basePrefix]);
 
   useEffect(() => {
     fetchFiles("");
@@ -51,7 +54,7 @@ export function FilesPanel() {
     if (item.type === "directory") {
       fetchFiles(path ? path + "/" + item.name : item.name);
     } else {
-      const url = "/workspace/" + (path ? path + "/" : "") + item.name;
+      const url = "/" + basePrefix + "/" + (path ? path + "/" : "") + item.name;
       window.open(url, "_blank");
     }
   };
@@ -80,7 +83,7 @@ export function FilesPanel() {
     <div className="files-panel">
       <div className="files-toolbar">
         <div className="files-breadcrumb">
-          <button className="files-crumb" onClick={() => fetchFiles("")}>workspace</button>
+          <button className="files-crumb" onClick={() => fetchFiles("")}>{basePrefix}</button>
           {path.split("/").filter(Boolean).map((part, i, arr) => (
             <React.Fragment key={i}>
               <span className="files-separator">/</span>
@@ -97,16 +100,16 @@ export function FilesPanel() {
           <button
             className={`files-filter-btn ${!showAll ? "active" : ""}`}
             onClick={() => setShowAll(false)}
-            title="Show data files only (CSV, JSON, TIF, etc.)"
+            title="Show data files only"
           >
-            📊 Data ({dataCount})
+            Data ({dataCount})
           </button>
           <button
             className={`files-filter-btn ${showAll ? "active" : ""}`}
             onClick={() => setShowAll(true)}
             title="Show all files"
           >
-            📁 All ({totalFileCount})
+            All ({totalFileCount})
           </button>
           <button className="files-refresh" onClick={() => fetchFiles(path)} title="Refresh">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
@@ -120,15 +123,17 @@ export function FilesPanel() {
       {loading && <div className="files-loading">Loading...</div>}
       {error && (
         <div className="files-empty">
-          <p>Workspace not available.</p>
+          <p>Session directory not available yet.</p>
           <p className="files-hint">
-            Data files from GBIF queries and model outputs will appear here.
+            {sessionDir
+              ? "Ask Emily to generate data — files will appear here."
+              : "Data files from GBIF queries and model outputs will appear here."}
           </p>
         </div>
       )}
       {!loading && !error && visibleFiles.length === 0 && (
         <div className="files-empty">
-          <p>{showAll ? "Workspace is empty." : "No data files yet."}</p>
+          <p>{showAll ? "Session directory is empty." : "No data files yet."}</p>
           <p className="files-hint">
             Ask Emily to query GBIF or run a model — CSV, JSON, and TIF outputs
             will appear here for download.
