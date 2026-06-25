@@ -37,12 +37,19 @@ export function LiteraturePanel({ onCitePaper, isLocalEmily }) {
         body: JSON.stringify(body),
       });
       
-      if (!resp.ok) {
-        const err = await resp.json();
-        throw new Error(err.detail || "Search failed");
+      // Try to parse response as JSON; handle non-JSON (nginx error pages, etc.)
+      let data;
+      try {
+        data = await resp.json();
+      } catch (jsonErr) {
+        const text = await resp.text().catch(() => "");
+        throw new Error(text.slice(0, 200) || `Service error (HTTP ${resp.status})`);
       }
       
-      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data?.detail || `Search failed (HTTP ${resp.status})`);
+      }
+      
       if (data.success) {
         setResults(data.results || []);
         setTotalHits(data.total_hits || 0);
