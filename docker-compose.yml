@@ -386,8 +386,8 @@ services:
       context: ./frontend
       args:
         REACT_APP_BROKER_URL: "${REACT_APP_BROKER_URL:-https://broker.ecoseek.org}"
-        REACT_APP_EMILY_URL: "${REACT_APP_EMILY_URL:-http://localhost:8642}"
-        REACT_APP_EMILY_KEY: "${REACT_APP_EMILY_KEY:-${EMILY_API_KEY:-emily-local-key}}"
+        REACT_APP_EMILY_URL: "${REACT_APP_EMILY_URL:-}"
+        REACT_APP_EMILY_KEY: "${REACT_APP_EMILY_KEY:-}"
     container_name: ecoseek-frontend
     profiles: ["frontend"]
     ports:
