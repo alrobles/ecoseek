@@ -864,8 +864,7 @@ function App() {
               {rightPanelTab === "literature" && (
                 <LiteraturePanel
                   onCitePaper={(ctx) => {
-                    setQuery(ctx + query);
-                    setRightPanelTab("output");
+                    setQuery((prev) => prev + ctx);
                   }}
                   isLocalEmily={IS_LOCAL_EMILY}
                 />
