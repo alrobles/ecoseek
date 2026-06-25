@@ -30,8 +30,9 @@ const IS_DEMO = process.env.REACT_APP_DEMO_MODE === "true";
 const EMILY_KEY = process.env.REACT_APP_EMILY_KEY || "";
 
 /** The endpoint to send chat completions to.
- *  Demo mode uses relative URLs — nginx proxies /v1/ to Hermes :8646. */
-const CHAT_URL = IS_DEMO ? "" : IS_LOCAL_EMILY ? EMILY_URL : BROKER_URL;
+ *  Empty string = relative URL — nginx proxies /v1/ to Hermes.
+ *  Only local dev with EMILY_URL set bypasses nginx. */
+const CHAT_URL = IS_LOCAL_EMILY ? EMILY_URL : "";
 
 // ── Session helpers ────────────────────────────────────────────────────
 
