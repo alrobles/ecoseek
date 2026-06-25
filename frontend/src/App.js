@@ -829,12 +829,6 @@ function App() {
                 Output
               </button>
               <button
-                className={`panel-tab ${rightPanelTab === "terminal" ? "active" : ""}`}
-                onClick={() => setRightPanelTab("terminal")}
-              >
-                Terminal
-              </button>
-              <button
                 className={`panel-tab ${rightPanelTab === "results" ? "active" : ""}`}
                 onClick={() => setRightPanelTab("results")}
               >
@@ -844,7 +838,7 @@ function App() {
                 className={`panel-tab ${rightPanelTab === "files" ? "active" : ""}`}
                 onClick={() => setRightPanelTab("files")}
               >
-                Files
+                📥 Data
               </button>
               <button
                 className={`panel-tab ${rightPanelTab === "didal" ? "active" : ""}`}
@@ -871,21 +865,6 @@ function App() {
               )}
               {rightPanelTab === "output" && (
                 <RenderPreview messages={messages} streamingContent={streamingContent} isLoading={isLoading} didalStages={didalStages} />
-              )}
-              {rightPanelTab === "terminal" && (
-                <div className="terminal-panel">
-                  <iframe
-                    src="http://localhost:8001"
-                    title="Local Terminal"
-                    className="terminal-iframe"
-                    sandbox="allow-scripts allow-same-origin allow-forms"
-                  />
-                  <div className="terminal-fallback">
-                    <p>Terminal runs on <code>localhost:8001</code> via ttyd.</p>
-                    <p>Start with: <code>bash emily-start.sh</code> (includes terminal container).</p>
-                    <p>Or manually: <code>docker run -d --name ecoseek-terminal -p 8001:7681 tsl0922/ttyd:latest bash</code></p>
-                  </div>
-                </div>
               )}
               {rightPanelTab === "results" && (
                 <ResultsPanel messages={messages} />

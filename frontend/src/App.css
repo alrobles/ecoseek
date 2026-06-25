@@ -2259,6 +2259,55 @@ mjx-container[display="true"] {
   color: var(--foreground);
 }
 
+.files-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.files-filter-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.files-filter-btn:hover {
+  border-color: var(--accent);
+  color: var(--foreground);
+}
+
+.files-filter-btn.active {
+  background: rgba(56, 161, 105, 0.15);
+  border-color: #38A169;
+  color: #68D391;
+}
+
+.files-item.files-data .files-name {
+  color: #68D391;
+  font-weight: 500;
+}
+
+.files-dl {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted-foreground);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.files-item:hover .files-dl {
+  opacity: 1;
+}
+
 .files-loading {
   padding: 2rem;
   text-align: center;
@@ -2297,7 +2346,7 @@ mjx-container[display="true"] {
 
 .files-item {
   display: grid;
-  grid-template-columns: 24px 1fr 70px 120px;
+  grid-template-columns: 24px 1fr 70px 110px 24px;
   align-items: center;
   gap: 6px;
   padding: 6px 12px;
