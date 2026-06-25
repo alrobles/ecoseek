@@ -398,13 +398,16 @@ services:
       - ./frontend/nginx.conf:/tmp/nginx.conf.template:ro
       - r-workspace-data:/workspace:ro
     command: >
-      /bin/sh -c "envsubst '$$EMILY_HERMES_KEY' < /tmp/nginx.conf.template
+      /bin/sh -c ": $${EMILY_HERMES_KEY:?FATAL must be set in .env to the hermes
+      API_SERVER_KEY served on host port 8642 - refusing to start so chat is not
+      silently proxied with an empty Bearer token (HTTP 401)};
+      envsubst '$$EMILY_HERMES_KEY' < /tmp/nginx.conf.template
       > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -439,7 +442,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/"]
       interval: 15s
       timeout: 5s
       retries: 3
