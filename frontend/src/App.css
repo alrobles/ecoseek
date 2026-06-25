@@ -2872,13 +2872,13 @@ mjx-container[display="true"] {
 .literature-header h3 {
   margin: 0;
   font-size: 14px;
-  color: var(--foreground);
+  color: #ffffff;
 }
 
 .literature-subtitle {
   margin: 4px 0 0 0;
   font-size: 11px;
-  color: var(--muted);
+  color: #a0aec0;
 }
 
 .literature-search {
@@ -2893,17 +2893,17 @@ mjx-container[display="true"] {
 .literature-input {
   flex: 1;
   padding: 8px 12px;
-  border: 1px solid var(--border-color);
+  border: 1px solid #2d3748;
   border-radius: 6px;
   font-size: 13px;
-  background: var(--panel-bg);
-  color: var(--foreground);
+  background: #1a1a2e;
+  color: #ffffff;
   outline: none;
   transition: border-color 0.2s;
 }
 
 .literature-input:focus {
-  border-color: var(--accent);
+  border-color: #38A169;
 }
 
 .search-btn {
@@ -2952,7 +2952,7 @@ mjx-container[display="true"] {
 .btn-label { font-weight: 500; }
 
 .active-mode {
-  box-shadow: 0 0 0 2px var(--foreground);
+  box-shadow: 0 0 0 2px #38A169;
 }
 
 .smart-indicator {
@@ -2964,7 +2964,7 @@ mjx-container[display="true"] {
 .literature-loading {
   padding: 12px;
   text-align: center;
-  color: var(--accent);
+  color: #68D391;
   font-size: 13px;
   animation: pulse 1.5s ease-in-out infinite;
 }
@@ -2985,16 +2985,16 @@ mjx-container[display="true"] {
   display: flex;
   align-items: center;
   gap: 4px;
-  color: var(--muted);
+  color: #a0aec0;
   cursor: pointer;
 }
 
 .filter-year {
   padding: 2px 6px;
-  border: 1px solid var(--border-color);
+  border: 1px solid #2d3748;
   border-radius: 4px;
-  background: var(--panel-bg);
-  color: var(--foreground);
+  background: #1a1a2e;
+  color: #ffffff;
   font-size: 11px;
 }
 
@@ -3010,7 +3010,7 @@ mjx-container[display="true"] {
 
 .literature-count {
   font-size: 11px;
-  color: var(--muted);
+  color: #a0aec0;
   margin-bottom: 8px;
 }
 
@@ -3024,14 +3024,14 @@ mjx-container[display="true"] {
 
 .literature-card {
   padding: 10px;
-  border: 1px solid var(--border-color);
+  border: 1px solid #2d3748;
   border-radius: 6px;
-  background: var(--panel-bg);
+  background: #1a1a2e;
   transition: border-color 0.15s;
 }
 
 .literature-card:hover {
-  border-color: var(--accent);
+  border-color: #38A169;
 }
 
 .literature-card-header {
@@ -3043,16 +3043,16 @@ mjx-container[display="true"] {
 
 .literature-year {
   font-size: 11px;
-  color: var(--accent);
+  color: #68D391;
   font-weight: 600;
-  background: var(--accent-bg, #eef2ff);
+  background: rgba(56, 161, 105, 0.15);
   padding: 1px 6px;
   border-radius: 3px;
 }
 
 .literature-keywords {
   font-size: 10px;
-  color: var(--muted);
+  color: #a0aec0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3062,14 +3062,14 @@ mjx-container[display="true"] {
   margin: 0 0 4px 0;
   font-size: 12px;
   font-weight: 500;
-  color: var(--foreground);
+  color: #ffffff;
   line-height: 1.4;
 }
 
 .literature-abstract {
   margin: 0 0 8px 0;
   font-size: 11px;
-  color: var(--muted);
+  color: #e2e8f0;
   line-height: 1.5;
 }
 
@@ -3092,7 +3092,7 @@ mjx-container[display="true"] {
 .literature-empty {
   padding: 20px;
   text-align: center;
-  color: var(--muted);
+  color: #718096;
   font-size: 12px;
 }
 
