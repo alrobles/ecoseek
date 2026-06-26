@@ -21,7 +21,7 @@ All components are open source, require only Git and Docker, and include 600+ au
 
 ### A dedicated biodiversity AI agent
 
-Previous Ebbe Nielsen Challenge winners have advanced visualization, data cleaning, and analysis pipelines. EcoSeek represents a different approach: an agentic system built specifically for ecological research workflows. The agents do not merely generate text — they execute tools. EcoAgent exposes over 30 biodiversity-specific HTTP endpoints (species distribution modeling, niche overlap, GBIF data validation, host-parasite network construction, taxonomic resolution) that AgenticPlug discovers and brokers at runtime.
+Previous Ebbe Nielsen Challenge winners have advanced visualization, data cleaning, and analysis pipelines. EcoSeek represents a different approach: an agentic system I built specifically for ecological research workflows. The agents do not merely generate text — they execute tools. EcoAgent exposes over 30 biodiversity-specific HTTP endpoints (species distribution modeling, niche overlap, GBIF data validation, host-parasite network construction, taxonomic resolution) that AgenticPlug discovers and brokers at runtime.
 
 DiDAL orchestrates parallel execution. A complex query triggers multiple agents simultaneously — one fetches GBIF occurrences, another retrieves environmental layers, a third searches PubMed — all coordinated through the same gateway that enforces policy and records decisions in an immutable audit log.
 
@@ -39,7 +39,7 @@ All code is freely available under open-source licenses. The stack runs locally 
 
 ### Quality of implementation
 
-The codebase ships with 600+ automated tests across 26 suites. Two deployments (ecoseek.org and kids.ecoseek.org) serve live traffic. The gateway refuses to start with invalid path configuration; the keystore refuses to operate without the cryptography library. Fail-closed behavior is enforced at runtime, not documented as aspiration.
+The codebase ships with 600+ automated tests across 26 suites. Two deployments (ecoseek.org and kids.ecoseek.org) serve live traffic. The gateway refuses to start with invalid path configuration; the keystore refuses to operate without the cryptography library. I designed the system to fail closed at runtime — it is not a documented aspiration, it is enforced behavior.
 
 ---
 
