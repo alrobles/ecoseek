@@ -9,51 +9,43 @@
 
 ## Abstract
 
-Most biodiversity tools expect you to learn their interface, download the data, and run your analysis somewhere else. EcoSeek doesn't. You ask a question — "What drives Quercus distribution in the Mexican Altiplano?" — and the system does the rest. It hits GBIF for occurrence records, pulls WorldClim layers, runs a species distribution model, searches the literature, and comes back with maps, citations, and numbers.
+Most biodiversity tools expect users to learn a query interface, download data, and run analyses in separate environments. EcoSeek does not. A researcher asks a question — "What drives Quercus distribution in the Mexican Altiplano?" — and the system queries GBIF occurrences, retrieves WorldClim layers, runs a species distribution model, searches the literature, and returns maps, citations, and model outputs.
 
-A swarm of DiDAL agents splits the work across whatever compute is available: your laptop, the lab cluster, an HPC node. A gateway called AgenticPlug sits between the agents and the outside world, approving or denying every GBIF query, filesystem write, and API call. The agent layer never touches a raw credential. If you're deploying this in a university or research institute, someone will ask "who accessed what and when." The audit log has the answer.
+The system has three components. A swarm of DiDAL agents distributes computation across available hardware — from a laptop to an HPC node; the gateway (AgenticPlug) brokers every GBIF query, filesystem write, and external API call, while the agent layer never holds raw credentials. kids.ecoseek.org extends GBIF-mediated data to learners aged 6 to 15; an animated mascot guides children through ecology, zoology, and Earth science with age-appropriate responses filtered through content safety guardrails. The system runs in three modes — offline with local models, bring-your-own-keys with Fernet-encrypted credentials, or lab-managed with role-based access control and audit trails.
 
-We also built kids.ecoseek.org — same system, but for children ages 6 to 15. Emily, an animated astronaut, guides them through ecology, animals, plants, and Earth science. Responses go through content safety filters. It's live and serving actual young users right now.
-
-EcoSeek is open source. Git + Docker, three commands to run. Three modes: offline with local models, bring-your-own-keys for cloud models, or lab-managed with role-based access and audit logs.
+All components are open source, require only Git and Docker, and include 600+ automated security tests across 26 suites covering authentication, authorization, path traversal protection, and encryption key management.
 
 ---
 
 ## Rationale
 
-### What we actually built
+### A dedicated biodiversity AI agent
 
-We didn't take a generic LLM and add biodiversity prompts. EcoSeek is an agent built specifically for ecological research. The agents don't just chat — they run tools. SDM, niche overlap, GBIF data validation, host-parasite network construction, taxonomic resolution. Over 30 of them, exposed as HTTP endpoints that the gateway discovers and brokers.
+Previous Ebbe Nielsen Challenge winners have advanced visualization, data cleaning, and analysis pipelines. EcoSeek represents a different approach: an agentic system built specifically for ecological research workflows. The agents do not merely generate text — they execute tools. EcoAgent exposes over 30 biodiversity-specific HTTP endpoints (species distribution modeling, niche overlap, GBIF data validation, host-parasite network construction, taxonomic resolution) that AgenticPlug discovers and brokers at runtime.
 
-DiDAL is the part that distributes work. Send a complex question, and multiple agents go off in parallel — one hits GBIF, another pulls climate data, a third searches PubMed. They report back through the same gateway that enforces policy and logs everything. If a reviewer wants to know exactly what happened during a query, the audit trail has it.
+DiDAL orchestrates parallel execution. A complex query triggers multiple agents simultaneously — one fetches GBIF occurrences, another retrieves environmental layers, a third searches PubMed — all coordinated through the same gateway that enforces policy and records decisions in an immutable audit log.
 
-The security model is why this can actually run in an institution. The gateway is approval-gated. Six capabilities require explicit sign-off. Every decision goes into a SQLite log. We've got 600+ tests covering auth, authorization, path traversal, and key encryption. It fails closed — ambiguous request, denied.
+The gateway is approval-gated; six capabilities require explicit authorization. Every decision is recorded. If a reviewer needs to trace what happened during a query, the audit log provides the chain of events. The system fails closed — ambiguous requests are denied.
 
-### Why GBIF should care
+### Relevance to GBIF
 
-GBIF has 2.7 billion records. Getting insight out of them still takes real technical skill. EcoSeek lowers that bar without dumbing down the science. Every query is logged. Every model run captures its inputs and seeds. Results trace back to source data.
+GBIF holds over 2.7 billion occurrence records. Extracting insight at scale requires technical expertise that many potential users lack. EcoSeek accepts natural-language questions and returns results backed by GBIF data, literature, and model outputs — without requiring users to learn query languages or manage separate analysis environments. Every query is logged; every model run captures its inputs and seeds; results trace to source data.
 
-kids.ecoseek.org reaches an audience GBIF currently doesn't: children. These are the people who'll be submitting their own datasets in 15 years. Right now they're asking Emily about volcanoes and whale sharks. The responses are safe, the data is real GBIF data, and the site is live.
+kids.ecoseek.org reaches an audience GBIF currently does not serve — children aged 6 to 15. These users will become the next generation of biodiversity data contributors; engaging them early matters. The site is live and serving real users today.
 
-### What makes this different from previous Challenge winners
+### Openness and repeatability
 
-Past winners have built visualization tools, data cleaners, analysis pipelines. All valuable. EcoSeek is a different thing: an agent that does the pipeline for you. You describe the scientific question. The system figures out which GBIF endpoints to hit, which models to run, which papers to cite. That's not been submitted before.
+All code is freely available under open-source licenses. The stack runs locally with no external dependencies beyond GBIF data access. Every component can be inspected, modified, and redeployed. Agent decisions, model outputs, and query results are reproducible: LACS uses deterministic scoring, EcoAgent captures tool versions and input seeds, and the audit trail records every approval.
 
-The LACS literature pipeline and GBIF tools existed before this submission. What's new is putting them behind an agent interface, distributed across compute, with institutional-grade security and an audit trail. And a kids version that's actually deployed and serving users.
+### Quality of implementation
 
-### Openness
-
-Everything is on GitHub, open source. The only external dependency is GBIF itself. Clone, run three commands, you're in. Every query result, agent decision, and model output is reproducible. The audit trail has the receipts.
-
-### Quality
-
-600+ tests across 26 suites. Two live deployments. Pre-alpha code, production security posture. The gateway won't start with invalid path configuration. The keystore refuses to run without the cryptography library. Fail-closed isn't a design principle we wrote in a doc — it's enforced at runtime.
+The codebase ships with 600+ automated tests across 26 suites. Two deployments (ecoseek.org and kids.ecoseek.org) serve live traffic. The gateway refuses to start with invalid path configuration; the keystore refuses to operate without the cryptography library. Fail-closed behavior is enforced at runtime, not documented as aspiration.
 
 ---
 
-## How to run it
+## How to run
 
-Git + Docker. That's it.
+Git and Docker. Three commands:
 
 ```bash
 git clone https://github.com/alrobles/ecoseek.git
@@ -62,13 +54,13 @@ bash setup.sh
 docker compose up --build
 ```
 
-Then hit `http://localhost:3000` and try:
+Access at `http://localhost:3000`. Try:
 
 ```
 POST /v1/smart-search {"text": "ecological niche of Quercus in Mexican altiplano"}
 ```
 
-Kids version at https://kids.ecoseek.org — no setup needed.
+Kids version at https://kids.ecoseek.org — no setup required.
 
 ## Video
 
