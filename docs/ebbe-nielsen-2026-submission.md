@@ -1,6 +1,6 @@
 # 2026 GBIF Ebbe Nielsen Challenge — Submission
 
-**Project:** EcoSeek — Scientific Agentic Assistant for Biodiversity Informatics  
+**Project:** EcoSeek — A Dedicated Scientific AI Agent for Biodiversity  
 **Team:** alrobles / ReumanLab  
 **Repository:** https://github.com/alrobles/ecoseek  
 **Live sites:** https://ecoseek.org | https://kids.ecoseek.org  
@@ -9,53 +9,46 @@
 
 ## Abstract (max 300 words)
 
-EcoSeek is an open-source, local-first agentic assistant that transforms how researchers, conservationists, and educators interact with GBIF-mediated biodiversity data. Built on a three-layer architecture — Substrate, Gateway (AgenticPlug), and Intelligence (EcoCoder + EcoAgent) — EcoSeek enables natural-language queries against biodiversity records, species distributions, and ecological literature.
+EcoSeek is the first dedicated scientific AI agent purpose-built for the GBIF network — not a generic chatbot with biodiversity prompts, but an agentic system designed from the ground up for ecological research, biodiversity informatics, and science outreach.
 
-The submission presents three integrated innovations:
+Where traditional GBIF tools require users to learn query interfaces, download datasets, and run analyses in separate environments, EcoSeek collapses the entire research pipeline into a single natural-language interaction. A researcher asks "What ecological factors drive the distribution of Quercus species in the Mexican Altiplano?" — and EcoSeek's swarm of DiDAL agents autonomously queries GBIF occurrences, retrieves WorldClim environmental layers, builds species distribution models, searches 36M PubMed abstracts for relevant literature, and synthesizes a response with citations, maps, and model outputs.
 
-1. **Smart Literature Search (LACS pipeline):** A PU-learning classifier scores 36 million PubMed abstracts for ecological relevance, indexing them into Meilisearch. Combined with LLM-powered query expansion via a multi-provider chain (MiMo, Ollama, OpenRouter), researchers can discover biodiversity literature through natural language — for example, asking "What parasites affect amphibians in the Sierra Madre Oriental?" and receiving ranked citations enriched with GBIF occurrence data.
+The system operates through a three-layer security architecture where no raw credentials ever reach the intelligence layer. An approval-gated gateway (AgenticPlug, 600+ tests) brokers every GBIF query, filesystem write, and external API call. This makes EcoSeek the first GBIF tool that can be safely deployed in institutional environments where data access must be audited and controlled.
 
-2. **DiDAL Distributed Agent System:** A swarm of lightweight AI agents running across HPC and edge nodes performs parallel biodiversity computations — species distribution modeling, GBIF data cleansing, and niche overlap analysis — coordinated through the AgenticPlug gateway with role-based access control and full audit trails.
+The submission also introduces **kids.ecoseek.org**, a live deployment that extends GBIF's reach to learners aged 6–15. Emily Astronauta, an animated mascot, guides children through ecology, zoology, and Earth science with age-appropriate responses filtered through content safety guardrails — cultivating the next generation of biodiversity scientists through direct engagement with GBIF-mediated data.
 
-3. **kids.ecoseek.org:** A kid-friendly science portal (ages 6–15) that makes GBIF-mediated biodiversity data accessible to young learners. Emily Astronauta, an animated mascot, guides children through ecology, zoology, botany, and Earth science using safe, age-appropriate responses filtered through Hermes Gateway content guardrails.
-
-All components are fully open-source, self-hosted, and require only Git + Docker. EcoSeek operates in three modes: DIY (fully offline), BYOK (user-provided cloud keys, Fernet-encrypted), and Lab-managed (shared gateway with 600+ security tests).
+EcoSeek is fully open-source, requires only Git + Docker, and operates in three modes: DIY (offline, local models), BYOK (user-provided cloud keys, Fernet-encrypted), and Lab-managed (institutional gateway with RBAC and audit trails).
 
 ---
 
 ## Rationale
 
+### Core Innovation: A Dedicated Biodiversity AI Agent
+
+The Ebbe Nielsen Challenge has recognized tools for visualization, data cleaning, and analysis pipelines. EcoSeek represents a fundamentally different category: **the first dedicated AI agent for GBIF**. It is not a generic LLM with biodiversity knowledge — it is an agentic system engineered specifically for ecological research workflows, with:
+
+- **Domain-specialized agent architecture:** EcoCoder runs fine-tuned models optimized for ecological reasoning. EcoAgent exposes 30+ biodiversity-specific tools via HTTP — SDM, niche overlap, GBIF data validation, host-parasite networks, taxonomic resolution.
+- **Multi-agent orchestration (DiDAL):** A swarm of lightweight agents distributed across available compute (laptop to HPC) performs tasks in parallel. The gateway coordinates agents, enforces policy, and records every decision in an immutable audit log.
+- **Fail-closed security by design:** The agent cannot make an unmediated GBIF query, filesystem write, or API call. Every action passes through an approval-gated gateway. This is not a feature — it is the architectural invariant that makes EcoSeek suitable for institutional deployment where audit compliance matters.
+
+### Why This Matters for GBIF
+
+The GBIF network holds over 2.7 billion occurrence records, but extracting scientific insight still requires significant technical expertise. EcoSeek removes this barrier by letting researchers interact with GBIF data in natural language while maintaining scientific rigor — every query is logged, every model run is reproducible, and every result is traceable to its source data.
+
+### Applicability
+
+- **Researchers:** Ask complex ecological questions in natural language. Receive answers backed by GBIF data + literature + models. No query language, no separate analysis environments.
+- **Institutions:** Deploy a lab-managed gateway with role-based access control. Audit every GBIF interaction. Share keys safely via Fernet-encrypted keystore.
+- **Educators & children:** kids.ecoseek.org makes GBIF data accessible to ages 6–15 with content safety guardrails. Live, serving real users.
+- **Data managers:** Open-source, self-hosted, zero vendor lock-in. Every component can be inspected, modified, and redeployed.
+
 ### Openness & Repeatability
 
-All components are freely available on GitHub under open-source licenses. The entire stack runs locally with zero external dependencies beyond GBIF data access. Every query, tool call, and policy decision is logged in a persistent audit trail. Reproducibility is guaranteed: the LACS pipeline uses deterministic scoring, the AgenticPlug gateway records every approval, and EcoAgent captures tool versions and input seeds. Any researcher can clone, run, and verify results.
-
-### Applicability to the GBIF Network
-
-EcoSeek addresses three critical gaps in the GBIF ecosystem:
-
-- **Literature-to-data bridging:** GBIF excels at occurrence data but lacks deep integration with ecological literature. The LACS pipeline connects 36M PubMed abstracts to GBIF taxa, enabling researchers to ask "what does the literature say about this species?" and receive both citations and occurrence maps.
-- **Democratizing access:** kids.ecoseek.org reaches audiences that GBIF portals currently do not serve — children aged 6–15 who will become the next generation of biodiversity scientists. The site already operates live, receiving real queries from young users.
-- **Computational scaling:** DiDAL distributes GBIF data processing across available compute from laptops to HPC clusters, making large-scale analyses (SDM for thousands of species, niche overlap matrices) feasible for researchers without institutional HPC access.
-
-### Innovation & Novelty
-
-Unlike traditional GBIF tools that focus on single-purpose visualizations or downloads, EcoSeek introduces an **agentic** paradigm: the user describes a scientific question in natural language, and a swarm of AI agents autonomously queries GBIF, searches literature, runs models, and synthesizes results. This agentic approach has not been demonstrated in previous Ebbe Nielsen Challenge winners.
-
-The LACS PU-learning pipeline is also novel for GBIF: it uses only 62K positive examples (GBIF-derived ecological publications) to classify 36M PubMed abstracts without requiring labeled negatives, a technique with immediate applicability to other biodiversity data domains.
+All code is freely available under open-source licenses on GitHub. The entire stack runs locally — the only external dependency is GBIF data access. Every query result, agent decision, and model output is reproducible: LACS uses deterministic scoring, EcoAgent captures tool versions and input seeds, and the audit trail records every approval.
 
 ### Quality of Implementation
 
-EcoSeek is production-ready at pre-alpha stage with **600+ automated security tests** across 26 test suites covering authentication, authorization, approval workflows, path traversal protection, and BYOK encryption (Fernet: AES-128-CBC + HMAC-SHA256). The gateway enforces a fail-closed security posture: if any policy check is ambiguous, the request is denied. Two live deployments (ecoseek.org and kids.ecoseek.org) serve real users with monitored uptime.
-
-### Benefit for GBIF Network
-
-EcoSeek adds value across all GBIF stakeholder groups:
-
-- **Data users:** Natural-language access to GBIF + literature, agentic analysis pipelines
-- **Data holders:** Increased visibility through literature-mediated species discovery
-- **Data managers:** Open-source, auditable, self-hosted — no vendor lock-in
-- **Community & outreach:** kids.ecoseek.org builds the next generation of biodiversity scientists
-- **Policy:** Evidence synthesis combining GBIF data with peer-reviewed literature at scale
+EcoSeek ships with **600+ automated security tests** covering authentication, authorization, approval workflows, path traversal protection, and BYOK encryption. Two live deployments (ecoseek.org and kids.ecoseek.org) serve real users. Pre-alpha maturity, production-ready security posture.
 
 ---
 
@@ -68,9 +61,9 @@ EcoSeek adds value across all GBIF stakeholder groups:
    bash setup.sh
    docker compose up --build
    ```
-2. Access the gateway at `http://localhost:3000`
-3. Try a query: `POST /v1/smart-search {"text": "amphibian parasites in Mexico"}`
-4. Visit https://kids.ecoseek.org for the kid-friendly version
+2. Access: `http://localhost:3000`
+3. Try: `POST /v1/smart-search {"text": "ecological niche of Quercus in Mexican altiplano"}`
+4. Kids version live at: https://kids.ecoseek.org
 
 ## Video Demo
 
@@ -78,9 +71,11 @@ EcoSeek adds value across all GBIF stakeholder groups:
 
 ## Submission Materials
 
-- GitHub: https://github.com/alrobles/ecoseek
-- AgenticPlug (gateway): https://github.com/alrobles/agenticplug
-- EcoCoder (inference): https://github.com/alrobles/ecocoder
-- EcoAgent (tools): https://github.com/alrobles/ecoagent
-- EcoSeek Kids: https://github.com/alrobles/ecoseek-kids
-- Live: https://ecoseek.org | https://kids.ecoseek.org
+| Component | Repository |
+|-----------|-----------|
+| EcoSeek (monorepo) | https://github.com/alrobles/ecoseek |
+| AgenticPlug (gateway) | https://github.com/alrobles/agenticplug |
+| EcoCoder (inference) | https://github.com/alrobles/ecocoder |
+| EcoAgent (tools) | https://github.com/alrobles/ecoagent |
+| EcoSeek Kids | https://github.com/alrobles/ecoseek-kids |
+| Live sites | https://ecoseek.org · https://kids.ecoseek.org |
