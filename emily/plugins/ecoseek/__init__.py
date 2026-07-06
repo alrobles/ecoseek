@@ -1472,15 +1472,15 @@ R_WORKSPACE_STATUS_SCHEMA = {
 RUN_NICHE_MODEL_SCHEMA = {
     "name": "run_niche_model",
     "description": (
-        "Run the ellipsoidal niche modeling pipeline for a species. "
-        "10-step algorithm: (1) Get GBIF occurrences, (2) filter unique, "
-        "(3) remove outliers (IQR), (4) extract CHELSA bioclim, "
-        "(5) deduplicate coords, (6) fit nicher ellipsoid (presence_only), "
-        "(7) build M mask from ecoregions (>5% threshold), "
-        "(8) crop bioclim with M mask, (9) project ellipse, "
-        "(10) write suitability GeoTIFF. "
-        "Uses nicher package with CHELSA bioclim and WWF ecoregions. "
-        "Data sources: GBIF parquet (cluster) or GBIF API."
+        "Run the ellipsoidal niche modeling pipeline (Barve et al. 2011 compliant). "
+        "10-step algorithm: (1-3) Get GBIF occurrences, filter unique, remove geographic outliers, "
+        "(4-5) extract ERA5-bioclim, deduplicate coords, "
+        "(6) environmental IQR filtering on bioclim values, "
+        "(7-8) build M mask from One Earth ecoregions 2017, crop rasters to M, "
+        "(9) fit nicher ellipsoid (presence_only), "
+        "(10) project on M-cropped rasters + write outputs. "
+        "M mask restricts prediction to species' accessible area. "
+        "Data sources: GBIF parquet (260GB local) or GBIF API."
     ),
     "parameters": {
         "type": "object",
@@ -1495,7 +1495,11 @@ RUN_NICHE_MODEL_SCHEMA = {
             },
             "iqr_factor": {
                 "type": "number",
-                "description": "IQR multiplier for outlier removal (default: 1.5).",
+                "description": "IQR multiplier for geographic outlier removal (default: 1.5).",
+            },
+            "env_iqr_factor": {
+                "type": "number",
+                "description": "IQR multiplier for environmental outlier removal (default: 1.5).",
             },
             "ecoregion_pct": {
                 "type": "number",
@@ -1505,9 +1509,82 @@ RUN_NICHE_MODEL_SCHEMA = {
                 "type": "string",
                 "description": "Comma-separated bioclim vars (default: bio01-bio19).",
             },
+            "bioclim_year": {
+                "type": "integer",
+                "description": "Year for ERA5-bioclim data, 1980-2020 (default: 2020).",
+            },
             "use_gbif_api": {
                 "type": "boolean",
                 "description": "Query GBIF API instead of local parquet (default: false).",
+            },
+        },
+        "required": ["species"],
+    },
+}
+
+RUN_MAXENT_MODEL_SCHEMA = {
+    "name": "run_maxent_model",
+    "description": (
+        "Run MaxEnt SDM pipeline via maxentcpp (Barve et al. 2011 compliant). "
+        "10-step algorithm: (1-3) Get GBIF occurrences, filter unique, remove geographic outliers, "
+        "(4-5) extract ERA5-bioclim, deduplicate coords, "
+        "(6) environmental IQR filtering on bioclim values, "
+        "(7-8) build M mask from One Earth ecoregions 2017, crop rasters to M, "
+        "(9) fit MaxEnt with background WITHIN M (linear, quadratic, hinge features), "
+        "(10) project cloglog on M-cropped rasters + write outputs. "
+        "Returns AUC, percent contribution, permutation importance. "
+        "Data sources: GBIF parquet (260GB local) or GBIF API."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "species": {
+                "type": "string",
+                "description": "Scientific name (e.g., 'Panthera onca').",
+            },
+            "n_background": {
+                "type": "integer",
+                "description": "Number of background points within M (default: 10000).",
+            },
+            "feature_types": {
+                "type": "string",
+                "description": "Comma-separated feature types: linear,quadratic,hinge,product,threshold (default: linear,quadratic,hinge).",
+            },
+            "n_hinges": {
+                "type": "integer",
+                "description": "Number of hinge knots (default: 15).",
+            },
+            "max_iter": {
+                "type": "integer",
+                "description": "Maximum training iterations (default: 500).",
+            },
+            "iqr_factor": {
+                "type": "number",
+                "description": "IQR multiplier for geographic outlier removal (default: 1.5).",
+            },
+            "env_iqr_factor": {
+                "type": "number",
+                "description": "IQR multiplier for environmental outlier removal (default: 1.5).",
+            },
+            "ecoregion_pct": {
+                "type": "number",
+                "description": "Min fraction of points to keep ecoregion (default: 0.05).",
+            },
+            "bioclim_vars": {
+                "type": "string",
+                "description": "Comma-separated bioclim vars (default: bio01-bio19).",
+            },
+            "bioclim_year": {
+                "type": "integer",
+                "description": "Year for ERA5-bioclim data, 1980-2020 (default: 2020).",
+            },
+            "use_gbif_api": {
+                "type": "boolean",
+                "description": "Query GBIF API instead of local parquet (default: false).",
+            },
+            "seed": {
+                "type": "integer",
+                "description": "Random seed for background sampling (default: 42).",
             },
         },
         "required": ["species"],
@@ -1636,6 +1713,7 @@ def register(ctx) -> None:
         execute_r_code,
         list_r_packages,
         r_workspace_status,
+        run_maxent_model,
         run_niche_model,
     )
 
@@ -1676,12 +1754,39 @@ def register(ctx) -> None:
             species=args.get("species", ""),
             num_starts=args.get("num_starts", 20),
             iqr_factor=args.get("iqr_factor", 1.5),
+            env_iqr_factor=args.get("env_iqr_factor", 1.5),
             ecoregion_pct=args.get("ecoregion_pct", 0.05),
             bioclim_vars=args.get(
                 "bioclim_vars",
                 "bio01,bio02,bio03,bio04,bio05,bio06,bio07,bio08,bio09,bio10,bio11,bio12,bio13,bio14,bio15,bio16,bio17,bio18,bio19",
             ),
+            bioclim_year=args.get("bioclim_year", 2020),
             use_gbif_api=args.get("use_gbif_api", False),
+            task_id=kw.get("task_id"),
+        ),
+        check_fn=lambda: True,
+    )
+
+    ctx.register_tool(
+        name="run_maxent_model",
+        toolset="ecoseek",
+        schema=RUN_MAXENT_MODEL_SCHEMA,
+        handler=lambda args, **kw: run_maxent_model(
+            species=args.get("species", ""),
+            n_background=args.get("n_background", 10000),
+            feature_types=args.get("feature_types", "linear,quadratic,hinge"),
+            n_hinges=args.get("n_hinges", 15),
+            max_iter=args.get("max_iter", 500),
+            iqr_factor=args.get("iqr_factor", 1.5),
+            env_iqr_factor=args.get("env_iqr_factor", 1.5),
+            ecoregion_pct=args.get("ecoregion_pct", 0.05),
+            bioclim_vars=args.get(
+                "bioclim_vars",
+                "bio01,bio02,bio03,bio04,bio05,bio06,bio07,bio08,bio09,bio10,bio11,bio12,bio13,bio14,bio15,bio16,bio17,bio18,bio19",
+            ),
+            bioclim_year=args.get("bioclim_year", 2020),
+            use_gbif_api=args.get("use_gbif_api", False),
+            seed=args.get("seed", 42),
             task_id=kw.get("task_id"),
         ),
         check_fn=lambda: True,
@@ -1726,9 +1831,9 @@ def register(ctx) -> None:
         check_fn=_is_configured,
     )
 
-    n = 15 if _is_configured() else 10
+    n = 16 if _is_configured() else 11
     logger.info(
-        "ecoseek plugin registered: %d tools, remote=%s configured=%s didal=v2 ecoagent=true r_workspace=true niche=true pdf=true artifacts=true lacs=true",
+        "ecoseek plugin registered: %d tools, remote=%s configured=%s didal=v2 ecoagent=true r_workspace=true niche=true maxent=true pdf=true artifacts=true lacs=true",
         n,
         _REMOTE_URL,
         _is_configured(),

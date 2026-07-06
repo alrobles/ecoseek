@@ -409,6 +409,185 @@ async def _route(req: QueryRequest) -> QueryResponse:
 # ── Endpoints ───────────────────────────────────────────────────────────────
 
 
+class SearchRequest(BaseModel):
+    """Search GBIF ecological literature via Meilisearch."""
+    q: str = Field(..., description="Search query")
+    limit: int = Field(default=10, ge=1, le=100, description="Max results")
+    offset: int = Field(default=0, ge=0, description="Pagination offset")
+    filter_has_abstract: bool = Field(default=False, description="Only papers with abstract >200 chars")
+    min_year: int = Field(default=0, description="Minimum publication year")
+
+
+class SearchResult(BaseModel):
+    """A single literature search result."""
+    id: str
+    title: str
+    abstract: str
+    year: str
+    keywords: str
+    doi: str
+
+
+class SearchResponse(BaseModel):
+    """Meilisearch literature search response."""
+    success: bool
+    query: str
+    total_hits: int
+    processing_time_ms: int
+    results: list[SearchResult]
+
+
+@app.post("/v1/search", response_model=SearchResponse, summary="Search GBIF ecological literature")
+async def search_papers(req: SearchRequest):  # returns SearchResponse | JSONResponse
+    """
+    Full-text search across 62,000 GBIF-cited ecological papers.
+
+    Powered by Meilisearch — returns results in <100ms with typo-tolerant,
+    relevance-ranked matching. Filters available for abstract presence and
+    minimum publication year.
+    """
+    if not config.MEILI_ENABLED:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Meilisearch is not enabled. Set MEILI_ENABLED=true."},
+        )
+
+    # Build Meilisearch query
+    meili_query: dict[str, Any] = {
+        "q": req.q,
+        "limit": req.limit,
+        "offset": req.offset,
+        "attributesToRetrieve": ["id", "title", "abstract", "year", "keywords", "doi"],
+    }
+
+    filters: list[str] = []
+    if req.filter_has_abstract:
+        filters.append("has_abstract = true")
+    if req.min_year > 0:
+        filters.append(f"year >= {req.min_year}")
+    if filters:
+        meili_query["filter"] = " AND ".join(filters)
+
+    try:
+        async with httpx.AsyncClient(timeout=config.UPSTREAM_TIMEOUT_S) as client:
+            resp = await client.post(
+                f"{config.MEILI_URL}/indexes/{config.MEILI_INDEX}/search",
+                json=meili_query,
+                headers={"Content-Type": "application/json"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as exc:
+        log.error("Meilisearch search failed: %s", exc)
+        return JSONResponse(
+            status_code=502,
+            content={"detail": f"Meilisearch unavailable: {exc}"},
+        )
+
+    results: list[SearchResult] = []
+    for hit in data.get("hits", []):
+        results.append(SearchResult(
+            id=hit.get("id", ""),
+            title=hit.get("title", ""),
+            abstract=hit.get("abstract", ""),
+            year=str(hit.get("year", "")),
+            keywords=hit.get("keywords", ""),
+            doi=hit.get("doi", ""),
+        ))
+
+    return SearchResponse(
+        success=True,
+        query=req.q,
+        total_hits=data.get("estimatedTotalHits", 0),
+        processing_time_ms=data.get("processingTimeMs", 0),
+        results=results,
+    )
+
+
+@app.post("/v1/smart-search", summary="AI-powered semantic literature search")
+async def smart_search_papers(req: SearchRequest):
+    """
+    Smart search with LLM-powered query expansion + semantic re-ranking.
+    
+    Uses the Q6000 Ollama cluster to:
+    1. Expand the query with scientific terminology
+    2. Search Meilisearch for top-50 papers
+    3. Re-rank results based on semantic relevance to user intent
+    
+    Slower (~5-10s) but much more accurate than keyword search.
+    """
+    if not config.MEILI_ENABLED:
+        return JSONResponse(status_code=503, content={"detail": "Meilisearch not enabled."})
+    
+    try:
+        from smart_search import expand_query, rerank_papers, search_meili
+        
+        # 1. Expand query with LLM
+        log.info("Smart search: expanding query '%s'", req.q[:80])
+        expanded = expand_query(req.q)
+        log.info("Smart search: expanded to '%s'", expanded[:100])
+        
+        # 2. Search Meilisearch
+        meili_results = search_meili(expanded, limit=50)
+        papers = meili_results.get("hits", [])
+        log.info("Smart search: Meilisearch returned %d hits", len(papers))
+        
+        # 3. Re-rank with LLM
+        if len(papers) > 10:
+            papers = rerank_papers(req.q, papers)
+            log.info("Smart search: re-ranked to %d papers", len(papers))
+        
+        # Format results
+        results: list[SearchResult] = []
+        for hit in papers[:req.limit]:
+            results.append(SearchResult(
+                id=hit.get("id", ""),
+                title=hit.get("title", ""),
+                abstract=hit.get("abstract", ""),
+                year=str(hit.get("year", "")),
+                keywords=hit.get("keywords", ""),
+                doi=hit.get("doi", ""),
+            ))
+        
+        return SearchResponse(
+            success=True,
+            query=req.q,
+            total_hits=len(papers),
+            processing_time_ms=meili_results.get("processingTimeMs", 0),
+            results=results,
+        )
+    except Exception as exc:
+        log.error("Smart search failed: %s", exc)
+        return JSONResponse(status_code=502, content={"detail": f"Smart search error: {exc}"})
+
+
+@app.post("/v1/metasearch", summary="Multi-agent dialectical literature search")
+async def metasearch_papers(req: SearchRequest):
+    """
+    Alpha↔Beta dialectical search — multiple Hermes agents debate and refine.
+    
+    Alpha proposes query expansion + ranking.
+    Beta critiques and suggests improvements.
+    Alpha revises → consensus final ranking.
+    
+    Slower (~15-30s) but highest quality results with dialectical reasoning.
+    """
+    try:
+        from metasearch import metasearch
+        result = metasearch(req.q)
+        return JSONResponse(content={
+            "success": True,
+            "query": req.q,
+            "total_hits": len(result["results"]),
+            "processing_time_ms": result["time_ms"],
+            "results": result["results"][:req.limit],
+            "method": "didal",
+        })
+    except Exception as exc:
+        log.error("Metasearch failed: %s", exc)
+        return JSONResponse(status_code=502, content={"detail": str(exc)})
+
+
 @app.get("/", summary="Health check")
 async def health() -> Dict[str, str]:
     """Returns immediately with status=ok. Used by docker healthcheck."""

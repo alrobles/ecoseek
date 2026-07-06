@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { MathJax } from "better-react-mathjax";
 import "./App.css";
 import { ThemeToggle } from "./components/ThemeToggle";
@@ -7,13 +8,61 @@ import { ResizableLayout } from "./components/ResizableLayout";
 import { CodeBlock } from "./components/CodeBlock";
 import { RenderPreview, DiDALPanel } from "./components/RenderPreview";
 import { FilesPanel } from "./components/FilesPanel";
+import { ResultsPanel } from "./components/ResultsPanel";
+import { LiteraturePanel } from "./components/LiteraturePanel";
 import { ReactComponent as EcoSeekLogo } from "./ecoseek-logo.svg";
 import emilyAvatar from "./emily-avatar.png";
 import emilyThinking from "./emily-avatar-thinking.gif";
 import { useAuth } from "./contexts/AuthContext";
-import { chatCompletionStream, checkHealth, checkRemoteHealth, BROKER_URL, CHAT_URL, IS_LOCAL_EMILY, HERMES_REMOTE_URL } from "./api/broker";
+import { chatCompletionStream, checkHealth, checkRemoteHealth, BROKER_URL, CHAT_URL, IS_LOCAL_EMILY, IS_DEMO, HERMES_REMOTE_URL } from "./api/broker";
 import { ToolCallsContainer } from "./components/ToolCallCard";
 import { extractPdfText, validatePdf } from "./utils/pdfExtract";
+
+function formatTimer(seconds) {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function DemoLandingScreen({ onStart, cooldownRemaining }) {
+  const inCooldown = cooldownRemaining > 0;
+  return (
+    <div className="login-screen">
+      <div className="login-card demo-landing">
+        <EcoSeekLogo className="login-logo" />
+        <h1>EcoSeek</h1>
+        <img src={emilyAvatar} alt="Emily" className="login-emily-avatar" />
+        <p className="login-subtitle">
+          Meet Emily — your AI ecological research assistant.
+          <br />
+          Explore biodiversity data powered by GBIF.
+        </p>
+        {inCooldown ? (
+          <>
+            <div className="demo-cooldown-notice">
+              <span className="cooldown-icon">&#9200;</span>
+              <p>Demo session limit reached.</p>
+              <p className="cooldown-timer">Available again in <strong>{formatTimer(cooldownRemaining)}</strong></p>
+            </div>
+            <button className="login-button" disabled>
+              Start Demo Session
+            </button>
+          </>
+        ) : (
+          <button className="login-button demo-start-button" onClick={onStart}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polygon points="5 3 19 12 5 21 5 3" />
+            </svg>
+            Start Demo Session
+          </button>
+        )}
+        <p className="login-note">
+          15-minute session &middot; Fair-use limited &middot; Powered by Hermes
+        </p>
+      </div>
+    </div>
+  );
+}
 
 function LoginScreen({ onLogin }) {
   return (
@@ -42,7 +91,7 @@ function LoginScreen({ onLogin }) {
 }
 
 function App() {
-  const { user, loading, login, logout, handleCallback } = useAuth();
+  const { user, loading, login, logout, handleCallback, startDemoSession, demoActive, demoRemaining, demoCooldownRemaining } = useAuth();
   const [query, setQuery] = useState("");
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -50,7 +99,7 @@ function App() {
   const [isOnline, setIsOnline] = useState(false);
   const [remoteStatus, setRemoteStatus] = useState(null);
   const [expandedReasoning, setExpandedReasoning] = useState(new Set());
-  const [rightPanelTab, setRightPanelTab] = useState("output");
+  const [rightPanelTab, setRightPanelTab] = useState("literature");
   const [streamingContent, setStreamingContent] = useState("");
   const [streamingReasoning, setStreamingReasoning] = useState("");
   const [activeToolCalls, setActiveToolCalls] = useState([]);
@@ -352,6 +401,7 @@ function App() {
 
               // Extract classification and trace_id from didal_protocol results
               if (result.toolCalls) {
+                let hasModelResult = false;
                 for (const tc of result.toolCalls) {
                   if (tc.name === "didal_protocol" || tc.name === "classify_prompt") {
                     try {
@@ -362,7 +412,11 @@ function App() {
                       if (parsed?.judge) setLastJudgeResult(parsed.judge);
                     } catch (_) { /* ignore parse errors */ }
                   }
+                  if (tc.name === "run_maxent_model" || tc.name === "run_niche_model") {
+                    hasModelResult = true;
+                  }
                 }
+                if (hasModelResult) setRightPanelTab("results");
               }
 
               setTimeout(() => setActiveToolCalls([]), 3000);
@@ -410,6 +464,9 @@ function App() {
   }
 
   if (!user) {
+    if (IS_DEMO) {
+      return <DemoLandingScreen onStart={startDemoSession} cooldownRemaining={demoCooldownRemaining} />;
+    }
     return <LoginScreen onLogin={login} />;
   }
 
@@ -439,16 +496,23 @@ function App() {
           </div>
         </div>
         <div className="header-actions">
-          <div className="user-info">
-            {user.avatarUrl && (
-              <img
-                src={user.avatarUrl}
-                alt={user.login}
-                className="user-avatar"
-              />
-            )}
-            <span className="user-name">{user.login}</span>
-          </div>
+          {!IS_DEMO && (
+            <div className="user-info">
+              {user.avatarUrl && (
+                <img
+                  src={user.avatarUrl}
+                  alt={user.login}
+                  className="user-avatar"
+                />
+              )}
+              <span className="user-name">{user.login}</span>
+            </div>
+          )}
+          {IS_DEMO && demoActive && (
+            <span className={`demo-badge ${demoRemaining <= 60 ? 'demo-badge-warning' : ''}`}>
+              Demo &middot; {formatTimer(demoRemaining)}
+            </span>
+          )}
           <a
             href="https://github.com/alrobles/ecoseek"
             target="_blank"
@@ -461,9 +525,11 @@ function App() {
             </svg>
           </a>
           <ThemeToggle />
-          <button className="action-button logout-button" onClick={logout}>
-            Sign out
-          </button>
+          {!IS_DEMO && (
+            <button className="action-button logout-button" onClick={logout}>
+              Sign out
+            </button>
+          )}
         </div>
       </header>
 
@@ -547,7 +613,11 @@ function App() {
                     <div className="message-content">
                       <MathJax>
                         <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
                           components={{
+                            table({ children }) {
+                              return <div className="output-table-wrap"><table>{children}</table></div>;
+                            },
                             code({ node, inline, className, children, ...props }) {
                               if (inline) {
                                 return <code className="inline-code" {...props}>{children}</code>;
@@ -588,7 +658,11 @@ function App() {
                     <div className="message-content">
                       <MathJax>
                         <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
                           components={{
+                            table({ children }) {
+                              return <div className="output-table-wrap"><table>{children}</table></div>;
+                            },
                             code({ node, inline, className, children, ...props }) {
                               if (inline) {
                                 return <code className="inline-code" {...props}>{children}</code>;
@@ -743,6 +817,12 @@ function App() {
           <div className="computer-section">
             <div className="panel-tabs">
               <button
+                className={`panel-tab ${rightPanelTab === "literature" ? "active" : ""}`}
+                onClick={() => setRightPanelTab("literature")}
+              >
+                📚 Literature
+              </button>
+              <button
                 className={`panel-tab ${rightPanelTab === "output" ? "active" : ""}`}
                 onClick={() => setRightPanelTab("output")}
               >
@@ -753,6 +833,12 @@ function App() {
                 onClick={() => setRightPanelTab("terminal")}
               >
                 Terminal
+              </button>
+              <button
+                className={`panel-tab ${rightPanelTab === "results" ? "active" : ""}`}
+                onClick={() => setRightPanelTab("results")}
+              >
+                Results
               </button>
               <button
                 className={`panel-tab ${rightPanelTab === "files" ? "active" : ""}`}
@@ -775,6 +861,15 @@ function App() {
               </button>
             </div>
             <div className="content">
+              {rightPanelTab === "literature" && (
+                <LiteraturePanel
+                  onCitePaper={(ctx) => {
+                    setQuery(ctx + query);
+                    setRightPanelTab("output");
+                  }}
+                  isLocalEmily={IS_LOCAL_EMILY}
+                />
+              )}
               {rightPanelTab === "output" && (
                 <RenderPreview messages={messages} streamingContent={streamingContent} isLoading={isLoading} didalStages={didalStages} />
               )}
@@ -792,6 +887,9 @@ function App() {
                     <p>Or manually: <code>docker run -d --name ecoseek-terminal -p 8001:7681 tsl0922/ttyd:latest bash</code></p>
                   </div>
                 </div>
+              )}
+              {rightPanelTab === "results" && (
+                <ResultsPanel messages={messages} />
               )}
               {rightPanelTab === "files" && (
                 <FilesPanel />

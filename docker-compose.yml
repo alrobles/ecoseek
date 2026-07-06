@@ -107,6 +107,10 @@ services:
       UPSTREAM_TIMEOUT_S: "${UPSTREAM_TIMEOUT_S:-120}"
       LOCAL_LLM_URL: "${LOCAL_LLM_URL:-}"
       LOCAL_LLM_API_KEY: "${LOCAL_LLM_API_KEY:-}"
+      # Meilisearch (literature search)
+      MEILI_URL: "${MEILI_URL:-http://meilisearch:7700}"
+      MEILI_ENABLED: "${MEILI_ENABLED:-true}"
+      MEILI_INDEX: "${MEILI_INDEX:-gbif_literature}"
       # Phoenix / OpenTelemetry tracing
       PHOENIX_ENABLED: "${PHOENIX_ENABLED:-false}"
       PHOENIX_ENDPOINT: "${PHOENIX_ENDPOINT:-http://phoenix:6006/v1/traces}"
@@ -382,15 +386,63 @@ services:
       context: ./frontend
       args:
         REACT_APP_BROKER_URL: "${REACT_APP_BROKER_URL:-https://broker.ecoseek.org}"
-        REACT_APP_EMILY_URL: "${REACT_APP_EMILY_URL:-http://localhost:8642}"
-        REACT_APP_EMILY_KEY: "${REACT_APP_EMILY_KEY:-${EMILY_API_KEY:-emily-local-key}}"
+        REACT_APP_EMILY_URL: "${REACT_APP_EMILY_URL:-}"
+        REACT_APP_EMILY_KEY: "${REACT_APP_EMILY_KEY:-}"
     container_name: ecoseek-frontend
     profiles: ["frontend"]
     ports:
       - "127.0.0.1:${FRONTEND_PORT:-4000}:80"
+    environment:
+      EMILY_HERMES_KEY: "${EMILY_HERMES_KEY:-${EMILY_API_KEY:-}}"
+    volumes:
+      - ./frontend/nginx.conf:/tmp/nginx.conf.template:ro
+      - r-workspace-data:/workspace:ro
+    command: >
+      /bin/sh -c ": $${EMILY_HERMES_KEY:?FATAL must be set in .env to the hermes
+      API_SERVER_KEY served on host port 8642 - refusing to start so chat is not
+      silently proxied with an empty Bearer token (HTTP 401)};
+      envsubst '$$EMILY_HERMES_KEY' < /tmp/nginx.conf.template
+      > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - ecoseek-net
+
+  # ── Demo Frontend (public, no login) ──────────────────────────────────
+  # Public demo for hackathons/challenges. No GitHub OAuth, no cluster
+  # access. Chat proxies to demo Hermes on port 8646.
+  demo-frontend:
+    build:
+      context: ./frontend
+      args:
+        REACT_APP_BROKER_URL: "${REACT_APP_BROKER_URL:-https://broker.ecoseek.org}"
+        REACT_APP_EMILY_URL: ""
+        REACT_APP_EMILY_KEY: ""
+        REACT_APP_DEMO_MODE: "true"
+    container_name: demo-frontend
+    profiles: ["demo"]
+    ports:
+      - "127.0.0.1:${DEMO_FRONTEND_PORT:-4001}:80"
+    environment:
+      DEMO_HERMES_KEY: "${DEMO_HERMES_KEY:-}"
+    volumes:
+      - ./frontend/nginx-demo.conf:/tmp/nginx-demo.conf.template:ro
+      - r-workspace-data:/workspace:ro
+    command: >
+      /bin/sh -c "envsubst '$$DEMO_HERMES_KEY' < /tmp/nginx-demo.conf.template
+      > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -413,6 +465,7 @@ services:
       R_EXEC_TIMEOUT: "${R_EXEC_TIMEOUT:-300}"
     volumes:
       - r-workspace-data:/workspace
+      - /media/reumanlab/TOSHIBA_EXT:/media/reumanlab/TOSHIBA_EXT:ro
     restart: unless-stopped
     healthcheck:
       test:

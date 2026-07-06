@@ -55,6 +55,20 @@ _HERMES_REMOTE_URL = os.environ.get(
 _HERMES_API_KEY = os.environ.get("HERMES_ECOSEEK_API_KEY", "")
 _ECOAGENT_TIMEOUT = int(os.environ.get("ECOAGENT_RETRIEVAL_TIMEOUT", "30"))
 
+# CORE API — world's largest open access aggregator (57M+ full texts)
+_CORE_API_KEY = os.environ.get("CORE_API_KEY", "")
+_CORE_ENABLED = os.environ.get("CORE_ENABLED", "true").lower() in ("true", "1", "yes")
+_CORE_TIMEOUT = int(os.environ.get("CORE_RETRIEVAL_TIMEOUT", "15"))
+
+# Crawl4AI — web crawling for supplementary literature (replaces Firecrawl)
+_CRAWL4AI_VENV = os.environ.get(
+    "CRAWL4AI_VENV", os.path.expanduser("~/crawl4ai-venv")
+)
+_CRAWL4AI_ENABLED = os.environ.get("CRAWL4AI_ENABLED", "true").lower() in (
+    "true", "1", "yes",
+)
+_CRAWL4AI_TIMEOUT = int(os.environ.get("CRAWL4AI_TIMEOUT", "20"))
+
 # ---------------------------------------------------------------------------
 # Normalized evidence schema
 # ---------------------------------------------------------------------------
@@ -462,6 +476,189 @@ def search_entrez(query: str, max_results: int = 5) -> list[Evidence]:
             )
         )
 
+    return results
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CORE API — full-text open access papers (57M+ full texts)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _search_core(query: str, limit: int = 10) -> list[Evidence]:
+    """Search CORE for open access papers with full text."""
+    if not _CORE_ENABLED:
+        return []
+
+    params = urllib.parse.urlencode({
+        "q": f"{query} AND _exists_:fullText",
+        "limit": limit,
+    })
+    url = f"https://api.core.ac.uk/v3/search/works?{params}"
+
+    headers = {"Accept": "application/json"}
+    if _CORE_API_KEY:
+        headers["Authorization"] = f"Bearer {_CORE_API_KEY}"
+
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        resp = urllib.request.urlopen(req, timeout=_CORE_TIMEOUT)
+        data = json.loads(resp.read())
+    except Exception as exc:
+        logger.warning(f"CORE search failed: {exc}")
+        return []
+
+    results = []
+    for hit in data.get("results", []):
+        title = (hit.get("title") or "").strip()
+        if len(title) < 5:
+            continue
+        authors_list = hit.get("authors") or []
+        first = authors_list[0].get("name", "") if authors_list else ""
+        authors_str = f"{first} et al." if len(authors_list) > 1 else first
+        doi = hit.get("doi") or ""
+        download_url = hit.get("downloadUrl") or ""
+        url_source = hit.get("sourceUrl") or ""
+        year = hit.get("yearPublished")
+        abstract = (hit.get("abstract") or "")[:500]
+
+        results.append(Evidence(
+            source_type="paper",
+            title=title,
+            authors=authors_str,
+            year=year,
+            url=download_url or url_source,
+            doi=doi,
+            abstract=abstract,
+            claim_used_for="",
+            confidence=0.85 if download_url else 0.75,
+            provider="core",
+        ))
+
+    logger.info(f"CORE: {len(results)} results for '{query[:60]}'")
+    return results
+
+
+
+# ---------------------------------------------------------------------------
+# Crawl4AI — web crawling for supplementary literature (replaces Firecrawl)
+# ---------------------------------------------------------------------------
+
+
+def _crawl4ai_available() -> bool:
+    """Return True if crawl4ai venv is installed and enabled."""
+    if not _CRAWL4AI_ENABLED:
+        return False
+    python_bin = os.path.join(_CRAWL4AI_VENV, "bin", "python")
+    return os.path.isfile(python_bin)
+
+
+def search_crawl4ai(query: str, max_results: int = 3) -> list[Evidence]:
+    """Use crawl4ai to crawl web pages for supplementary literature.
+
+    Unlike API-based sources, crawl4ai can access arbitrary web pages,
+    preprint servers, and journal sites that don't have public APIs.
+    This replaces Firecrawl which ran out of credits.
+
+    Strategy: crawl Google Scholar / CrossRef / DOAJ for the query,
+    extract paper metadata from the crawled markdown.
+    """
+    import subprocess
+    import re
+
+    if not _crawl4ai_available():
+        return []
+
+    python_bin = os.path.join(_CRAWL4AI_VENV, "bin", "python")
+
+    # Use CrossRef API (free, no auth) as a web-accessible source
+    # that crawl4ai can enrich with abstracts from landing pages
+    queries_to_try = [
+        f"https://api.crossref.org/works?query={urllib.parse.quote(query)}&rows={max_results}&select=DOI,title,author,published-print,abstract,URL",
+    ]
+
+    results: list[Evidence] = []
+
+    for crawl_url in queries_to_try[:1]:  # one URL per call to stay fast
+        try:
+            proc = subprocess.run(
+                [python_bin, "-m", "crawl4ai.cli", "crawl", crawl_url, "-o", "md"],
+                capture_output=True,
+                text=True,
+                timeout=_CRAWL4AI_TIMEOUT,
+            )
+            if proc.returncode != 0:
+                logger.warning("crawl4ai failed for %s: %s", crawl_url[:80], proc.stderr[:200])
+                continue
+
+            md_output = proc.stdout.strip()
+            if not md_output or len(md_output) < 50:
+                continue
+
+            # Try to parse as JSON (CrossRef returns JSON)
+            try:
+                # Strip markdown code fences if present
+                clean = md_output
+                if clean.startswith("```"):
+                    lines = clean.split("\n")
+                    clean = "\n".join(lines[1:-1]) if len(lines) > 2 else clean
+                data = json.loads(clean)
+                items = data.get("message", {}).get("items", [])
+            except (json.JSONDecodeError, ValueError):
+                # If not JSON, try to extract DOIs from markdown text
+                dois = re.findall(r'10\.\d{4,}/[^\s"\'>]+', md_output)
+                items = [{"DOI": d} for d in dois[:max_results]]
+
+            for item in items[:max_results]:
+                doi = item.get("DOI", "")
+                title_list = item.get("title", [])
+                title = title_list[0] if isinstance(title_list, list) and title_list else str(title_list)
+
+                # Authors
+                authors_list = item.get("author", [])
+                if authors_list:
+                    first = authors_list[0].get("family", authors_list[0].get("given", "Unknown"))
+                    authors = f"{first} et al." if len(authors_list) > 1 else first
+                else:
+                    authors = "Unknown"
+
+                # Year
+                pub = item.get("published-print", item.get("published-online", {}))
+                year = None
+                if pub and pub.get("date-parts"):
+                    try:
+                        year = pub["date-parts"][0][0]
+                    except (IndexError, TypeError):
+                        pass
+
+                # Abstract (may be absent from CrossRef)
+                abstract = item.get("abstract", "")
+                # Strip HTML tags from CrossRef abstracts
+                if abstract:
+                    abstract = re.sub(r'<[^>]+>', '', abstract)[:500]
+
+                url = item.get("URL", "")
+                if doi and not url:
+                    url = f"https://doi.org/{doi}"
+
+                if title:
+                    results.append(Evidence(
+                        source_type="paper",
+                        title=title,
+                        authors=authors,
+                        year=year,
+                        url=url,
+                        doi=doi,
+                        abstract=abstract,
+                        claim_used_for="",
+                        confidence=0.70,  # CrossRef = good but not curated
+                        provider="crawl4ai",
+                    ))
+
+        except subprocess.TimeoutExpired:
+            logger.warning("crawl4ai timeout for query '%s'", query[:60])
+        except Exception as exc:
+            logger.warning("crawl4ai error: %s", exc)
+
+    if results:
+        logger.info("crawl4ai: %d results for '%s'", len(results), query[:60])
     return results
 
 
@@ -934,7 +1131,15 @@ def retrieve_literature(
             search_tasks.append(("gbif", search_gbif_literature, query, max_per_source))
         search_tasks.append(("entrez", search_entrez, query, max_per_source))
 
-    # Source 5: EcoAgent RAG (via Hermes)
+    # Source 5: CORE — full-text open access papers (57M+)
+    if _CORE_ENABLED:
+        search_tasks.append(("core", _search_core, query, max_per_source))
+
+    # Source 5b: Crawl4AI — web crawling (replaces Firecrawl)
+    if _crawl4ai_available():
+        search_tasks.append(("crawl4ai", search_crawl4ai, query, max_per_source))
+
+    # Source 6: EcoAgent RAG (via Hermes)
     if _ecoagent_available():
         search_tasks.append(
             ("ecoagent", search_ecoagent_literature, query, max_per_source)

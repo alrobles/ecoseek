@@ -28,6 +28,16 @@ HERMES_API_KEY          Deprecated. Use EMILY_API_KEY.
 UPSTREAM_TIMEOUT_S      Seconds before upstream requests time out.
                         Default: 60 (longer for Emily's tool-calling loops).
 
+MEILI_URL               URL of Meilisearch instance for literature search.
+                        Default: http://localhost:7700
+                        Provides instant full-text search across 62K GBIF papers.
+
+MEILI_ENABLED           Set to \"true\" to enable /v1/search endpoint.
+                        Default: true
+
+MEILI_INDEX             Meilisearch index name for GBIF literature.
+                        Default: gbif_literature
+
 LOCAL_LLM_URL           OpenAI-compatible endpoint for local-model fallback
                         (e.g. Ollama or OpenWebUI). Optional.
 
@@ -91,6 +101,11 @@ UPSTREAM_TIMEOUT_S: int = int(os.getenv("UPSTREAM_TIMEOUT_S", "60"))
 # ── Local LLM fallback (e.g. Ollama) ─────────────────────────────────────
 LOCAL_LLM_URL: str = os.getenv("LOCAL_LLM_URL", "").rstrip("/")
 LOCAL_LLM_API_KEY: str = os.getenv("LOCAL_LLM_API_KEY", "")
+
+# ── Meilisearch (literature search) ────────────────────────────────────────
+MEILI_URL: str = os.getenv("MEILI_URL", "http://localhost:7700").rstrip("/")
+MEILI_ENABLED: bool = os.getenv("MEILI_ENABLED", "true").lower() not in ("false", "0", "no")
+MEILI_INDEX: str = os.getenv("MEILI_INDEX", "gbif_literature")
 
 # ── Server ────────────────────────────────────────────────────────────────
 BACKEND_PORT: int = int(os.getenv("BACKEND_PORT", "3000"))
