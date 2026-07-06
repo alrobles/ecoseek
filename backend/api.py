@@ -411,15 +411,19 @@ async def _route(req: QueryRequest) -> QueryResponse:
 
 class SearchRequest(BaseModel):
     """Search GBIF ecological literature via Meilisearch."""
+
     q: str = Field(..., description="Search query")
     limit: int = Field(default=10, ge=1, le=100, description="Max results")
     offset: int = Field(default=0, ge=0, description="Pagination offset")
-    filter_has_abstract: bool = Field(default=False, description="Only papers with abstract >200 chars")
+    filter_has_abstract: bool = Field(
+        default=False, description="Only papers with abstract >200 chars"
+    )
     min_year: int = Field(default=0, description="Minimum publication year")
 
 
 class SearchResult(BaseModel):
     """A single literature search result."""
+
     id: str
     title: str
     abstract: str
@@ -430,6 +434,7 @@ class SearchResult(BaseModel):
 
 class SearchResponse(BaseModel):
     """Meilisearch literature search response."""
+
     success: bool
     query: str
     total_hits: int
@@ -437,7 +442,11 @@ class SearchResponse(BaseModel):
     results: list[SearchResult]
 
 
-@app.post("/v1/search", response_model=SearchResponse, summary="Search GBIF ecological literature")
+@app.post(
+    "/v1/search",
+    response_model=SearchResponse,
+    summary="Search GBIF ecological literature",
+)
 async def search_papers(req: SearchRequest):  # returns SearchResponse | JSONResponse
     """
     Full-text search across 62,000 GBIF-cited ecological papers.
@@ -486,14 +495,16 @@ async def search_papers(req: SearchRequest):  # returns SearchResponse | JSONRes
 
     results: list[SearchResult] = []
     for hit in data.get("hits", []):
-        results.append(SearchResult(
-            id=hit.get("id", ""),
-            title=hit.get("title", ""),
-            abstract=hit.get("abstract", ""),
-            year=str(hit.get("year", "")),
-            keywords=hit.get("keywords", ""),
-            doi=hit.get("doi", ""),
-        ))
+        results.append(
+            SearchResult(
+                id=hit.get("id", ""),
+                title=hit.get("title", ""),
+                abstract=hit.get("abstract", ""),
+                year=str(hit.get("year", "")),
+                keywords=hit.get("keywords", ""),
+                doi=hit.get("doi", ""),
+            )
+        )
 
     return SearchResponse(
         success=True,
@@ -508,47 +519,51 @@ async def search_papers(req: SearchRequest):  # returns SearchResponse | JSONRes
 async def smart_search_papers(req: SearchRequest):
     """
     Smart search with LLM-powered query expansion + semantic re-ranking.
-    
+
     Uses the Q6000 Ollama cluster to:
     1. Expand the query with scientific terminology
     2. Search Meilisearch for top-50 papers
     3. Re-rank results based on semantic relevance to user intent
-    
+
     Slower (~5-10s) but much more accurate than keyword search.
     """
     if not config.MEILI_ENABLED:
-        return JSONResponse(status_code=503, content={"detail": "Meilisearch not enabled."})
-    
+        return JSONResponse(
+            status_code=503, content={"detail": "Meilisearch not enabled."}
+        )
+
     try:
         from smart_search import expand_query, rerank_papers, search_meili
-        
+
         # 1. Expand query with LLM
         log.info("Smart search: expanding query '%s'", req.q[:80])
         expanded = expand_query(req.q)
         log.info("Smart search: expanded to '%s'", expanded[:100])
-        
+
         # 2. Search Meilisearch
         meili_results = search_meili(expanded, limit=50)
         papers = meili_results.get("hits", [])
         log.info("Smart search: Meilisearch returned %d hits", len(papers))
-        
+
         # 3. Re-rank with LLM
         if len(papers) > 10:
             papers = rerank_papers(req.q, papers)
             log.info("Smart search: re-ranked to %d papers", len(papers))
-        
+
         # Format results
         results: list[SearchResult] = []
-        for hit in papers[:req.limit]:
-            results.append(SearchResult(
-                id=hit.get("id", ""),
-                title=hit.get("title", ""),
-                abstract=hit.get("abstract", ""),
-                year=str(hit.get("year", "")),
-                keywords=hit.get("keywords", ""),
-                doi=hit.get("doi", ""),
-            ))
-        
+        for hit in papers[: req.limit]:
+            results.append(
+                SearchResult(
+                    id=hit.get("id", ""),
+                    title=hit.get("title", ""),
+                    abstract=hit.get("abstract", ""),
+                    year=str(hit.get("year", "")),
+                    keywords=hit.get("keywords", ""),
+                    doi=hit.get("doi", ""),
+                )
+            )
+
         return SearchResponse(
             success=True,
             query=req.q,
@@ -558,31 +573,36 @@ async def smart_search_papers(req: SearchRequest):
         )
     except Exception as exc:
         log.error("Smart search failed: %s", exc)
-        return JSONResponse(status_code=502, content={"detail": f"Smart search error: {exc}"})
+        return JSONResponse(
+            status_code=502, content={"detail": f"Smart search error: {exc}"}
+        )
 
 
 @app.post("/v1/metasearch", summary="Multi-agent dialectical literature search")
 async def metasearch_papers(req: SearchRequest):
     """
     Alpha↔Beta dialectical search — multiple Hermes agents debate and refine.
-    
+
     Alpha proposes query expansion + ranking.
     Beta critiques and suggests improvements.
     Alpha revises → consensus final ranking.
-    
+
     Slower (~15-30s) but highest quality results with dialectical reasoning.
     """
     try:
         from metasearch import metasearch
+
         result = metasearch(req.q)
-        return JSONResponse(content={
-            "success": True,
-            "query": req.q,
-            "total_hits": len(result["results"]),
-            "processing_time_ms": result["time_ms"],
-            "results": result["results"][:req.limit],
-            "method": "didal",
-        })
+        return JSONResponse(
+            content={
+                "success": True,
+                "query": req.q,
+                "total_hits": len(result["results"]),
+                "processing_time_ms": result["time_ms"],
+                "results": result["results"][: req.limit],
+                "method": "didal",
+            }
+        )
     except Exception as exc:
         log.error("Metasearch failed: %s", exc)
         return JSONResponse(status_code=502, content={"detail": str(exc)})

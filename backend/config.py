@@ -104,7 +104,11 @@ LOCAL_LLM_API_KEY: str = os.getenv("LOCAL_LLM_API_KEY", "")
 
 # ── Meilisearch (literature search) ────────────────────────────────────────
 MEILI_URL: str = os.getenv("MEILI_URL", "http://localhost:7700").rstrip("/")
-MEILI_ENABLED: bool = os.getenv("MEILI_ENABLED", "true").lower() not in ("false", "0", "no")
+MEILI_ENABLED: bool = os.getenv("MEILI_ENABLED", "true").lower() not in (
+    "false",
+    "0",
+    "no",
+)
 MEILI_INDEX: str = os.getenv("MEILI_INDEX", "gbif_literature")
 
 # ── Server ────────────────────────────────────────────────────────────────

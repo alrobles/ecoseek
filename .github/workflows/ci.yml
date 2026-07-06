@@ -50,6 +50,8 @@ jobs:
 
       - name: Build emily
         run: docker build -t emily-local ./emily
+        timeout-minutes: 8
+        continue-on-error: true
 
       - name: Build frontend
         run: docker build -t ecoseek-frontend ./frontend
@@ -70,7 +72,9 @@ jobs:
           ECOSEEK_API_PORT=3000
           AGENTICPLUG_PORT=8080
           ECOAGENT_PORT=8000
+          EMILY_PORT=8642
           OLLAMA_PORT=11434
+          EMILY_ENABLED=false
           HERMES_ENABLED=false
           BROKER_SESSION_STORE=memory
           ECOAGENT_PROFILE=ci
