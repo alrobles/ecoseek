@@ -352,7 +352,7 @@ services:
       - "127.0.0.1:${ECOSEEK_API_PORT:-3000}:3000"
     environment:
       BACKEND_PORT: "3000"
-      EMILY_API_URL: "${EMILY_API_URL:?Set EMILY_API_URL in .env}"
+      EMILY_API_URL: "${EMILY_API_URL:-}"
       EMILY_API_KEY: "${EMILY_API_KEY:-}"
       EMILY_ENABLED: "true"
       AGENTICPLUG_URL: "${AGENTICPLUG_URL:-}"

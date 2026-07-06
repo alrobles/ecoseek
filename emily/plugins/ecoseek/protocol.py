@@ -133,32 +133,51 @@ def _init_local_providers() -> list[tuple[str, dict]]:
     providers = []
     mimo_key = os.environ.get("XIAOMI_API_KEY", "")
     if mimo_key:
-        providers.append(("mimo", {
-            "url": "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions",
-            "model": "mimo-v2.5",
-            "key": mimo_key,
-        }))
+        providers.append(
+            (
+                "mimo",
+                {
+                    "url": "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions",
+                    "model": "mimo-v2.5",
+                    "key": mimo_key,
+                },
+            )
+        )
 
     or_key = os.environ.get("OPENROUTER_API_KEY", "")
     if or_key:
-        providers.append(("openrouter", {
-            "url": "https://openrouter.ai/api/v1/chat/completions",
-            "model": "deepseek/deepseek-chat-v3-0324",
-            "key": or_key,
-        }))
+        providers.append(
+            (
+                "openrouter",
+                {
+                    "url": "https://openrouter.ai/api/v1/chat/completions",
+                    "model": "deepseek/deepseek-chat-v3-0324",
+                    "key": or_key,
+                },
+            )
+        )
 
     ollama_url = os.environ.get("OLLAMA_URL", "")
     if ollama_url:
-        providers.append(("ollama", {
-            "url": ollama_url if "/api/generate" in ollama_url else f"{ollama_url}/api/generate",
-            "model": os.environ.get("OLLAMA_MODEL", "deepseek-r1:14b"),
-        }))
+        providers.append(
+            (
+                "ollama",
+                {
+                    "url": ollama_url
+                    if "/api/generate" in ollama_url
+                    else f"{ollama_url}/api/generate",
+                    "model": os.environ.get("OLLAMA_MODEL", "deepseek-r1:14b"),
+                },
+            )
+        )
 
     _LOCAL_PROVIDERS.extend(providers)
     return _LOCAL_PROVIDERS
 
 
-def _local_llm_call(system_prompt: str, user_content: str, max_tokens: int = 1500) -> dict:
+def _local_llm_call(
+    system_prompt: str, user_content: str, max_tokens: int = 1500
+) -> dict:
     """Call a local LLM provider as fallback when Beta is unreachable.
 
     Tries providers in order: Mimo → OpenRouter → Ollama.
@@ -169,7 +188,12 @@ def _local_llm_call(system_prompt: str, user_content: str, max_tokens: int = 150
 
     providers = _init_local_providers()
     if not providers:
-        return {"content": "", "usage": {}, "model": "none", "error": "no_local_providers"}
+        return {
+            "content": "",
+            "usage": {},
+            "model": "none",
+            "error": "no_local_providers",
+        }
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -180,12 +204,14 @@ def _local_llm_call(system_prompt: str, user_content: str, max_tokens: int = 150
         try:
             if "key" in cfg:
                 # OpenAI-compatible API
-                body = json.dumps({
-                    "model": cfg["model"],
-                    "messages": messages,
-                    "max_tokens": max_tokens,
-                    "temperature": 0.3,
-                }).encode()
+                body = json.dumps(
+                    {
+                        "model": cfg["model"],
+                        "messages": messages,
+                        "max_tokens": max_tokens,
+                        "temperature": 0.3,
+                    }
+                ).encode()
                 req = urllib.request.Request(
                     cfg["url"],
                     data=body,
@@ -207,12 +233,14 @@ def _local_llm_call(system_prompt: str, user_content: str, max_tokens: int = 150
                     }
             else:
                 # Ollama API
-                body = json.dumps({
-                    "model": cfg["model"],
-                    "prompt": f"{system_prompt}\n\n{user_content}",
-                    "stream": False,
-                    "options": {"temperature": 0.3, "num_predict": max_tokens},
-                }).encode()
+                body = json.dumps(
+                    {
+                        "model": cfg["model"],
+                        "prompt": f"{system_prompt}\n\n{user_content}",
+                        "stream": False,
+                        "options": {"temperature": 0.3, "num_predict": max_tokens},
+                    }
+                ).encode()
                 req = urllib.request.Request(
                     cfg["url"],
                     data=body,
@@ -233,7 +261,12 @@ def _local_llm_call(system_prompt: str, user_content: str, max_tokens: int = 150
             logger.warning("local_llm[%s] failed: %s", name, str(exc)[:100])
             continue
 
-    return {"content": "", "usage": {}, "model": "none", "error": "all_local_providers_failed"}
+    return {
+        "content": "",
+        "usage": {},
+        "model": "none",
+        "error": "all_local_providers_failed",
+    }
 
 
 def _beta_call(
@@ -291,7 +324,9 @@ def _beta_call(
         logger.warning("beta_call failed (%s), trying local fallback", str(exc)[:100])
         local_result = _local_llm_call(system_prompt, user_content, max_tokens=1500)
         if local_result.get("content"):
-            record_llm_call({}, local_result.get("model", "local"), {}, stage="local_fallback")
+            record_llm_call(
+                {}, local_result.get("model", "local"), {}, stage="local_fallback"
+            )
             return local_result
         raise  # re-raise if local also failed
 
