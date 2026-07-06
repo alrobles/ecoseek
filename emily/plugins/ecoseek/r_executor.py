@@ -121,7 +121,9 @@ def r_workspace_status(task_id: str | None = None) -> str:
 # Post-processing: convert R results to shareable markdown
 # ---------------------------------------------------------------------------
 
-_RESULT_JSON_RE = re.compile(r"\[RESULT_JSON\]\s*(\{.*?\})\s*$", re.DOTALL | re.MULTILINE)
+_RESULT_JSON_RE = re.compile(
+    r"\[RESULT_JSON\]\s*(\{.*?\})\s*$", re.DOTALL | re.MULTILINE
+)
 
 _FILE_LABELS = {
     "suitability_png": ("Suitability Map", "image"),
