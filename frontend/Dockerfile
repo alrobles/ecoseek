@@ -21,7 +21,14 @@ RUN npm run build
 FROM nginx:alpine
 
 COPY --from=build /app/build /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# La API key del gateway se inyecta en BUILD time (envsubst), nunca se
+# hardcodea en el repo. Build: --build-arg EMILY_HERMES_KEY=<canonical-key>
+# (para emily.ecoseek.org = API_SERVER_KEY del gateway nativo :8642).
+ARG EMILY_HERMES_KEY=
+RUN envsubst '${EMILY_HERMES_KEY}' < nginx.conf > /etc/nginx/conf.d/default.conf \
+    && grep -Eq 'Bearer [A-Za-z0-9_-]{8,}' /etc/nginx/conf.d/default.conf \
+    || { echo "ERROR: EMILY_HERMES_KEY build-arg vacío — build abortado"; exit 1; }
 
 RUN mkdir -p /workspace
 
