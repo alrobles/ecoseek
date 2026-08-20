@@ -273,7 +273,6 @@ _UNCERTAINTY_WORDS = frozenset(
         "controversia",
         "limitation",
         "limitacion",
-        "limitation",
         "critique",
         "critica",
         "challenge",

@@ -64,15 +64,14 @@ from __future__ import annotations
 
 import logging
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
+import config
 import httpx
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
-
-import config
 from phoenix_tracer import get_tracer, instrument_fastapi
+from pydantic import BaseModel, Field
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 log = logging.getLogger("ecoseek.api")
@@ -98,45 +97,45 @@ class Mode(str, Enum):
 class QueryRequest(BaseModel):
     text: str = Field(..., description="The user query text.")
     mode: Mode = Field(Mode.auto, description="Routing preference.")
-    session_id: Optional[str] = Field(None, description="Opaque session identifier.")
-    metadata: Optional[Dict[str, Any]] = Field(None, description="Arbitrary context.")
+    session_id: str | None = Field(None, description="Opaque session identifier.")
+    metadata: dict[str, Any] | None = Field(None, description="Arbitrary context.")
 
 
 class QueryResponse(BaseModel):
     success: bool
-    mode_used: Optional[str]
-    result: Optional[Dict[str, Any]]
-    error: Optional[str]
-    fallback_chain: List[str]
+    mode_used: str | None
+    result: dict[str, Any] | None
+    error: str | None
+    fallback_chain: list[str]
 
 
 # ── Upstream helpers ────────────────────────────────────────────────────────
 
 
-def _emily_headers() -> Dict[str, str]:
+def _emily_headers() -> dict[str, str]:
     """Auth headers for Emily (Hermes API server)."""
-    headers: Dict[str, str] = {"Content-Type": "application/json"}
+    headers: dict[str, str] = {"Content-Type": "application/json"}
     if config.EMILY_API_KEY:
         headers["Authorization"] = f"Bearer {config.EMILY_API_KEY}"
     return headers
 
 
-def _agenticplug_headers() -> Dict[str, str]:
+def _agenticplug_headers() -> dict[str, str]:
     """Auth headers for AgenticPlug (uses same key as legacy)."""
-    headers: Dict[str, str] = {"Content-Type": "application/json"}
+    headers: dict[str, str] = {"Content-Type": "application/json"}
     if config.EMILY_API_KEY:
         headers["Authorization"] = f"Bearer {config.EMILY_API_KEY}"
     return headers
 
 
-def _local_headers() -> Dict[str, str]:
-    headers: Dict[str, str] = {"Content-Type": "application/json"}
+def _local_headers() -> dict[str, str]:
+    headers: dict[str, str] = {"Content-Type": "application/json"}
     if config.LOCAL_LLM_API_KEY:
         headers["Authorization"] = f"Bearer {config.LOCAL_LLM_API_KEY}"
     return headers
 
 
-async def _call_emily(req: QueryRequest) -> Dict[str, Any]:
+async def _call_emily(req: QueryRequest) -> dict[str, Any]:
     """
     POST to Emily (Hermes Agent API server) directly.
 
@@ -146,7 +145,7 @@ async def _call_emily(req: QueryRequest) -> Dict[str, Any]:
     and the Emily scientific personality.
     """
     url = f"{config.EMILY_API_URL}/v1/chat/completions"
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "model": "emily",
         "messages": [
             {
@@ -185,17 +184,17 @@ async def _call_emily(req: QueryRequest) -> Dict[str, Any]:
                     "model": data.get("model", "emily"),
                     "raw": data,
                 }
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             span.set_attribute("ecoseek.success", False)
             span.set_attribute("error", True)
             span.record_exception(exc)
             raise
 
 
-async def _call_agenticplug(req: QueryRequest) -> Dict[str, Any]:
+async def _call_agenticplug(req: QueryRequest) -> dict[str, Any]:
     """POST to AgenticPlug chat completions (OpenAI-compatible fallback)."""
     url = f"{config.AGENTICPLUG_URL}/v1/chat/completions"
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "messages": [{"role": "user", "content": req.text}],
         "stream": False,
     }
@@ -215,19 +214,19 @@ async def _call_agenticplug(req: QueryRequest) -> Dict[str, Any]:
                 r.raise_for_status()
                 span.set_attribute("ecoseek.success", True)
                 return r.json()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             span.set_attribute("ecoseek.success", False)
             span.set_attribute("error", True)
             span.record_exception(exc)
             raise
 
 
-async def _call_local(req: QueryRequest) -> Dict[str, Any]:
+async def _call_local(req: QueryRequest) -> dict[str, Any]:
     """POST to the local OpenAI-compatible LLM endpoint (e.g. Ollama)."""
     if not config.LOCAL_LLM_URL:
         raise RuntimeError("LOCAL_LLM_URL is not configured")
     url = f"{config.LOCAL_LLM_URL}/v1/chat/completions"
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "messages": [{"role": "user", "content": req.text}],
         "stream": False,
     }
@@ -245,7 +244,7 @@ async def _call_local(req: QueryRequest) -> Dict[str, Any]:
                 r.raise_for_status()
                 span.set_attribute("ecoseek.success", True)
                 return r.json()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             span.set_attribute("ecoseek.success", False)
             span.set_attribute("error", True)
             span.record_exception(exc)
@@ -271,15 +270,15 @@ async def _route(req: QueryRequest) -> QueryResponse:
         if req.session_id:
             span.set_attribute("ecoseek.session_id", req.session_id)
 
-        chain: List[str] = []
+        chain: list[str] = []
 
-        async def _try(name: str, coro) -> Optional[Dict[str, Any]]:
+        async def _try(name: str, coro) -> dict[str, Any] | None:
             chain.append(name)
             try:
                 result = await coro
                 log.info("upstream %s succeeded", name)
                 return result
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 log.warning("upstream %s failed: %s", name, exc)
                 return None
 
@@ -609,7 +608,7 @@ async def metasearch_papers(req: SearchRequest):
 
 
 @app.get("/", summary="Health check")
-async def health() -> Dict[str, str]:
+async def health() -> dict[str, str]:
     """Returns immediately with status=ok. Used by docker healthcheck."""
     return {"status": "ok"}
 
@@ -617,7 +616,7 @@ async def health() -> Dict[str, str]:
 @app.post("/v1/query", response_model=QueryResponse, summary="Primary query endpoint")
 async def query(
     req: QueryRequest,
-    stream: Optional[bool] = Query(
+    stream: bool | None = Query(
         default=None, description="Streaming — not supported in alpha."
     ),
 ) -> QueryResponse:

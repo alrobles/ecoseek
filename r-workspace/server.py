@@ -17,7 +17,7 @@ import os
 import subprocess
 import time
 import uuid
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="[r-workspace] %(message)s")
@@ -70,6 +70,7 @@ class RWorkspaceHandler(BaseHTTPRequestHandler):
                 capture_output=True,
                 text=True,
                 timeout=30,
+                check=False,
             )
             packages = [
                 p.strip() for p in result.stdout.strip().split("\n") if p.strip()
@@ -129,6 +130,7 @@ tryCatch({{
                 timeout=timeout,
                 cwd=str(job_dir),
                 env={**os.environ, "R_LIBS_USER": str(WORKSPACE / "R_libs")},
+                check=False,
             )
             elapsed = round(time.time() - start, 2)
 

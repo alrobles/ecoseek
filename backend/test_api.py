@@ -3,10 +3,9 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from fastapi.testclient import TestClient
-
 import api
 import config
+from fastapi.testclient import TestClient
 
 
 class HealthEndpointTests(unittest.TestCase):

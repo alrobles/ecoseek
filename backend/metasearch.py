@@ -5,13 +5,13 @@ Single LLM call for ranking (expand is heuristic, no LLM needed).
 Geographic post-filtering for better relevance.
 """
 
-import os
 import json
-import urllib.request
-import time
 import logging
-import threading
+import os
 import re
+import threading
+import time
+import urllib.request
 
 logger = logging.getLogger("ecoseek.metasearch")
 

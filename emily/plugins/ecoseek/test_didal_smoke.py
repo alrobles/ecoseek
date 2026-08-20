@@ -511,7 +511,7 @@ def test_memory_schema_creation():
 
 def test_memory_write_and_recall():
     """Write a memory, then recall it via FTS."""
-    from plugins.ecoseek.memory import recall, memorize
+    from plugins.ecoseek.memory import memorize, recall
 
     # Write a semantic memory
     memorize(

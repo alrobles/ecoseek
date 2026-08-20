@@ -26,7 +26,6 @@ import sqlite3
 import threading
 import time
 from contextlib import contextmanager
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +173,7 @@ def _signal_id(protocol_id: str) -> str:
 
 def recall(
     query: str,
-    mem_class: Optional[str] = None,
+    mem_class: str | None = None,
     max_results: int = 0,
 ) -> list[dict]:
     """Search memory using FTS5 full-text search.
@@ -300,10 +299,10 @@ def memorize(
     key: str,
     content: str,
     score: float = 0.0,
-    metadata: Optional[dict] = None,
+    metadata: dict | None = None,
     protocol_id: str = "",
     trace_id: str = "",
-) -> Optional[str]:
+) -> str | None:
     """Write a memory entry (upsert — updates if same class+key exists).
 
     Parameters
@@ -519,8 +518,8 @@ def record_policy_signal(
     rounds: int = 0,
     sources_used: int = 0,
     trace_id: str = "",
-    metadata: Optional[dict] = None,
-) -> Optional[float]:
+    metadata: dict | None = None,
+) -> float | None:
     """Record a fitness signal for a protocol run and return the fitness score.
 
     Fitness formula (from DiDAL Protocol spec):
@@ -593,7 +592,7 @@ def record_policy_signal(
         return None
 
 
-def get_policy_stats(mode: Optional[str] = None, limit: int = 50) -> dict:
+def get_policy_stats(mode: str | None = None, limit: int = 50) -> dict:
     """Aggregate policy signals for threshold tuning.
 
     Returns stats that can be used to evolve classifier thresholds,
