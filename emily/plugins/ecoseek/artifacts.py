@@ -149,8 +149,8 @@ def upload_artifact_direct(
             "error": "GITHUB_TOKEN not configured for direct upload",
         }
 
-    import urllib.request
     import urllib.error
+    import urllib.request
     from datetime import datetime
 
     date_prefix = datetime.utcnow().strftime("%Y-%m-%d")

@@ -14,7 +14,7 @@ Contract: see https://github.com/alrobles/ecoseek/issues/71
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import httpx
 
@@ -28,7 +28,7 @@ YEAR_MIN: int = 1700
 YEAR_MAX: int = 2100
 TAXON_KEY_MAX: int = 2_000_000_000
 
-EXPECTED_COLUMNS: Tuple[str, ...] = (
+EXPECTED_COLUMNS: tuple[str, ...] = (
     "decimalLatitude",
     "decimalLongitude",
     "species",
@@ -48,7 +48,7 @@ class GbifClusterError(RuntimeError):
     """
 
     def __init__(
-        self, code: str, message: str, *, payload: Optional[Dict[str, Any]] = None
+        self, code: str, message: str, *, payload: dict[str, Any] | None = None
     ):
         super().__init__(f"{code}: {message}")
         self.code = code
@@ -61,11 +61,11 @@ class GbifClusterError(RuntimeError):
 
 def _validate_args(
     species_name: str,
-    taxon_key: Optional[int],
-    bbox: Optional[Tuple[float, float, float, float]],
-    year_range: Optional[Tuple[int, int]],
+    taxon_key: int | None,
+    bbox: tuple[float, float, float, float] | None,
+    year_range: tuple[int, int] | None,
     limit: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Validate inputs and return a JSON-safe dict for the capability payload."""
     if not isinstance(species_name, str) or len(species_name) > SPECIES_NAME_MAX_LEN:
         raise GbifClusterError(
@@ -120,7 +120,7 @@ def _validate_args(
             "at least one of species_name, taxon_key, or bbox is required",
         )
 
-    args: Dict[str, Any] = {"limit": limit}
+    args: dict[str, Any] = {"limit": limit}
     if species_name:
         args["species_name"] = species_name
     if taxon_key is not None:
@@ -132,7 +132,7 @@ def _validate_args(
     return args
 
 
-def _rows_to_dataframe(rows: List[list], schema: List[str]) -> Any:
+def _rows_to_dataframe(rows: list[list], schema: list[str]) -> Any:
     """Convert list-of-lists rows into a pandas DataFrame.
 
     Imported lazily so the backend can boot without pandas installed
@@ -158,12 +158,12 @@ async def query_gbif_cluster(
     agenticplug_url: str,
     session_id: str,
     species_name: str = "",
-    taxon_key: Optional[int] = None,
-    bbox: Optional[Tuple[float, float, float, float]] = None,
-    year_range: Optional[Tuple[int, int]] = None,
+    taxon_key: int | None = None,
+    bbox: tuple[float, float, float, float] | None = None,
+    year_range: tuple[int, int] | None = None,
     limit: int = 50_000,
     timeout_s: float = 180.0,
-    http_client: Optional[httpx.AsyncClient] = None,
+    http_client: httpx.AsyncClient | None = None,
 ) -> Any:  # returns pd.DataFrame
     """Query the GBIF Parquet mirror on KU-HPC via AgenticPlug.
 

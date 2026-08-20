@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -90,8 +89,8 @@ def judge_answer(
     prompt: str,
     answer: str,
     mode: str = "didal",
-    evidence: Optional[dict] = None,
-    classification: Optional[dict] = None,
+    evidence: dict | None = None,
+    classification: dict | None = None,
 ) -> dict:
     """Score a DiDAL protocol answer.
 
@@ -181,7 +180,7 @@ def judge_answer(
         return _fallback_judge(answer, mode, evidence)
 
 
-def _parse_judge_json(content: str) -> Optional[dict]:
+def _parse_judge_json(content: str) -> dict | None:
     """Extract JSON from judge response (may be wrapped in ```json blocks)."""
     content = content.strip()
 
@@ -215,7 +214,7 @@ def _parse_judge_json(content: str) -> Optional[dict]:
 def _fallback_judge(
     answer: str,
     mode: str,
-    evidence: Optional[dict] = None,
+    evidence: dict | None = None,
 ) -> dict:
     """Heuristic-based judge when LLM judge is unavailable.
 

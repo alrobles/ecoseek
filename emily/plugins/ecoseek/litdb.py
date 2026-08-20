@@ -18,8 +18,8 @@ import logging
 import os
 import sqlite3
 import time
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Generator
 
 logger = logging.getLogger(__name__)
 

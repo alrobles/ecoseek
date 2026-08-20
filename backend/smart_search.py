@@ -5,9 +5,9 @@ Query expansion + semantic re-ranking for better results.
 """
 
 import json
-import urllib.request
-import os
 import logging
+import os
+import urllib.request
 
 logger = logging.getLogger("ecoseek.smart_search")
 

@@ -22,7 +22,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install ruff
-        run: pip install ruff
+        run: pip install "ruff==0.16.3"
 
       - name: Ruff check (Python lint)
         run: ruff check backend/ emily/ r-workspace/ benchmarks/
