@@ -178,7 +178,9 @@ def _curl_post(url: str, payload: dict, headers: dict, timeout: int) -> dict:
         cmd.extend(["-H", f"{k}: {v}"])
     cmd.extend(["-d", json.dumps(payload), url])
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 10)
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, timeout=timeout + 10, check=False
+    )
     if result.returncode != 0:
         raise RuntimeError(
             f"curl POST failed (rc={result.returncode}): {result.stderr[:200]}"
@@ -214,7 +216,9 @@ def _curl_get(url: str, headers: dict, timeout: int) -> dict | list | None:
         cmd.extend(["-H", f"{k}: {v}"])
     cmd.append(url)
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 10)
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, timeout=timeout + 10, check=False
+    )
     if result.returncode != 0:
         logger.warning(
             "curl GET failed (rc=%d): %s", result.returncode, result.stderr[:200]

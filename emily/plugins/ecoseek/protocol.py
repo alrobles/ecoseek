@@ -17,12 +17,17 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import uuid
 
-import threading
-
 from .classifier import classify_complexity
+from .judge import judge_answer
+from .memory import (
+    is_memory_enabled,
+    memory_read_stage,
+    memory_write_stage,
+)
 from .prompts import (
     BETA_EXPERT_SYSTEM,
     BETA_NAIVE_SYSTEM,
@@ -33,12 +38,6 @@ from .prompts import (
     NAIVE_CRITIQUE_PROMPT,
     RETRIEVE_EVIDENCE_PROMPT,
     REVISION_PROMPT,
-)
-from .judge import judge_answer
-from .memory import (
-    is_memory_enabled,
-    memory_read_stage,
-    memory_write_stage,
 )
 from .tracing import (
     record_llm_call,
@@ -183,8 +182,8 @@ def _local_llm_call(
     Tries providers in order: Mimo → OpenRouter → Ollama.
     Returns same format as _beta_call.
     """
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     providers = _init_local_providers()
     if not providers:
@@ -362,8 +361,8 @@ def _beta_call_stream(
         Called with each text chunk as it arrives. If None, collects silently.
         Signature: on_token(chunk: str) -> None
     """
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     messages = [{"role": "system", "content": system_prompt}]
     if context_messages:

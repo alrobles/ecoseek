@@ -70,7 +70,7 @@ def _init_tracer():
             "opentelemetry-exporter-otlp-proto-http",
         )
         _tracer = _NoOpTracer()
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.exception("Failed to initialise Phoenix tracer — tracing disabled.")
         _tracer = _NoOpTracer()
 
@@ -80,7 +80,7 @@ def _init_tracer():
 class _NoOpSpan:
     """Drop-in stand-in for an OTel span that does nothing."""
 
-    def set_attribute(self, key: str, value: str | bool | int | float) -> None:
+    def set_attribute(self, key: str, value: str | bool | float) -> None:
         pass
 
     def set_attributes(self, attrs: dict) -> None:
@@ -143,5 +143,5 @@ def instrument_fastapi(app):
             "is not installed. FastAPI spans will NOT be auto-created. "
             "Run: pip install opentelemetry-instrumentation-fastapi.",
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.exception("Failed to instrument FastAPI — continuing without.")

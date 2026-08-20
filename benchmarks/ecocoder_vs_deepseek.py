@@ -37,7 +37,7 @@ from pathlib import Path
 
 # Add plugin path for judge import
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "emily" / "plugins"))
-from ecoseek.judge import judge_answer, _fallback_judge  # noqa: E402
+from ecoseek.judge import _fallback_judge, judge_answer
 
 # ---------------------------------------------------------------------------
 # Configuration

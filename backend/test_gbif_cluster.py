@@ -15,13 +15,11 @@ import httpx
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-
 from tools.gbif_cluster import (
     EXPECTED_COLUMNS,
     GbifClusterError,
     query_gbif_cluster,
 )
-
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 

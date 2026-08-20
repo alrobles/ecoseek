@@ -1,0 +1,27 @@
+# ruff configuration — deterministic lint across ruff upgrades.
+#
+# Why: the CI ran `pip install ruff` unpinned. ruff 0.16 introduced stricter
+# default rules (BLE001, S110, DTZ*, EXE001, ...) and began formatting markdown,
+# which silently turned the previously-green CI lint red on 2026-08-11.
+# This file records which rules are intentional so lint output is stable and
+# reviewable instead of tracking the ruff flavour of the day.
+#
+# NB: in `ruff.toml` the sections live at the top level (this file IS the
+# `[tool.ruff]` table). In pyproject.toml they'd be `[tool.ruff.lint]` etc.
+
+[lint]
+ignore = [
+  "BLE001",  # `except Exception:` is a deliberate API error-envelope pattern here
+  "S110",    # historical try/except:pass in instrumentation code
+  "DTZ003",  # timezone-naive datetime objects accepted at the codebase edge
+  "DTZ005",  # datetime.now() without tz — zone handled at the write boundary
+  "SIM102",  # nested single-statement ifs — keep explicit
+  "SIM103",  # explicit `return bool` — keep readable for clarity
+  "SIM117",  # nested `with` blocks — keep explicit
+  "EXE001",  # module shebangs are intentional
+  "G201",    # logging.error(..., exc_info=...) acceptable without .exception()
+]
+
+[format]
+# ruff 0.16 started auto-formatting markdown; skills/skill prose must stay human.
+exclude = ["**/*.md"]

@@ -39,7 +39,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +98,7 @@ def _hermes_request(
 # ---------------------------------------------------------------------------
 
 
-def hermes_status(task_id: Optional[str] = None) -> str:
+def hermes_status(task_id: str | None = None) -> str:
     """Check if Hermes remote is available and what tools/plugins are loaded."""
     try:
         health = _hermes_request("/health", timeout=15)
@@ -128,7 +127,7 @@ def hermes_status(task_id: Optional[str] = None) -> str:
 # ---------------------------------------------------------------------------
 
 
-def classify_prompt_tool(prompt: str, task_id: Optional[str] = None) -> str:
+def classify_prompt_tool(prompt: str, task_id: str | None = None) -> str:
     """Classify a prompt's complexity and recommend a response mode.
 
     Returns the classification result with mode, score, and reasons.
@@ -189,7 +188,7 @@ def didal_protocol_tool(
     prompt: str,
     mode: str = "",
     max_rounds: int = 0,
-    task_id: Optional[str] = None,
+    task_id: str | None = None,
 ) -> str:
     """Run the full DiDAL protocol: classify → frame → retrieve → draft → critique → revise → report.
 
@@ -243,7 +242,7 @@ def escalate_remote(
     task: str,
     context: str = "",
     urgency: str = "normal",
-    task_id: Optional[str] = None,
+    task_id: str | None = None,
 ) -> str:
     """Send a task to Hermes Beta on reumanlab via hermes.ecoseek.org.
 
@@ -414,7 +413,7 @@ def dialectical_exchange(
     task: str,
     plan: str = "",
     max_turns: int = 0,
-    task_id: Optional[str] = None,
+    task_id: str | None = None,
 ) -> str:
     """Start a DiDAL exchange: Alpha proposes, Beta executes + critiques, loop until consensus.
 
@@ -692,7 +691,7 @@ def upload_document_tool(
     text: str = "",
     title: str = "",
     authors: str = "",
-    task_id: Optional[str] = None,
+    task_id: str | None = None,
 ) -> str:
     """Ingest a PDF or text into the user's personal knowledge base."""
     if file_path:
@@ -763,14 +762,16 @@ LITERATURE_SEARCH_SCHEMA = {
 def literature_search_tool(
     query: str,
     limit: int = 10,
-    task_id: Optional[str] = None,
+    task_id: str | None = None,
 ) -> str:
     """Search local literature cache, user papers, and optionally APIs."""
     from .litdb import (
-        search as litdb_search,
         get_stats,
-        search_user_papers,
         get_user_paper_stats,
+        search_user_papers,
+    )
+    from .litdb import (
+        search as litdb_search,
     )
 
     # Search user-uploaded documents first (highest priority)
@@ -1051,7 +1052,7 @@ def web_search_tool(
     query: str,
     search_type: str = "auto",
     limit: int = 5,
-    task_id: Optional[str] = None,
+    task_id: str | None = None,
 ) -> str:
     """Search GitHub, scientific APIs, or general web."""
     if search_type == "auto":
@@ -1123,7 +1124,7 @@ _ECOAGENT_ACTIONS = (
 def ecoagent_query_tool(
     action: str,
     params: dict | None = None,
-    task_id: Optional[str] = None,
+    task_id: str | None = None,
 ) -> str:
     """Execute an ecological analysis action on EcoAgent (reumanlab) via Hermes.
 
@@ -1250,10 +1251,10 @@ CLASSIFY_LITERATURE_SCHEMA = {
 def classify_literature_tool(
     abstracts: list,
     domain: str = "host-parasite",
-    task_id: Optional[str] = None,
+    task_id: str | None = None,
 ) -> str:
     """Score abstracts by domain relevance using LACS."""
-    from .lacs_classifier import classify_abstracts, AVAILABLE_DOMAINS
+    from .lacs_classifier import AVAILABLE_DOMAINS, classify_abstracts
 
     if not abstracts:
         return json.dumps({"success": False, "error": "No abstracts provided"})
@@ -1326,7 +1327,7 @@ def train_lacs_model_tool(
     domain: str,
     positive_papers: list,
     random_sample_size: int = 5000,
-    task_id: Optional[str] = None,
+    task_id: str | None = None,
 ) -> str:
     """Train a new LACS model on the cluster."""
     from .lacs_classifier import train_lacs_model
@@ -1407,7 +1408,7 @@ def upload_artifact_tool(
     cluster_path: str,
     artifact_name: str,
     session_id: str = "",
-    task_id: Optional[str] = None,
+    task_id: str | None = None,
 ) -> str:
     """Upload a large file from the cluster to GitHub artifacts repo."""
     from .artifacts import upload_artifact_via_hermes

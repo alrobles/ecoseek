@@ -565,8 +565,8 @@ def search_crawl4ai(query: str, max_results: int = 3) -> list[Evidence]:
     Strategy: crawl Google Scholar / CrossRef / DOAJ for the query,
     extract paper metadata from the crawled markdown.
     """
-    import subprocess
     import re
+    import subprocess
 
     if not _crawl4ai_available():
         return []
@@ -588,6 +588,7 @@ def search_crawl4ai(query: str, max_results: int = 3) -> list[Evidence]:
                 capture_output=True,
                 text=True,
                 timeout=_CRAWL4AI_TIMEOUT,
+                check=False,
             )
             if proc.returncode != 0:
                 logger.warning(
@@ -1238,7 +1239,7 @@ def retrieve_literature(
     lacs_applied = False
     lacs_domain = ""
     try:
-        from .lacs_classifier import rerank_evidence, _LACS_ENABLED
+        from .lacs_classifier import _LACS_ENABLED, rerank_evidence
 
         if _LACS_ENABLED and sources_dicts:
             lacs_domain = _detect_domain(query)
