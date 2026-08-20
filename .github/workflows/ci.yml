@@ -54,7 +54,10 @@ jobs:
         continue-on-error: true
 
       - name: Build frontend
-        run: docker build -t ecoseek-frontend ./frontend
+        # EMILY_HERMES_KEY is a required build-arg (frontend/Dockerfile aborts if
+        # blank). CI passes a placeholder — the frontend service is profile-gated
+        # and not started in compose-smoke, so the value is never exercised.
+        run: docker build -t ecoseek-frontend --build-arg EMILY_HERMES_KEY=ci-standalone ./frontend
 
       - name: Build r-workspace
         run: docker build -t r-workspace -f docker/r-workspace.Dockerfile .
