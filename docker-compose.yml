@@ -23,8 +23,6 @@
 #                       docker compose --profile observability up
 #   - frontend        — EcoSeek React web UI
 #                       docker compose --profile frontend up
-#   - agenticplug     — AgenticPlug broker (auth/sessions, optional fallback)
-#                       docker compose --profile agenticplug up
 #   - r-workspace     — R geospatial workspace (rocker/geospatial + HTTP bridge)
 #                       docker compose --profile r-workspace up
 #
@@ -274,47 +272,9 @@ services:
     networks:
       - ecoseek-net
 
-  # ── AgenticPlug (optional — auth/session broker) ────────────────────────
-  # No longer required for basic chat — Emily handles that directly.
-  # Use this profile if you need GitHub OAuth sessions, audit trails,
-  # or the legacy orchestration endpoint.
-  agenticplug:
-    build:
-      context: .repos/agenticplug
-      dockerfile: ../../docker/broker.Dockerfile
-    container_name: agenticplug
-    profiles: ["agenticplug"]
-    environment:
-      BROKER_HOST: "0.0.0.0"
-      BROKER_PORT: "${AGENTICPLUG_PORT:-8080}"
-      BROKER_SESSION_STORE: "${BROKER_SESSION_STORE:-sqlite}"
-      ECOAGENT_URL: "http://ecoagent:${ECOAGENT_PORT:-8000}"
-      OLLAMA_URL: "http://ollama:${OLLAMA_PORT:-11434}"
-      OLLAMA_BASE_URL: "http://ollama:${OLLAMA_PORT:-11434}"
-      AGENTICPLUG_ALLOWED_LOGINS: "${AGENTICPLUG_ALLOWED_LOGINS:-}"
-      HERMES_URL: "${HERMES_URL:-}"
-      HERMES_API_KEY: "${HERMES_API_KEY:-}"
-      HERMES_ENABLED: "${HERMES_ENABLED:-false}"
-    ports:
-      - "127.0.0.1:${AGENTICPLUG_PORT:-8080}:${AGENTICPLUG_PORT:-8080}"
-    volumes:
-      - broker-data:/data
-    depends_on:
-      ecoagent:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - >-
-          node -e "require('http').get('http://localhost:'+process.env.BROKER_PORT+'/healthz',
-          r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
-      interval: 10s
-      timeout: 5s
-      retries: 6
-      start_period: 15s
-    networks:
-      - ecoseek-net
+  # ── AgenticPlug (removed 2026-09-04 — legacy dockerized broker, superseded by
+  #    systemd agenticplug-broker.service on :9092; the docker ran 8080 with
+  #    oauthConfigured=false since Jun 2026 and was never the public gateway) ─
 
   # ── Phoenix observability ───────────────────────────────────────────────
   phoenix:
@@ -482,7 +442,6 @@ services:
 
 volumes:
   emily-data:
-  broker-data:
   ollama-data:
   redis-data:
   r-workspace-data:
