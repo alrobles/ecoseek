@@ -1,45 +1,41 @@
 #!/usr/bin/env bash
-# EcoSeek Phase 2 canonical smoke command.
+# EcoSeek canonical smoke command (no-broker stack).
 #
 # Proves the real product workflow for the alpha:
-#   1. AgenticPlug gateway is up and serving its Phase 1 contract
-#      (/healthz + /v1/connectors).
-#   2. Ollama is reachable on the configured port and the requested
-#      ${OLLAMA_MODEL} is present (diagnostic prerequisite — if this
-#      fails, the broker-mediated step below will too, and the user
-#      needs to know which leg is the problem).
-#   3. AgenticPlug's broker-mediated /v1/chat/completions returns a
-#      non-empty assistant message — i.e. model traffic flowed through
-#      the gateway's session/scope/audit layer to the local Ollama
-#      backend (AgenticPlug PR #80, EcoSeek issue #15).
+#   1. Emily (Hermes gateway, :8642) is alive — /health returns JSON
+#      {"status": "ok"}.
+#   2. EcoSeek API (:3000) is alive — / returns 200 JSON {"status": "ok"}.
+#   3. EcoAgent tool server (:8000) is alive — /v1/tools returns 200.
+#   4. A real chat round-trip through the EcoSeek API (/v1/query) returns a
+#      non-empty assistant reply (Emily primary → local Ollama fallback).
 #
 # Honesty notes (do not skip):
-#   - This is the LOCAL DIY demo path. It does not exercise the
-#     reumanlab connector or any KU-HPC routing — those require private
-#     credentials and a different deployment, by design.
-#   - The /v1/chat/completions route requires a session. Set
-#     AGENTICPLUG_SESSION in .env (an opaque session id from
-#     POST /v1/cli/session). Without it, this script fails Step 3 with a
-#     clear hint rather than pretending the route was exercised.
-#   - This script never reads or prints DEEPSEEK_API_KEY,
-#     AGENTICPLUG_SESSION, or any environment variable whose name
-#     contains KEY/TOKEN/SECRET/PASSWORD/SESSION.
+#   - This is the LOCAL DIY path. It does not exercise the reumanlab
+#     connector, GitHub OAuth, or any KU-HPC routing — those require
+#     private credentials and a different deployment, by design.
+#   - Step 4 is tolerant: on failure it reports the cause honestly with
+#     diagnostic hints (no LLM backend, model not pulled, Emily unhealthy)
+#     instead of pretending the route was exercised.
+#   - This script never reads or prints DEEPSEEK_API_KEY, EMILY_API_KEY,
+#     EMILY_HERMES_KEY, or any environment variable whose name contains
+#     KEY/TOKEN/SECRET/PASSWORD/SESSION.
 #   - All probes use 127.0.0.1; nothing is exposed off-host.
 #
 # Usage:
-#   bash scripts/smoke.sh                 # default: prompts tinyllama
-#   OLLAMA_MODEL=ecocoder bash scripts/smoke.sh   # once that model is published
-#   SMOKE_PROMPT="..." bash scripts/smoke.sh      # override the prompt
-#   SMOKE_PULL=0 bash scripts/smoke.sh            # skip the model pull
+#   bash scripts/smoke.sh                        # defaults (OLLAMA_MODEL=tinyllama)
+#   EMILY_PORT=8642 bash scripts/smoke.sh        # override Emily gateway port
+#   ECOSEEK_API_PORT=3000 bash scripts/smoke.sh  # override EcoSeek API port
+#   ECOAGENT_PORT=8000 bash scripts/smoke.sh     # override EcoAgent port
+#   SMOKE_PROMPT="..." bash scripts/smoke.sh     # override the prompt
+#   OLLAMA_MODEL=ecocoder bash scripts/smoke.sh  # model used in diagnostics
 #
 # Exit codes:
 #   0  all checks passed
 #   1  prerequisite missing (docker, curl, .env)
-#   2  AgenticPlug gateway probe failed
-#   3  Ollama model unavailable (pull failed or model not present)
-#   4  Broker-mediated /v1/chat/completions failed (no session, 4xx, 5xx,
-#      or empty assistant content)
-#   5  EcoSeek API not reachable (warning only — see SMOKE_REQUIRE_API)
+#   2  Emily gateway /health probe failed
+#   3  EcoSeek API / probe failed
+#   4  EcoAgent /v1/tools probe failed
+#   5  chat round-trip failed (no LLM backend / model missing / Emily unhealthy)
 
 set -euo pipefail
 umask 077
@@ -56,6 +52,31 @@ NC='\033[0m'
 step()  { printf "${GREEN}[smoke]${NC} %s\n" "$*"; }
 warn()  { printf "${YELLOW}[smoke]${NC} %s\n" "$*"; }
 fail()  { printf "${RED}[smoke]${NC} %s\n" "$*" >&2; }
+help()  { printf "${YELLOW}[smoke]${NC}   %s\n" "$*"; }
+
+# Print grounded diagnostics for a failed chat round-trip. Never prints
+# secrets — only HTTP status codes of the live probes.
+_chat_diagnostics() {
+  fail ""
+  fail "  Possible causes (in order of likelihood):"
+  help "1. No LLM backend configured for Emily."
+  help "   Set DEEPSEEK_API_KEY=<key> in .env (DeepSeek cloud), or set"
+  help "   OLLAMA_BASE_URL=http://ollama:11434 in .env (local Ollama),"
+  help "   then re-create Emily: docker compose up -d emily"
+  help "2. Local model not pulled into Ollama:"
+  help "   docker compose exec ollama ollama pull ${OLLAMA_MODEL}"
+  help "3. Emily unhealthy or still starting:"
+  help "   docker compose ps ; docker compose logs emily"
+  help "4. Emily gateway denying chat (403):"
+  help "   ensure GATEWAY_ALLOW_ALL_USERS=true in .env, then:"
+  help "   docker compose up -d emily"
+  EMILY_NOW="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+    "http://127.0.0.1:${EMILY_PORT}/health" 2>/dev/null || true)"
+  OLLAMA_NOW="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+    "http://127.0.0.1:${OLLAMA_PORT}/api/tags" 2>/dev/null || true)"
+  help "Current status: Emily /health=${EMILY_NOW:-000}  Ollama /api/tags=${OLLAMA_NOW:-000}"
+  fail "  See docs/smoke-test.md → Troubleshooting for more."
+}
 
 # ── 0. Prerequisites ──────────────────────────────────────────────────────
 for bin in curl docker; do
@@ -84,212 +105,148 @@ set -a
 . ./.env
 set +a
 
+export EMILY_PORT="${EMILY_PORT:-8642}"
 export ECOSEEK_API_PORT="${ECOSEEK_API_PORT:-3000}"
-export AGENTICPLUG_PORT="${AGENTICPLUG_PORT:-8080}"
+export ECOAGENT_PORT="${ECOAGENT_PORT:-8000}"
 export OLLAMA_PORT="${OLLAMA_PORT:-11434}"
 export OLLAMA_MODEL="${OLLAMA_MODEL:-tinyllama}"
 export SMOKE_PROMPT="${SMOKE_PROMPT:-Reply with exactly the single word: pong.}"
-export SMOKE_PULL="${SMOKE_PULL:-1}"
 export SMOKE_TIMEOUT="${SMOKE_TIMEOUT:-120}"
-export SMOKE_REQUIRE_API="${SMOKE_REQUIRE_API:-0}"
-# AGENTICPLUG_SESSION is an opaque Bearer token; never echo its value.
-: "${AGENTICPLUG_SESSION:=}"
 
-step "Repo:          $REPO_ROOT"
-step "Local model:   $OLLAMA_MODEL  (override: OLLAMA_MODEL=...)"
-step "Gateway port:  127.0.0.1:$AGENTICPLUG_PORT"
-step "Ollama port:   127.0.0.1:$OLLAMA_PORT  (diagnostic only)"
-step "Prompt:        $SMOKE_PROMPT"
-if [ -n "$AGENTICPLUG_SESSION" ]; then
-  step "Session:       configured (value hidden)"
-else
-  step "Session:       not set (Step 3 will fail with a hint)"
-fi
+step "Repo:            $REPO_ROOT"
+step "Emily gateway:   127.0.0.1:$EMILY_PORT   (override: EMILY_PORT=...)"
+step "EcoSeek API:     127.0.0.1:$ECOSEEK_API_PORT  (override: ECOSEEK_API_PORT=...)"
+step "EcoAgent tools:  127.0.0.1:$ECOAGENT_PORT/v1/tools  (override: ECOAGENT_PORT=...)"
+step "Local model:     $OLLAMA_MODEL  (used in Step 4 diagnostics)"
+step "Prompt:          $SMOKE_PROMPT"
 
-# ── 1. AgenticPlug gateway: /healthz returns 200 ──────────────────────────
-step "[1/3] AgenticPlug /healthz ..."
-HEALTH_CODE="$(curl -s -o /dev/null -w '%{http_code}' \
-  --max-time 10 \
-  "http://127.0.0.1:${AGENTICPLUG_PORT}/healthz" 2>/dev/null || true)"
-HEALTH_CODE="${HEALTH_CODE:-000}"
-if [ "$HEALTH_CODE" != "200" ]; then
-  fail "  AgenticPlug /healthz returned ${HEALTH_CODE} (expected 200)."
-  fail "  Hint: docker compose ps agenticplug ; docker compose logs agenticplug"
-  fail "  See docs/smoke-test.md → Troubleshooting → 'AgenticPlug unhealthy'."
+# ── 1. Emily gateway: /health returns JSON status ok ──────────────────────
+step "[1/4] Emily (Hermes gateway) /health ..."
+EMILY_BODY="$(curl -sS --max-time 10 \
+  "http://127.0.0.1:${EMILY_PORT}/health" 2>/dev/null || true)"
+if [ -z "$EMILY_BODY" ]; then
+  fail "  Emily /health returned no body on 127.0.0.1:${EMILY_PORT}."
+  fail "  Hint: docker compose ps emily ; docker compose logs emily"
   exit 2
 fi
-step "      OK (200)"
-
-# ── 2. AgenticPlug Phase 1 contract: /v1/connectors returns JSON ──────────
-step "[2/3] AgenticPlug /v1/connectors ..."
-CONNECTORS_BODY="$(curl -sS --max-time 10 \
-  "http://127.0.0.1:${AGENTICPLUG_PORT}/v1/connectors" || true)"
-if [ -z "$CONNECTORS_BODY" ]; then
-  fail "  /v1/connectors returned no body."
-  exit 2
-fi
-# Validate JSON without printing the body (it can be empty/array/object).
-if ! printf '%s' "$CONNECTORS_BODY" | python3 -c '
+if ! printf '%s' "$EMILY_BODY" | python3 -c '
 import json, sys
 try:
     d = json.loads(sys.stdin.read())
 except Exception as e:
     print(f"bad json: {e}", file=sys.stderr)
     sys.exit(1)
-sys.exit(0 if isinstance(d, (list, dict)) else 1)
+sys.exit(0 if isinstance(d, dict) and d.get("status") == "ok" else 1)
 ' 2>/dev/null; then
-  fail "  /v1/connectors did not return well-formed JSON."
-  fail "  Hint: docker compose logs agenticplug"
+  fail "  Emily /health did not return JSON {\"status\": \"ok\"}."
+  fail "  Hint: docker compose logs emily"
   exit 2
 fi
-step "      OK (JSON body)"
+step "      OK ({\"status\": \"ok\"})"
 
-# ── 2b. Diagnostic: Ollama reachable + model present ──────────────────────
-# This is NOT the canonical pass criterion — Step 3 (broker-mediated chat)
-# is. But if Ollama is unreachable or the model is missing, Step 3 will
-# fail with a sanitized 502/503 from the broker and the user will have no
-# way to tell whether the problem is the gateway or the upstream. So we
-# probe Ollama directly first as a diagnostic prerequisite.
-step "[diag] Ollama /api/tags + model '${OLLAMA_MODEL}' ..."
-TAGS_BODY="$(curl -sS --max-time 10 \
-  "http://127.0.0.1:${OLLAMA_PORT}/api/tags" || true)"
-if [ -z "$TAGS_BODY" ]; then
-  fail "  Ollama /api/tags returned no body on 127.0.0.1:${OLLAMA_PORT}."
-  fail "  Hint: docker compose ps ollama ; docker compose logs ollama"
-  fail "  See docs/smoke-test.md → Troubleshooting → 'Ollama not reachable'."
+# ── 2. EcoSeek API: / returns 200 JSON status ok ──────────────────────────
+step "[2/4] EcoSeek API / ..."
+API_BODY="$(curl -sS --max-time 10 \
+  "http://127.0.0.1:${ECOSEEK_API_PORT}/" 2>/dev/null || true)"
+if [ -z "$API_BODY" ]; then
+  fail "  EcoSeek API / returned no body on 127.0.0.1:${ECOSEEK_API_PORT}."
+  fail "  Hint: docker compose ps ecoseek-api ; docker compose logs ecoseek-api"
   exit 3
 fi
-
-HAS_MODEL="$(printf '%s' "$TAGS_BODY" | python3 -c '
-import json, sys, os
-want = os.environ.get("OLLAMA_MODEL", "")
+if ! printf '%s' "$API_BODY" | python3 -c '
+import json, sys
 try:
     d = json.loads(sys.stdin.read())
-except Exception:
-    print("no")
-    sys.exit(0)
-models = d.get("models", []) if isinstance(d, dict) else []
-for m in models:
-    name = m.get("name", "") if isinstance(m, dict) else ""
-    if name == want or name.startswith(want + ":"):
-        print("yes")
-        sys.exit(0)
-print("no")
-' || echo "no")"
-
-if [ "$HAS_MODEL" != "yes" ]; then
-  if [ "$SMOKE_PULL" = "1" ]; then
-    warn "  Model '${OLLAMA_MODEL}' not present. Pulling (this can take minutes)..."
-    if ! docker compose exec -T ollama ollama pull "${OLLAMA_MODEL}"; then
-      fail "  Failed to pull '${OLLAMA_MODEL}'."
-      fail "  - For the default 'tinyllama', verify network egress on the Ollama container."
-      fail "  - For 'ecocoder', confirm the model is published in the public Ollama"
-      fail "    registry. EcoCoder is not yet public — keep OLLAMA_MODEL=tinyllama"
-      fail "    until it is."
-      fail "  See docs/smoke-test.md → Troubleshooting → 'Missing model'."
-      exit 3
-    fi
-  else
-    fail "  Model '${OLLAMA_MODEL}' not present and SMOKE_PULL=0."
-    fail "  Run: docker compose exec ollama ollama pull ${OLLAMA_MODEL}"
-    exit 3
-  fi
+except Exception as e:
+    print(f"bad json: {e}", file=sys.stderr)
+    sys.exit(1)
+sys.exit(0 if isinstance(d, dict) and d.get("status") == "ok" else 1)
+' 2>/dev/null; then
+  fail "  EcoSeek API / did not return JSON {\"status\": \"ok\"}."
+  fail "  Hint: docker compose logs ecoseek-api"
+  exit 3
 fi
-step "      OK ('${OLLAMA_MODEL}' available)"
+step "      OK ({\"status\": \"ok\"})"
 
-# ── 3. Broker-mediated chat: AgenticPlug /v1/chat/completions ────────────
-# This is the canonical Phase 2 product success criterion (issue #15):
-# prompt → AgenticPlug → local Ollama → assistant text, with the broker's
-# session/scope/audit layer in the loop.
-step "[3/3] AgenticPlug /v1/chat/completions (broker-mediated) ..."
-
-if [ -z "$AGENTICPLUG_SESSION" ]; then
-  fail "  AGENTICPLUG_SESSION is not set."
-  fail "  /v1/chat/completions requires an authenticated session (no smoke-mode"
-  fail "  bypass — same auth as every other /v1/* route)."
-  fail ""
-  fail "  Obtain one:"
-  fail "    1. Set AGENTICPLUG_ALLOWED_LOGINS=<your-github-login> in .env"
-  fail "       and run: docker compose up -d --force-recreate agenticplug"
-  fail "    2. POST a personal GitHub access token to /v1/cli/session:"
-  fail "         curl -sS -X POST http://127.0.0.1:${AGENTICPLUG_PORT}/v1/cli/session \\"
-  fail "              -H 'Content-Type: application/json' \\"
-  fail "              -d \"{\\\"github_access_token\\\":\\\"\$GITHUB_TOKEN\\\"}\""
-  fail "       and copy the returned session_id."
-  fail "    3. Put it in .env as AGENTICPLUG_SESSION=<session_id> and rerun."
-  fail ""
-  fail "  See docs/smoke-test.md → 'Obtaining an AgenticPlug session'."
+# ── 3. EcoAgent tool server: /v1/tools returns 200 ────────────────────────
+step "[3/4] EcoAgent /v1/tools ..."
+TOOLS_CODE="$(curl -s -o /dev/null -w '%{http_code}' \
+  --max-time 10 \
+  "http://127.0.0.1:${ECOAGENT_PORT}/v1/tools" 2>/dev/null || true)"
+TOOLS_CODE="${TOOLS_CODE:-000}"
+if [ "$TOOLS_CODE" != "200" ]; then
+  fail "  EcoAgent /v1/tools returned ${TOOLS_CODE} (expected 200)."
+  fail "  Hint: docker compose ps ecoagent ; docker compose logs ecoagent"
   exit 4
 fi
+step "      OK (200)"
+
+# ── 4. Chat round-trip via EcoSeek API /v1/query (tolerant) ───────────────
+# Product path: prompt → EcoSeek API → Emily (primary) → local Ollama.
+# Note: /v1/query returns HTTP 200 with {"success": false} when the whole
+# upstream chain fails, so the JSON body must be inspected, not the status.
+# The body contains no secrets (results are assistant text only).
+step "[4/4] EcoSeek API /v1/query chat round-trip ..."
 
 CHAT_PAYLOAD="$(python3 -c '
 import json, os, sys
 json.dump({
-  "model": os.environ["OLLAMA_MODEL"],
-  "messages": [
-    {"role": "user", "content": os.environ["SMOKE_PROMPT"]}
-  ],
-  "temperature": 0.0,
-  "stream": False
+  "text": os.environ["SMOKE_PROMPT"],
+  "mode": "auto",
 }, sys.stdout)
 ')"
 
-# Use a tmp file for the request body so the bearer token and prompt are
-# never visible in `ps` output. The Authorization header is passed via
-# stdin to curl with -K, so the session id is also not in the argv.
+# Request body goes through a tmp file so the prompt is never in argv.
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 BODY_FILE="$TMP_DIR/body.json"
-CURL_CFG="$TMP_DIR/curl.cfg"
+RESP_FILE="$TMP_DIR/resp.json"
 printf '%s' "$CHAT_PAYLOAD" > "$BODY_FILE"
-# curl config file: never logs the header to stdout/stderr.
-{
-  printf 'header = "Authorization: Bearer %s"\n' "$AGENTICPLUG_SESSION"
-  printf 'header = "Content-Type: application/json"\n'
-} > "$CURL_CFG"
-chmod 600 "$BODY_FILE" "$CURL_CFG"
+chmod 600 "$BODY_FILE"
 
-CHAT_RESP_FILE="$TMP_DIR/resp.json"
-CHAT_CODE="$(curl -sS -K "$CURL_CFG" \
-  --max-time "$SMOKE_TIMEOUT" \
-  -X POST \
-  --data-binary "@$BODY_FILE" \
-  -o "$CHAT_RESP_FILE" \
+CHAT_CODE="$(curl -sS --max-time "$SMOKE_TIMEOUT" \
+  -X POST -H 'Content-Type: application/json' \
+  --data-binary "@$BODY_FILE" -o "$RESP_FILE" \
   -w '%{http_code}' \
-  "http://127.0.0.1:${AGENTICPLUG_PORT}/v1/chat/completions" 2>/dev/null || true)"
+  "http://127.0.0.1:${ECOSEEK_API_PORT}/v1/query" 2>/dev/null || true)"
 CHAT_CODE="${CHAT_CODE:-000}"
 
 if [ "$CHAT_CODE" != "200" ]; then
-  fail "  /v1/chat/completions returned HTTP ${CHAT_CODE} (expected 200)."
-  # Print the broker's sanitized error code if it gave us one — the
-  # error vocabulary is small and fixed (see docs/smoke-test.md).
-  ERR_CODE="$(python3 -c '
+  fail "  /v1/query returned HTTP ${CHAT_CODE} (expected 200)."
+  _chat_diagnostics
+  exit 5
+fi
+
+CHAT_OK="$(python3 -c '
 import json, sys
 try:
     d = json.load(open(sys.argv[1]))
 except Exception:
-    print("")
+    print("no")
     sys.exit(0)
-err = d.get("error", "") if isinstance(d, dict) else ""
-if isinstance(err, dict):
-    print(err.get("code", ""))
-elif isinstance(err, str):
-    print(err)
-else:
-    print("")
-' "$CHAT_RESP_FILE" 2>/dev/null || true)"
-  if [ -n "$ERR_CODE" ]; then
-    fail "  Broker error code: ${ERR_CODE}"
-  fi
-  case "$CHAT_CODE" in
-    401) fail "  Hint: AGENTICPLUG_SESSION is invalid or expired. Re-issue via /v1/cli/session." ;;
-    403) fail "  Hint: session lacks 'model.chat' capability, or the user is not in AGENTICPLUG_ALLOWED_LOGINS." ;;
-    503) fail "  Hint: OLLAMA_BASE_URL is unset or upstream Ollama is down. Check docker-compose.yml and 'docker compose ps ollama'." ;;
-    502) fail "  Hint: Ollama returned an error. 'docker compose logs ollama' and check the model name." ;;
-    400) fail "  Hint: malformed request — verify OLLAMA_MODEL matches the regex [A-Za-z0-9_.:/-]+ and the prompt is non-empty." ;;
-  esac
-  fail "  See docs/smoke-test.md → Troubleshooting → 'Broker-mediated chat'."
-  exit 4
+if not isinstance(d, dict) or not d.get("success"):
+    print("no")
+    sys.exit(0)
+result = d.get("result") or {}
+text = ""
+if isinstance(result, dict):
+    if result.get("text"):
+        text = result["text"]
+    elif result.get("raw"):
+        raw = result["raw"]
+        if isinstance(raw, dict) and raw.get("choices"):
+            msg = raw["choices"][0].get("message") or {}
+            text = msg.get("content") or ""
+    elif result.get("choices"):
+        msg = result["choices"][0].get("message") or {}
+        text = msg.get("content") or ""
+sys.stdout.write("yes" if text.strip() else "no")
+' "$RESP_FILE" || echo "no")"
+
+if [ "$CHAT_OK" != "yes" ]; then
+  fail "  /v1/query returned no assistant text (success=false or empty)."
+  _chat_diagnostics
+  exit 5
 fi
 
 CHAT_TEXT="$(python3 -c '
@@ -298,49 +255,30 @@ try:
     d = json.load(open(sys.argv[1]))
 except Exception:
     sys.exit(1)
-if not isinstance(d, dict):
-    sys.exit(1)
-choices = d.get("choices") or []
-if not choices:
-    sys.exit(1)
-msg = (choices[0] or {}).get("message") or {}
-sys.stdout.write(msg.get("content", "") or "")
-' "$CHAT_RESP_FILE" || true)"
-
-if [ -z "$CHAT_TEXT" ]; then
-  fail "  /v1/chat/completions returned an empty assistant 'content'."
-  fail "  Hint: try a longer prompt or a different model. Some models need warm-up."
-  exit 4
-fi
+result = (d.get("result") or {}) if isinstance(d, dict) else {}
+text = ""
+if isinstance(result, dict):
+    if result.get("text"):
+        text = result["text"]
+    elif result.get("raw"):
+        raw = result["raw"]
+        if isinstance(raw, dict) and raw.get("choices"):
+            msg = raw["choices"][0].get("message") or {}
+            text = msg.get("content") or ""
+    elif result.get("choices"):
+        msg = result["choices"][0].get("message") or {}
+        text = msg.get("content") or ""
+sys.stdout.write(text or "")
+' "$RESP_FILE" || true)"
 
 PREVIEW="$(printf '%s' "$CHAT_TEXT" | tr -d '\r' | head -c 240)"
 step "      OK — assistant returned ${#CHAT_TEXT} chars."
-printf "${GREEN}[smoke]${NC} model says (via broker): %s\n" "$PREVIEW"
-
-# ── 4. (Soft) EcoSeek API reachability ────────────────────────────────────
-# This is informational only by default. Set SMOKE_REQUIRE_API=1 to make
-# an unreachable orchestrator API a hard failure.
-API_CODE="$(curl -s -o /dev/null -w '%{http_code}' \
-  --max-time 10 \
-  "http://127.0.0.1:${ECOSEEK_API_PORT}/health" 2>/dev/null || true)"
-API_CODE="${API_CODE:-000}"
-if [ "$API_CODE" = "200" ] || [ "$API_CODE" = "404" ] || [ "$API_CODE" = "307" ]; then
-  step "EcoSeek API:  reachable on 127.0.0.1:${ECOSEEK_API_PORT} (status ${API_CODE})"
-else
-  if [ "$SMOKE_REQUIRE_API" = "1" ]; then
-    fail "EcoSeek API not reachable (status ${API_CODE}). Set SMOKE_REQUIRE_API=0 to ignore."
-    exit 5
-  fi
-  warn "EcoSeek API not reachable on 127.0.0.1:${ECOSEEK_API_PORT} (status ${API_CODE})."
-  warn "  This does not block Phase 2 smoke — the gateway and broker-mediated"
-  warn "  chat legs are the load-bearing parts. See docs/smoke-test.md for"
-  warn "  orchestrator verification."
-fi
+printf "${GREEN}[smoke]${NC} model says (via Emily): %s\n" "$PREVIEW"
 
 echo ""
-step "Phase 2 smoke: PASS"
-step "  - AgenticPlug gateway is up and routing JSON."
-step "  - Local model '${OLLAMA_MODEL}' produced a real response via"
-step "    POST /v1/chat/completions (broker-mediated, AgenticPlug PR #80)."
-step "  - End-to-end EcoSeek → AgenticPlug → local Ollama path works on a"
-step "    vanilla machine with no KU-HPC accounts and no reumanlab secrets."
+step "Smoke: PASS"
+step "  - Emily (Hermes gateway) is up and serving /health."
+step "  - EcoSeek API is up and serving /."
+step "  - EcoAgent tool server is up (/v1/tools)."
+step "  - A real chat round-trip via /v1/query returned assistant text"
+step "    (Emily primary; local Ollama fallback) — no broker involved."
