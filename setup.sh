@@ -125,7 +125,6 @@ export EMILY_API_KEY
 # end-to-end without depending on a private/unreleased model. Override
 # with `OLLAMA_MODEL=ecocoder bash setup.sh` once that model is published.
 ECOSEEK_API_PORT="${ECOSEEK_API_PORT:-${ECOSEEK_UI_PORT:-3000}}"
-AGENTICPLUG_PORT="${AGENTICPLUG_PORT:-8080}"
 ECOAGENT_PORT="${ECOAGENT_PORT:-8000}"
 OLLAMA_PORT="${OLLAMA_PORT:-11434}"
 OLLAMA_MODEL="${OLLAMA_MODEL:-tinyllama}"
@@ -139,8 +138,6 @@ PHOENIX_PROJECT_NAME="${PHOENIX_PROJECT_NAME:-ecoseek}"
 # Default profile = cpu so `docker compose up` brings the CPU Ollama
 # variant; the GPU profile (`--profile gpu`) is mutually exclusive.
 COMPOSE_PROFILES="${COMPOSE_PROFILES:-cpu}"
-# AgenticPlug session store: sqlite for alpha (persistent), memory for dev/test
-BROKER_SESSION_STORE="${BROKER_SESSION_STORE:-sqlite}"
 
 OVERWRITE=1
 if [ -f .env ]; then
@@ -170,7 +167,6 @@ if [ "$OVERWRITE" -eq 1 ]; then
     echo ""
     echo "# Ports"
     echo "ECOSEEK_API_PORT=${ECOSEEK_API_PORT}"
-    echo "AGENTICPLUG_PORT=${AGENTICPLUG_PORT}"
     echo "ECOAGENT_PORT=${ECOAGENT_PORT}"
     echo "OLLAMA_PORT=${OLLAMA_PORT}"
     echo "PHOENIX_PORT=${PHOENIX_PORT}"
@@ -188,30 +184,18 @@ if [ "$OVERWRITE" -eq 1 ]; then
     echo "PHOENIX_ENDPOINT=${PHOENIX_ENDPOINT}"
     echo "PHOENIX_PROJECT_NAME=${PHOENIX_PROJECT_NAME}"
     echo ""
-    echo "# AgenticPlug session store backend"
-    echo "# Options: memory (dev/test), sqlite (default for alpha, persistent)"
-    echo "# SQLite sessions survive broker restarts via broker-data Docker volume"
-    echo "BROKER_SESSION_STORE=${BROKER_SESSION_STORE}"
+    echo "# Hermes gateway access control (emily container)"
+    echo "# The Hermes gateway denies all chat requests by default. Allow"
+    echo "# any local user to chat with Emily (safe here: the stack binds"
+    echo "# to 127.0.0.1 loopback only). Set false only if you configure"
+    echo "# explicit user allowlists instead."
+    echo "GATEWAY_ALLOW_ALL_USERS=${GATEWAY_ALLOW_ALL_USERS:-true}"
     echo ""
-    echo "# AgenticPlug GitHub allowlist for CLI session handshake. Comma-"
-    echo "# separated GitHub logins. Empty = no sessions can be issued. Set"
-    echo "# this to your own GitHub login if you want to exercise the"
-    echo "# broker-mediated /v1/chat/completions route in scripts/smoke.sh."
-    echo "AGENTICPLUG_ALLOWED_LOGINS=${AGENTICPLUG_ALLOWED_LOGINS:-}"
-    echo ""
-    echo "# AgenticPlug session id (opaque bearer token) for scripts/smoke.sh"
-    echo "# to call /v1/chat/completions. Obtain via POST /v1/cli/session"
-    echo "# with a personal GitHub access token; see docs/smoke-test.md."
-    echo "# Empty = smoke.sh will skip the broker-mediated chat check and"
-    echo "# print a clear hint instead of pretending it passed."
-    echo "AGENTICPLUG_SESSION=${AGENTICPLUG_SESSION:-}"
-    echo ""
-    echo "# Hermes remote (scientific orchestrator via Tailscale funnel)"
-    echo "# Set HERMES_URL and HERMES_API_KEY to connect to a remote Hermes."
-    echo "# HERMES_ENABLED=true enables the adapter in AgenticPlug."
-    echo "HERMES_URL=${HERMES_URL:-}"
-    echo "HERMES_API_KEY=${HERMES_API_KEY:-}"
-    echo "HERMES_ENABLED=${HERMES_ENABLED:-false}"
+    echo "# Meilisearch literature search — NOT part of the default compose"
+    echo "# stack (no meilisearch service runs). /v1/search and"
+    echo "# /v1/smart-search are opt-in: set MEILI_ENABLED=true only after"
+    echo "# adding a Meilisearch container (see docs/search-providers.md)."
+    echo "MEILI_ENABLED=${MEILI_ENABLED:-false}"
     echo ""
     echo "# BYOK — empty by default; fill in to use DeepSeek cloud"
     echo "DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}"
@@ -243,13 +227,14 @@ else
 fi
 
 # ── Provider detection (informational only — backend reads from env) ──────
-if [ -n "${HERMES_URL:-}" ] && [ -n "${HERMES_API_KEY:-}" ]; then
-  info "LLM provider: Hermes remote (${HERMES_URL})"
-elif [ -n "${DEEPSEEK_API_KEY:-}" ]; then
+if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
   info "LLM provider: DeepSeek API (cloud, BYOK)"
+elif [ -n "${OLLAMA_BASE_URL:-}" ]; then
+  info "LLM provider: Ollama (local) via OLLAMA_BASE_URL=${OLLAMA_BASE_URL}"
 else
   info "LLM provider: Ollama (local) — pull the model with:"
   info "  docker compose exec ollama ollama pull ${OLLAMA_MODEL}"
+  info "  (set OLLAMA_BASE_URL=http://ollama:11434 in .env to enable it)"
 fi
 
 # ── Clone dependency repos ────────────────────────────────────────────────
@@ -266,15 +251,17 @@ clone_repo() {
 }
 
 mkdir -p .repos
-clone_repo "https://github.com/alrobles/agenticplug.git" ".repos/agenticplug"
-clone_repo "https://github.com/alrobles/ecoagent.git"     ".repos/ecoagent"
+# ecoagent provides the ecological tool server (30+ tools, :8000).
+# The legacy dockerized AgenticPlug broker was removed from the stack on
+# 2026-09-04 (no compose service anymore) — nothing to clone there.
+clone_repo "https://github.com/alrobles/ecoagent.git" ".repos/ecoagent"
 
 # ── Summary ───────────────────────────────────────────────────────────────
 echo ""
 info "Setup complete. Local URLs after 'docker compose up -d':"
-printf "  %-25s %s\n" "EcoSeek API:"         "http://127.0.0.1:${ECOSEEK_API_PORT}"
-printf "  %-25s %s\n" "AgenticPlug gateway:" "http://127.0.0.1:${AGENTICPLUG_PORT}"
-printf "  %-25s %s\n" "EcoAgent tools:"      "http://127.0.0.1:${ECOAGENT_PORT}/v1/tools"
+printf "  %-25s %s\n" "Emily (Hermes gateway):" "http://127.0.0.1:${EMILY_PORT:-8642}/health"
+printf "  %-25s %s\n" "EcoSeek API:"            "http://127.0.0.1:${ECOSEEK_API_PORT}"
+printf "  %-25s %s\n" "EcoAgent tools:"         "http://127.0.0.1:${ECOAGENT_PORT}/v1/tools"
 printf "  %-25s %s\n" "Ollama API:"          "http://127.0.0.1:${OLLAMA_PORT}"
 printf "  %-25s %s\n" "Phoenix (optional):"  "http://127.0.0.1:${PHOENIX_PORT}  (--profile observability)"
 echo ""
@@ -285,17 +272,8 @@ print_var ECOSEEK_AAR_ENABLED "${ECOSEEK_AAR_ENABLED}"
 print_var ECOSEEK_JUDGE_MODEL "${ECOSEEK_JUDGE_MODEL}"
 print_var PHOENIX_PORT       "${PHOENIX_PORT}"
 print_var PHOENIX_ENDPOINT   "${PHOENIX_ENDPOINT}"
-print_var BROKER_SESSION_STORE "${BROKER_SESSION_STORE}"
-print_var AGENTICPLUG_ALLOWED_LOGINS "${AGENTICPLUG_ALLOWED_LOGINS:-}"
-# AGENTICPLUG_SESSION is an opaque bearer token; treat as a secret.
-if [ -n "${AGENTICPLUG_SESSION:-}" ]; then
-  printf "  %-25s %s\n" "AGENTICPLUG_SESSION:" "configured (value hidden)"
-else
-  printf "  %-25s %s\n" "AGENTICPLUG_SESSION:" "not set"
-fi
-print_var HERMES_URL         "${HERMES_URL:-}"
-print_var HERMES_API_KEY     "${HERMES_API_KEY:-}"
-print_var HERMES_ENABLED     "${HERMES_ENABLED:-false}"
+print_var GATEWAY_ALLOW_ALL_USERS "${GATEWAY_ALLOW_ALL_USERS:-true}"
+print_var MEILI_ENABLED      "${MEILI_ENABLED:-false}"
 print_var DEEPSEEK_API_KEY   "${DEEPSEEK_API_KEY:-}"
 if [ -n "${ENTREZ_API_KEY:-}" ]; then
   print_var ENTREZ_API_KEY   "configured (10 req/s)"
@@ -304,16 +282,16 @@ else
 fi
 echo ""
 info "All host ports bind to 127.0.0.1 (loopback only). If you need LAN"
-info "access, edit docker-compose.yml — do not expose Ollama or AgenticPlug"
+info "access, edit docker-compose.yml — do not expose Ollama or SearxNG"
 info "to a network: they have no authentication by default."
 echo ""
 info "Next steps:"
 info "  1. docker compose up -d"
 info "  2. Wait for services to become healthy (docker compose ps)"
-info "  3. curl http://127.0.0.1:${AGENTICPLUG_PORT}/healthz"
-info "  4. Canonical Phase 2 smoke (one command):"
+info "  3. curl http://127.0.0.1:${ECOSEEK_API_PORT}/"
+info "  4. Canonical smoke (one command — Emily health, EcoSeek API,"
+info "     EcoAgent tools, and a real chat round-trip; no broker):"
 info "       bash scripts/smoke.sh"
-info "     Full walk-through: docs/smoke-test.md"
 echo ""
 info "Frontend only (Emily chat UI):                    bash frontend-start.sh"
 info "GPU stack (mutually exclusive with default CPU): docker compose --profile gpu up"
