@@ -2,14 +2,14 @@
 
 > **Status: pre-alpha.** This document describes how to install and run EcoSeek locally. **Do not use real production data with EcoSeek at this stage.**
 
-**Last updated:** 2026-05-18
+**Last updated:** 2026-09-04
 
 ## Prerequisites
 
 - **Git** (any recent version)
 - **Docker** and **Docker Compose v2** (Docker Desktop on Windows/macOS, or docker-ce on Linux)
-- **Optional:** `HERMES_URL` + `HERMES_API_KEY` for remote Hermes routing
-- **Optional:** DeepSeek API key — get one at https://platform.deepseek.com/api_keys
+- **Optional:** DeepSeek API key (BYOK) — get one at https://platform.deepseek.com/api_keys
+- **Optional:** `OLLAMA_BASE_URL` for local inference via the stack's Ollama container (`http://ollama:11434`)
 
 No Node.js, Python, or npm required on the host. Everything runs inside containers.
 
@@ -24,8 +24,8 @@ DEEPSEEK_API_KEY=sk-your-key-here bash setup.sh
 ```
 
 The script will:
-1. Clone dependency repos (`agenticplug`, `ecoagent`) using your git auth
-2. Generate `.env` with the Docker stack defaults (including Hermes variables)
+1. Clone the `ecoagent` dependency repo using your git auth
+2. Generate `.env` with the Docker stack defaults (ports, Emily gateway access, LLM provider)
 3. Leave you ready to start the stack with `docker compose up -d`
 
 If you don't pass the API key, the script will prompt you interactively.
@@ -49,11 +49,12 @@ $env:DEEPSEEK_API_KEY="sk-your-key-here"
 
 | Service | URL | What it does |
 |---------|-----|-------------|
-| **EcoSeek API** | `http://127.0.0.1:3000` | Lightweight FastAPI gateway (`/`, `/health/upstreams`, `/v1/query`) |
-| AgenticPlug broker | `http://127.0.0.1:8080` | Security gateway — auth, sessions, scopes |
-| EcoAgent | `http://127.0.0.1:8000/v1/tools` | Ecological/scientific tool server |
-| Ollama | `http://127.0.0.1:11434` | Default local OpenAI-compatible model backend |
-| Redis | (internal) | Task queue |
+| **Emily** (Hermes gateway) | `http://127.0.0.1:8642` | Primary AI backend — Hermes Agent API server (`/health`, `/v1/chat/completions`) |
+| **EcoSeek API** | `http://127.0.0.1:3000` | Lightweight FastAPI router (`/`, `/v1/query`) |
+| **EcoAgent** | `http://127.0.0.1:8000/v1/tools` | Ecological/scientific tool server (30+ tools) |
+| **Ollama** | `http://127.0.0.1:11434` | Default local OpenAI-compatible model backend |
+| **SearxNG** | (internal) | Private web search for the agent |
+| **Redis** | (internal) | Task queue / cache |
 
 ### Stop / restart / logs
 
@@ -66,14 +67,16 @@ bash setup.sh                # rebuild after upstream changes
 
 ### How LLM routing is configured
 
-`setup.sh` writes `.env` variables that the Docker stack reads directly:
+Provider selection is configured through the **Emily** (Hermes gateway) environment. `setup.sh` writes these into `.env` and the Docker stack reads them directly:
 
-- `HERMES_URL`, `HERMES_API_KEY`, `HERMES_ENABLED` — remote Hermes routing via AgenticPlug
-- `AGENTICPLUG_URL` — broker base URL inside the stack
-- `LOCAL_LLM_URL` — **base host only** for the local OpenAI-compatible endpoint; the gateway appends `/v1/chat/completions`
-- `UPSTREAM_TIMEOUT_S` — timeout applied to every upstream call
+- `DEEPSEEK_API_KEY` — DeepSeek cloud BYOK. Set it before running `bash setup.sh`, or add it to `.env` and re-create Emily: `docker compose up -d emily`.
+- `OLLAMA_BASE_URL` — local inference via the stack's Ollama container (`http://ollama:11434`). Pull a model first: `docker compose exec ollama ollama pull tinyllama`.
+- `GATEWAY_ALLOW_ALL_USERS=true` — the Hermes gateway denies all chat requests by default; this setting allows local chat with Emily. Keep it on for a single-user self-hosted stack (all ports bind to 127.0.0.1).
+- `EMILY_API_KEY` — shared secret between the Emily backend (`API_SERVER_KEY`) and the frontend nginx proxy (`EMILY_HERMES_KEY` defaults to it).
+- `LOCAL_LLM_URL` — optional direct OpenAI-compatible local fallback for the EcoSeek API router.
+- `UPSTREAM_TIMEOUT_S` — timeout applied to every upstream call.
 
-`POST /v1/query` accepts `text` or `messages`; if both are present, **`messages` wins**. In alpha, `stream=true` returns `501`.
+EcoSeek API routes chat to **Emily directly** (`/v1/chat/completions`) — no broker in the loop. `POST /v1/query` accepts `text` (plus optional `mode`, `session_id`, `metadata`). In alpha, `stream=true` returns `501`.
 
 ### Changing the API key
 
@@ -81,9 +84,9 @@ bash setup.sh                # rebuild after upstream changes
 # Option 1: re-run setup (regenerates .env)
 DEEPSEEK_API_KEY=sk-new-key bash setup.sh
 
-# Option 2: edit .env manually, then restart
-echo "DEEPSEEK_API_KEY=sk-new-key" > .env
-docker compose up -d
+# Option 2: edit .env manually, then re-create the affected services so
+# they pick up the new value (do NOT `echo > .env` — that would wipe the file)
+docker compose up -d emily ecoseek-api
 ```
 
 ## Manual setup (for development)
@@ -97,26 +100,16 @@ mkdir ecoseek-stack && cd ecoseek-stack
 
 git clone https://github.com/alrobles/ecoseek.git
 git clone https://github.com/alrobles/agenticSeek.git
-git clone https://github.com/alrobles/agenticplug.git
 git clone https://github.com/alrobles/ecoagent.git
 git clone https://github.com/alrobles/ecocoder.git
 git clone https://github.com/alrobles/knowledgebase.git   # read-only reference
 ```
 
-### 2. Set up AgenticPlug (gateway)
+### 2. Emily gateway (no host setup — Docker)
 
-```bash
-cd agenticplug
-npm install
-# For development/testing: use memory store (sessions lost on restart)
-BROKER_SESSION_STORE=memory node broker/server.js
-# For persistent sessions: use sqlite store (default for alpha)
-BROKER_SESSION_STORE=sqlite node broker/server.js
-```
+Emily runs inside the compose stack (build context `./emily`); there is no host-side installation or Node.js required.
 
-> **Session store:** AgenticPlug supports `memory` (ephemeral, for dev/test) and `sqlite` (persistent, survives restarts). See [`session-store.md`](./session-store.md) for details on choosing a backend.
-
-> **WSL users:** Make sure `which node` returns `/usr/bin/node` (Linux), not `/mnt/c/.../node.exe` (Windows). If it returns the Windows path, install Node.js inside WSL: `curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash - && sudo apt install -y nodejs`
+> **AgenticPlug removed:** the legacy dockerized broker was removed from the stack on 2026-09-04 (no compose service, no published port). Do not start one for local development — the EcoSeek API routes chat to Emily directly.
 
 ### 3. Set up EcoAgent (ecological tool server)
 
@@ -154,15 +147,6 @@ EcoSeek's agenticSeek fork tracks upstream [Fosowl/agenticSeek](https://github.c
 Each component has its own test suite:
 
 ```bash
-# AgenticPlug (308 tests across 6 suites)
-cd agenticplug
-npm run test:scoped-sessions    # 52 tests
-npm run test:remote-symlink     # 29 tests
-npm run test:approval-workflow  # 32 tests
-npm run test:mock-gateway-security  # 89 tests
-npm run test:hpc                # 86 tests
-npm run test:connector-discovery    # 20 tests
-
 # AgenticSeek / EcoSeek client (72 P0 tests)
 cd agenticSeek
 python -m pytest tests/test_safety.py tests/test_keystore.py \
