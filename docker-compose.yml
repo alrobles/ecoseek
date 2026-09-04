@@ -27,7 +27,7 @@
 #                       docker compose --profile r-workspace up
 #
 # Cloudflare Tunnels (configure separately):
-#   chat.ecoseek.org   → Hermes Agent API on reumanlab
+#   chat.ecoseek.org   → Hermes Agent API (host machine)
 #   emily.ecoseek.org  → Emily API server (this stack, port 8642)
 #
 # All host port publications are bound to 127.0.0.1 so the stack is reachable
@@ -51,6 +51,11 @@ services:
       OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-}"
       API_SERVER_KEY: "${EMILY_API_KEY:-emily-local-key}"
       API_SERVER_CORS_ORIGINS: "${API_SERVER_CORS_ORIGINS:-http://localhost:4000,http://localhost:3000,http://127.0.0.1:4000}"
+      # Allow chat without a Hermes user allowlist (self-hosted DIY product).
+      # The gateway denies ALL users by default; keep this true so a fresh
+      # install works out of the box. Set GATEWAY_ALLOW_ALL_USERS=false in
+      # .env and configure Hermes user allowlists later to restrict access.
+      GATEWAY_ALLOW_ALL_USERS: "${GATEWAY_ALLOW_ALL_USERS:-true}"
       R_WORKSPACE_URL: "${R_WORKSPACE_URL:-http://r-workspace:8787}"
       # Hermes remote for DiDAL escalation (optional)
       HERMES_ECOSEEK_API_KEY: "${HERMES_ECOSEEK_API_KEY:-}"
@@ -107,7 +112,11 @@ services:
       LOCAL_LLM_API_KEY: "${LOCAL_LLM_API_KEY:-}"
       # Meilisearch (literature search)
       MEILI_URL: "${MEILI_URL:-http://meilisearch:7700}"
-      MEILI_ENABLED: "${MEILI_ENABLED:-true}"
+      # Literature search is OFF by default: this stack ships no Meilisearch
+      # service. To enable, set MEILI_ENABLED=true and run your own
+      # Meilisearch (or add a meilisearch service behind a profile) —
+      # optional enhancement.
+      MEILI_ENABLED: "${MEILI_ENABLED:-false}"
       MEILI_INDEX: "${MEILI_INDEX:-gbif_literature}"
       # Phoenix / OpenTelemetry tracing
       PHOENIX_ENABLED: "${PHOENIX_ENABLED:-false}"
@@ -348,21 +357,15 @@ services:
         REACT_APP_BROKER_URL: "${REACT_APP_BROKER_URL:-https://broker.ecoseek.org}"
         REACT_APP_EMILY_URL: "${REACT_APP_EMILY_URL:-}"
         REACT_APP_EMILY_KEY: "${REACT_APP_EMILY_KEY:-}"
+        # Injected into nginx.conf at BUILD time (frontend/Dockerfile envsubst
+        # writes /etc/nginx/conf.d/default.conf); not needed at runtime.
+        EMILY_HERMES_KEY: "${EMILY_HERMES_KEY:-${EMILY_API_KEY:-}}"
     container_name: ecoseek-frontend
     profiles: ["frontend"]
     ports:
       - "127.0.0.1:${FRONTEND_PORT:-4000}:80"
-    environment:
-      EMILY_HERMES_KEY: "${EMILY_HERMES_KEY:-${EMILY_API_KEY:-}}"
     volumes:
-      - ./frontend/nginx.conf:/tmp/nginx.conf.template:ro
       - r-workspace-data:/workspace:ro
-    command: >
-      /bin/sh -c ": $${EMILY_HERMES_KEY:?FATAL must be set in .env to the hermes
-      API_SERVER_KEY served on host port 8642 - refusing to start so chat is not
-      silently proxied with an empty Bearer token (HTTP 401)};
-      envsubst '$$EMILY_HERMES_KEY' < /tmp/nginx.conf.template
-      > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -386,6 +389,12 @@ services:
         REACT_APP_EMILY_URL: ""
         REACT_APP_EMILY_KEY: ""
         REACT_APP_DEMO_MODE: "true"
+        # The shared frontend/Dockerfile aborts the build when EMILY_HERMES_KEY
+        # is empty (guard runs unconditionally, also for demo builds). Passed
+        # here so `--profile demo` builds; the demo container then replaces
+        # default.conf at runtime with nginx-demo.conf (DEMO_HERMES_KEY, demo
+        # gateway :8646, rate limits) — which is what it actually serves.
+        EMILY_HERMES_KEY: "${EMILY_HERMES_KEY:-${EMILY_API_KEY:-}}"
     container_name: demo-frontend
     profiles: ["demo"]
     ports:
@@ -425,7 +434,8 @@ services:
       R_EXEC_TIMEOUT: "${R_EXEC_TIMEOUT:-300}"
     volumes:
       - r-workspace-data:/workspace
-      - /media/reumanlab/TOSHIBA_EXT:/media/reumanlab/TOSHIBA_EXT:ro
+      # Optional: mount your own host data folder read-only, e.g.:
+      # - /path/to/your/data:/data:ro
     restart: unless-stopped
     healthcheck:
       test:
