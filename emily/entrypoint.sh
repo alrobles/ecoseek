@@ -114,6 +114,14 @@ echo "API_SERVER_KEY=${API_SERVER_KEY}" >> "$ENV_FILE"
 # API server port — Hermes default is 8642 when API_SERVER_PORT is set
 echo "API_SERVER_PORT=${API_SERVER_PORT:-8642}" >> "$ENV_FILE"
 
+# Allow all users to chat without a Hermes user allowlist (self-hosted DIY
+# product). The gateway denies ALL users by default, so a fresh install would
+# return 403 on every chat request. Set GATEWAY_ALLOW_ALL_USERS=false in .env
+# and configure Hermes user allowlists later to restrict access.
+if [ -n "${GATEWAY_ALLOW_ALL_USERS:-}" ]; then
+    echo "GATEWAY_ALLOW_ALL_USERS=${GATEWAY_ALLOW_ALL_USERS}" >> "$ENV_FILE"
+fi
+
 # CORS origins for the API server
 if [ -n "${API_SERVER_CORS_ORIGINS:-}" ]; then
     echo "API_SERVER_CORS_ORIGINS=${API_SERVER_CORS_ORIGINS}" >> "$ENV_FILE"
