@@ -258,6 +258,32 @@
         color: var(--text);
       }
 
+      /* Publish section */
+      .publish-recipe {
+        background: var(--surface-alt);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 1.25rem 1.5rem;
+        margin: 1.25rem 0;
+        font-size: 0.95rem;
+        color: var(--text);
+        line-height: 1.65;
+      }
+      .publish-recipe ol { margin: 0.5rem 0 0; padding-left: 1.25rem; }
+      .publish-recipe li { margin-bottom: 0.5rem; color: var(--muted); }
+      .publish-recipe li strong { color: var(--text); }
+      .publish-callout {
+        background: linear-gradient(135deg, #7C3AED, #A855F7);
+        color: #fff;
+        border: none;
+        border-radius: var(--radius);
+        padding: 1rem 1.25rem;
+        margin: 1.25rem 0 0;
+        font-size: 0.98rem;
+        line-height: 1.5;
+      }
+      .publish-callout a { color: #fff; text-decoration: underline; }
+
       @media (max-width: 600px) {
         .ecoseek-hero .product-name { font-size: 2rem; }
         .ecoseek-hero .logo-wrap { flex-direction: column; gap: 0.75rem; }
@@ -443,6 +469,38 @@ Compute backends
             Read-only tools run freely. Compute-intensive tools (SDM, MaxEnt, niche evaluation) carry risk metadata
             and can require approval through AgenticPlug before execution.
           </p>
+        </div>
+      </section>
+
+      <!-- Publish literature reviews -->
+      <section>
+        <div class="container">
+          <div class="section-title">
+            <h2>Write literature reviews with EcoSeek</h2>
+          </div>
+          <p>
+            EcoSeek is the <em>factory</em> side of your literature review. Deploy a scientific agent that
+            searches the literature, gathers evidence, and drafts — then you, the scientist, stay the author.
+            The result is a citable preprint, not an AI dump.
+          </p>
+          <div class="publish-recipe">
+            <ol>
+              <li><strong>Search.</strong> The EcoAgent literature tools (<code>search_literature</code>, <code>query_papers</code>,
+                <code>classify_abstract</code>) pull and rank relevant papers across your topic.</li>
+              <li><strong>Synthesize.</strong> Emily's DiDAL protocol runs critique-revise loops,
+                escalating complex synthesis to Hermes for expert reasoning — you review and edit every step.</li>
+              <li><strong>Publish.</strong> Submit your review to
+                <a href="https://litreview.org">litreview.org</a>, where it becomes a citable preprint with
+                versioning, citation metadata, and an openly declared AI-assistance record — the scientist is
+                the author, AI is the assistant, without apology.</li>
+            </ol>
+          </div>
+          <div class="publish-callout">
+            <strong>litreview.org</strong> — our preprint platform for expert-written, AI-assisted
+            literature reviews. Every published review is released under
+            <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a> for barrier-free
+            citation and reuse.
+          </div>
         </div>
       </section>
 
