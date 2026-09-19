@@ -27,7 +27,7 @@
 #   ECOSEEK_API_PORT=3000 bash scripts/smoke.sh  # override EcoSeek API port
 #   ECOAGENT_PORT=8000 bash scripts/smoke.sh     # override EcoAgent port
 #   SMOKE_PROMPT="..." bash scripts/smoke.sh     # override the prompt
-#   OLLAMA_MODEL=ecocoder bash scripts/smoke.sh  # model used in diagnostics
+#   OLLAMA_MODEL=llama3.1:8b bash scripts/smoke.sh  # model used in diagnostics
 #
 # Exit codes:
 #   0  all checks passed
@@ -60,7 +60,7 @@ _chat_diagnostics() {
   fail ""
   fail "  Possible causes (in order of likelihood):"
   help "1. No LLM backend configured for Emily."
-  help "   Set DEEPSEEK_API_KEY=<key> in .env (DeepSeek cloud), or set"
+  help "   Set ARCEE_API_KEY=<key> in .env (Arcee cloud — Trinity), or set"
   help "   OLLAMA_BASE_URL=http://ollama:11434 in .env (local Ollama),"
   help "   then re-create Emily: docker compose up -d emily"
   help "2. Local model not pulled into Ollama:"

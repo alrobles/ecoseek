@@ -47,7 +47,9 @@ services:
     ports:
       - "127.0.0.1:${EMILY_PORT:-8642}:8642"
     environment:
-      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+      # Primary LLM: Arcee router (Trinity Large Thinking, US).
+      # Policy: no Chinese AI — DeepSeek is not wired here on purpose.
+      ARCEE_API_KEY: "${ARCEE_API_KEY:-}"
       OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-}"
       API_SERVER_KEY: "${EMILY_API_KEY:-emily-local-key}"
       API_SERVER_CORS_ORIGINS: "${API_SERVER_CORS_ORIGINS:-http://localhost:4000,http://localhost:3000,http://127.0.0.1:4000}"

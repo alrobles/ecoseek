@@ -3,8 +3,8 @@
 # Works on Linux, macOS, and Windows (WSL).
 #
 # Usage:
-#   bash setup.sh                            # interactive, prompts for DeepSeek key
-#   DEEPSEEK_API_KEY=sk-xxx bash setup.sh    # non-interactive (BYOK)
+#   bash setup.sh                            # interactive, prompts for Arcee key
+#   ARCEE_API_KEY=rcai-xxx bash setup.sh     # non-interactive (BYOK)
 #   CI=1 bash setup.sh                        # non-interactive (keep .env on conflict)
 #
 # What it does:
@@ -89,21 +89,23 @@ if [ -n "${CI:-}" ] || [ ! -t 0 ]; then
   NON_INTERACTIVE=1
 fi
 
-# ── DeepSeek API key (BYOK — optional) ────────────────────────────────────
-if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
+# ── Arcee API key (BYOK — optional) ──────────────────────────────────────
+# Policy: no Chinese AI providers — Emily defaults to Trinity Large Thinking
+# via Arcee AI (US). DeepSeek is intentionally not prompted for.
+if [ -z "${ARCEE_API_KEY:-}" ]; then
   if [ "$NON_INTERACTIVE" -eq 0 ]; then
     echo ""
-    info "No DEEPSEEK_API_KEY found in environment."
-    info "Get your key at: https://platform.deepseek.com/api_keys"
+    info "No ARCEE_API_KEY found in environment."
+    info "Get your key at: https://api.arcee.ai"
     echo ""
-    printf "${GREEN}[ecoseek]${NC} Enter your DeepSeek API key (or press Enter to skip): "
-    read -r DEEPSEEK_API_KEY
+    printf "${GREEN}[ecoseek]${NC} Enter your Arcee API key (or press Enter to skip): "
+    read -r ARCEE_API_KEY
   fi
-  if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
-    warn "No DEEPSEEK_API_KEY provided. EcoSeek will run in local-only mode (Ollama)."
+  if [ -z "${ARCEE_API_KEY:-}" ]; then
+    warn "No ARCEE_API_KEY provided. EcoSeek will run in local-only mode (Ollama)."
   fi
 fi
-export DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY:-}"
+export ARCEE_API_KEY="${ARCEE_API_KEY:-}"
 
 # ── Emily API key (shared frontend ↔ Emily backend secret) ───────────────
 # The frontend's nginx injects this as the server-side Bearer token when
@@ -123,7 +125,7 @@ export EMILY_API_KEY
 # Defaults that docker-compose.yml expects.
 # OLLAMA_MODEL defaults to a small public model so the smoke test can run
 # end-to-end without depending on a private/unreleased model. Override
-# with `OLLAMA_MODEL=ecocoder bash setup.sh` once that model is published.
+# with `OLLAMA_MODEL=llama3.1:8b bash setup.sh` for a stronger local model.
 ECOSEEK_API_PORT="${ECOSEEK_API_PORT:-${ECOSEEK_UI_PORT:-3000}}"
 ECOAGENT_PORT="${ECOAGENT_PORT:-8000}"
 OLLAMA_PORT="${OLLAMA_PORT:-11434}"
@@ -197,8 +199,9 @@ if [ "$OVERWRITE" -eq 1 ]; then
     echo "# Set MEILI_ENABLED=true to activate /v1/search + /v1/smart-search."
     echo "MEILI_ENABLED=${MEILI_ENABLED:-false}"
     echo ""
-    echo "# BYOK — empty by default; fill in to use DeepSeek cloud"
-    echo "DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}"
+    echo "# BYOK — empty by default; fill in to use the Arcee router"
+    echo "# (Trinity Large Thinking). No Chinese AI providers are wired."
+    echo "ARCEE_API_KEY=${ARCEE_API_KEY:-}"
     echo ""
     echo "# Emily API key — shared secret between the frontend proxy and the"
     echo "# Emily backend (port 8642). The frontend's nginx injects it as the"
@@ -227,8 +230,8 @@ else
 fi
 
 # ── Provider detection (informational only — backend reads from env) ──────
-if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
-  info "LLM provider: DeepSeek API (cloud, BYOK)"
+if [ -n "${ARCEE_API_KEY:-}" ]; then
+  info "LLM provider: Arcee router — Trinity Large Thinking (cloud, BYOK)"
 elif [ -n "${OLLAMA_BASE_URL:-}" ]; then
   info "LLM provider: Ollama (local) via OLLAMA_BASE_URL=${OLLAMA_BASE_URL}"
 else
@@ -274,7 +277,7 @@ print_var PHOENIX_PORT       "${PHOENIX_PORT}"
 print_var PHOENIX_ENDPOINT   "${PHOENIX_ENDPOINT}"
 print_var GATEWAY_ALLOW_ALL_USERS "${GATEWAY_ALLOW_ALL_USERS:-true}"
 print_var MEILI_ENABLED      "${MEILI_ENABLED:-false}"
-print_var DEEPSEEK_API_KEY   "${DEEPSEEK_API_KEY:-}"
+print_var ARCEE_API_KEY      "${ARCEE_API_KEY:-}"
 if [ -n "${ENTREZ_API_KEY:-}" ]; then
   print_var ENTREZ_API_KEY   "configured (10 req/s)"
 else

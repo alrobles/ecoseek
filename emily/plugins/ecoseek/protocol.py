@@ -125,33 +125,26 @@ _LOCAL_PROVIDERS: list[tuple[str, dict]] = []
 
 
 def _init_local_providers() -> list[tuple[str, dict]]:
-    """Build local LLM provider chain from environment (same as metasearch.py)."""
+    """Build local LLM provider chain from environment (same as metasearch.py).
+
+    Policy: no Chinese AI providers/models — Arcee (US) is primary, Ollama
+    self-hosted and OpenRouter (non-Chinese models) are fallbacks.
+    """
     if _LOCAL_PROVIDERS:
         return _LOCAL_PROVIDERS
 
     providers = []
-    mimo_key = os.environ.get("XIAOMI_API_KEY", "")
-    if mimo_key:
+    arcee_key = os.environ.get("ARCEE_API_KEY", "")
+    if arcee_key:
         providers.append(
             (
-                "mimo",
+                "arcee",
                 {
-                    "url": "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions",
-                    "model": "mimo-v2.5",
-                    "key": mimo_key,
-                },
-            )
-        )
-
-    or_key = os.environ.get("OPENROUTER_API_KEY", "")
-    if or_key:
-        providers.append(
-            (
-                "openrouter",
-                {
-                    "url": "https://openrouter.ai/api/v1/chat/completions",
-                    "model": "deepseek/deepseek-chat-v3-0324",
-                    "key": or_key,
+                    "url": "https://api.arcee.ai/api/v1/chat/completions",
+                    "model": os.environ.get(
+                        "ARCEE_MODEL", "thinkingmachines/inkling-small"
+                    ),
+                    "key": arcee_key,
                 },
             )
         )
@@ -165,7 +158,20 @@ def _init_local_providers() -> list[tuple[str, dict]]:
                     "url": ollama_url
                     if "/api/generate" in ollama_url
                     else f"{ollama_url}/api/generate",
-                    "model": os.environ.get("OLLAMA_MODEL", "deepseek-r1:14b"),
+                    "model": os.environ.get("OLLAMA_MODEL", "llama3.1:8b"),
+                },
+            )
+        )
+
+    or_key = os.environ.get("OPENROUTER_API_KEY", "")
+    if or_key:
+        providers.append(
+            (
+                "openrouter",
+                {
+                    "url": "https://openrouter.ai/api/v1/chat/completions",
+                    "model": "openai/gpt-4o-mini",
+                    "key": or_key,
                 },
             )
         )
@@ -179,7 +185,7 @@ def _local_llm_call(
 ) -> dict:
     """Call a local LLM provider as fallback when Beta is unreachable.
 
-    Tries providers in order: Mimo → OpenRouter → Ollama.
+    Tries providers in order: Arcee → Ollama → OpenRouter.
     Returns same format as _beta_call.
     """
     import urllib.error
