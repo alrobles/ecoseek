@@ -112,10 +112,10 @@ services:
       LOCAL_LLM_API_KEY: "${LOCAL_LLM_API_KEY:-}"
       # Meilisearch (literature search)
       MEILI_URL: "${MEILI_URL:-http://meilisearch:7700}"
-      # Literature search is OFF by default: this stack ships no Meilisearch
-      # service. To enable, set MEILI_ENABLED=true and run your own
-      # Meilisearch (or add a meilisearch service behind a profile) —
-      # optional enhancement.
+      # Literature search is OFF by default. The optional `search` profile
+      # adds a Meilisearch service on this network (see below) — enable with:
+      #   docker compose --profile search up -d && MEILI_ENABLED=true
+      # To point at an external Meilisearch instead, set MEILI_URL.
       MEILI_ENABLED: "${MEILI_ENABLED:-false}"
       MEILI_INDEX: "${MEILI_INDEX:-gbif_literature}"
       # Phoenix / OpenTelemetry tracing
@@ -278,6 +278,40 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+    networks:
+      - ecoseek-net
+
+  # ── Meilisearch (GBIF literature search, optional) ──────────────────────
+  # Optional service behind the `search` profile:
+  #   docker compose --profile search up -d
+  #   MEILI_ENABLED=true in .env
+  # ecoseek-api reaches it as http://meilisearch:7700 on ecoseek-net.
+  # On first boot the index is empty — seed it with:
+  #   python3 scripts/meili_seed.py            # rebuild from GBIF API (~15min)
+  # or restore a dump for an exact copy:
+  #   docker cp gbif.dump meilisearch:/tmp/ &&
+  #   docker restart meilisearch with --import-dump /tmp/gbif.dump
+  meilisearch:
+    image: getmeili/meilisearch:v1.14
+    container_name: meilisearch
+    profiles: ["search"]
+    volumes:
+      - meili-data:/meili_data
+    ports:
+      - "127.0.0.1:${MEILI_PORT:-7700}:7700"
+    environment:
+      MEILI_ENV: "development"
+      MEILI_NO_ANALYTICS: "true"
+      # Set MEILI_MASTER_KEY to switch to production mode; then send
+      # Authorization: Bearer <key> — ecoseek-api does not send one today.
+      MEILI_MASTER_KEY: "${MEILI_MASTER_KEY:-}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:7700/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     networks:
       - ecoseek-net
 
@@ -452,6 +486,7 @@ services:
 
 volumes:
   emily-data:
+  meili-data:
   ollama-data:
   redis-data:
   r-workspace-data:
