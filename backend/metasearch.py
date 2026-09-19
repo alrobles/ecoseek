@@ -15,27 +15,28 @@ import urllib.request
 
 logger = logging.getLogger("ecoseek.metasearch")
 
-MEILI_URL = os.environ.get("MEILI_URL", "http://100.123.27.68:7700")
+MEILI_URL = os.environ.get("MEILI_URL", "http://meilisearch:7700")
 
 # ─── Provider fallback chain ────────────────────────────────────────────
+# Policy: no Chinese AI providers/models (no Mimo, DeepSeek, GLM, Kimi, Qwen).
 PROVIDERS = []
 
-# 1. Mimo mimo-v2.5 (xiaomi) — fastest
-MIMO_KEY = os.environ.get("XIAOMI_API_KEY", "")
-if MIMO_KEY:
+# 1. Arcee router (Inkling-Small, Thinking Machines Lab US) — primary
+ARCEE_KEY = os.environ.get("ARCEE_API_KEY", "")
+if ARCEE_KEY:
     PROVIDERS.append(
         (
-            "mimo",
+            "arcee",
             {
-                "url": "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions",
-                "model": "mimo-v2.5",
-                "key": MIMO_KEY,
+                "url": "https://api.arcee.ai/api/v1/chat/completions",
+                "model": os.environ.get("ARCEE_MODEL", "thinkingmachines/inkling-small"),
+                "key": ARCEE_KEY,
                 "type": "openai",
             },
         )
     )
 
-# 2. Ollama deepseek-r1:14b (cluster) — fallback
+# 2. Ollama (cluster/self-hosted) — fallback
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "")
 if OLLAMA_URL:
     PROVIDERS.append(
@@ -45,7 +46,7 @@ if OLLAMA_URL:
                 "url": OLLAMA_URL
                 if "/api/generate" in OLLAMA_URL
                 else f"{OLLAMA_URL}/api/generate",
-                "model": os.environ.get("OLLAMA_MODEL", "deepseek-r1:14b"),
+                "model": os.environ.get("OLLAMA_MODEL", "llama3.1:8b"),
                 "type": "ollama",
             },
         )
@@ -59,7 +60,7 @@ if OR_KEY:
             "openrouter",
             {
                 "url": "https://openrouter.ai/api/v1/chat/completions",
-                "model": "deepseek/deepseek-chat-v3-0324",
+                "model": "openai/gpt-4o-mini",
                 "key": OR_KEY,
                 "type": "openai",
             },
@@ -385,7 +386,7 @@ def rank_papers(user_query, papers):
 Rank top-10 by relevance. Geographic match to query is #1 priority.
 Output ONLY JSON: {{"ranking": [3,7,1,...]}}"""
 
-    response = ask(prompt, RANK_SYS, max_tokens=100)
+    response = ask(prompt, RANK_SYS, max_tokens=512)
     try:
         start = response.find("{")
         end = response.rfind("}") + 1

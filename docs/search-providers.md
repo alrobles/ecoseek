@@ -8,24 +8,28 @@ expansion and semantic re-ranking. The provider chain is configured for
 
 ## Provider Chain (priority order)
 
+**Policy: no Chinese AI providers or models.** Mimo/Xiaomi, DeepSeek, GLM
+(Zhipu), Kimi (Moonshot) and Qwen (Alibaba) are excluded everywhere — both
+as hosted providers and as model choices on routers. This is a hard
+requirement, not a preference; do not re-add them to the chain.
+
 | Priority | Provider | Model | Latency | Use Case |
 |----------|----------|-------|---------|----------|
-| 1 | **Mimo (Xiaomi)** | mimo-v2.5 | ~2s | Primary — fast reasoning with `reasoning_effort=low` |
-| 2 | **Ollama (KU-HPC)** | deepseek-r1:14b | ~6s | Fallback — free, local, 14B reasoning model |
-| 3 | **OpenRouter** | deepseek-chat-v3 | ~3s | Last resort — paid, non-reasoning |
+| 1 | **Arcee router** | inkling-small (Thinking Machines Lab, US) | ~3-6s | Primary — OpenAI-compatible (`api.arcee.ai/api/v1`) |
+| 2 | **Ollama** | llama3.1:8b (Meta, US) | ~6s | Fallback — free, self-hosted (set `OLLAMA_URL`) |
+| 3 | **OpenRouter** | openai/gpt-4o-mini (OpenAI, US) | ~3s | Last resort — paid, non-reasoning |
 
 ## Configuration by Environment
 
 ### Demo / Development (current)
-- **Primary:** Mimo mimo-v2.5 via `XIAOMI_API_KEY`
-- **Why:** Fastest option (~2s per LLM call), consistent availability
-- **Tradeoff:** Uses API credits, depends on Xiaomi service
+- **Primary:** Arcee `inkling-small` via `ARCEE_API_KEY`
+- **Why:** Hosted, no cluster dependency, honors the no-Chinese-AI policy
+- **Override model:** `ARCEE_MODEL` (default `thinkingmachines/inkling-small`)
 
 ### Production (EcoSeek cluster)
-- **Primary:** Ollama deepseek-r1:14b via SSH tunnel to KU-HPC
-- **Why:** Free, local, no external dependencies
-- **Tradeoff:** Slower (~6s per call), requires cluster jobs running
-- **Tunnel:** `ssh -f -N -L 19998:r22r20n01:39501 kuhpc`
+- **Fallback:** Ollama on KU-HPC via SSH tunnel — use a US model
+  (`llama3.1:8b`, `gemma3`, …). Do NOT use the legacy deepseek-r1 jobs.
+- **Tunnel:** `ssh -f -N -L 19998:<node>:<port> kuhpc`
 
 ### Switching providers
 
@@ -34,17 +38,17 @@ To switch primary provider, reorder the `PROVIDERS` list in:
 - `backend/smart_search.py`
 
 ```python
-# For demo (Mimo primary):
+# For demo (Arcee primary):
 PROVIDERS = [
-    ("mimo", {...}),     # ← primary
-    ("ollama", {...}),   # ← fallback
+    ("arcee", {...}),      # ← primary
+    ("ollama", {...}),     # ← fallback
     ("openrouter", {...}),
 ]
 
 # For production (Ollama primary):
 PROVIDERS = [
-    ("ollama", {...}),   # ← primary
-    ("mimo", {...}),     # ← fallback
+    ("ollama", {...}),     # ← primary
+    ("arcee", {...}),      # ← fallback
     ("openrouter", {...}),
 ]
 ```
@@ -68,18 +72,14 @@ PROVIDERS = [
 /health           → host.docker.internal:8642  (hermes)
 ```
 
-## Cluster Ollama Jobs
+## Cluster Ollama Jobs (legacy — deprecated)
 
-The KU-HPC cluster runs 4 Ollama instances with deepseek-r1:14b (Q4_K_M):
+The KU-HPC cluster previously ran Ollama instances with **deepseek-r1:14b**
+— retired per the no-Chinese-AI policy. Any future cluster deployment must
+use a US/open model (`llama3.1`, `gemma3`, …). Tunnel command for whatever
+job is running:
 
-| Node | Port | Context | Notes |
-|------|------|---------|-------|
-| r15r10n01 | 35367 | 8192 | New job |
-| r22r25n01 | 43459 | 8192 | --no-mmap |
-| r22r20n01 | 39501 | 65536 | **Recommended** (tunnel target) |
-| r22r15n01 | 34529 | 65536 | Standard |
-
-Tunnel command: `ssh -f -N -L 19998:r22r20n01:39501 kuhpc`
+`ssh -f -N -L 19998:<node>:<port> kuhpc`
 
 ## Performance Benchmarks
 
@@ -94,5 +94,6 @@ Tunnel command: `ssh -f -N -L 19998:r22r20n01:39501 kuhpc`
 1. **Query cache** — `_expand_cache` dict (512 entries, LRU eviction)
 2. **Parallel Meilisearch** — EN + native queries run in threads
 3. **Reduced LLM calls** — 2 max (expand + rank), critique/revise removed
-4. **Reasoning effort** — `reasoning_effort=low` for Mimo (22 vs 278 tokens)
-5. **Faster model** — mimo-v2.5 instead of mimo-v2.5-pro (~35% faster)
+4. **Reasoning effort** — `reasoning_effort=low` sent to reasoning-capable
+   providers (e.g. Inkling) to cap thinking tokens; `max_tokens=512` leaves
+   headroom so `content` isn't starved by reasoning.

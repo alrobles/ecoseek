@@ -1,6 +1,10 @@
 """Smart Search — LLM-powered literature retrieval for ecoSeek.
 
-Uses provider fallback chain: Mimo mimo-v2.5 → Ollama → OpenRouter.
+Provider fallback chain: Arcee → Ollama → OpenRouter.
+
+NOTE: Chinese AI providers are intentionally excluded (policy: no Chinese
+AI services/models — no Mimo/Xiaomi, DeepSeek, GLM, Kimi, Qwen). Arcee's
+Inkling-Small (Thinking Machines Lab, US) is the primary provider.
 Query expansion + semantic re-ranking for better results.
 """
 
@@ -11,27 +15,28 @@ import urllib.request
 
 logger = logging.getLogger("ecoseek.smart_search")
 
-MEILI_URL = os.environ.get("MEILI_URL", "http://alpha:7700")
+MEILI_URL = os.environ.get("MEILI_URL", "http://meilisearch:7700")
 
 # ─── Provider fallback chain (same as metasearch) ──────────────────────
+# Policy: no Chinese AI providers/models (no Mimo, DeepSeek, GLM, Kimi, Qwen).
 PROVIDERS = []
 
-# 1. Mimo mimo-v2.5 (xiaomi) — fastest
-MIMO_KEY = os.environ.get("XIAOMI_API_KEY", "")
-if MIMO_KEY:
+# 1. Arcee router (Inkling-Small, Thinking Machines Lab US) — primary
+ARCEE_KEY = os.environ.get("ARCEE_API_KEY", "")
+if ARCEE_KEY:
     PROVIDERS.append(
         (
-            "mimo",
+            "arcee",
             {
-                "url": "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions",
-                "model": "mimo-v2.5",
-                "key": MIMO_KEY,
+                "url": "https://api.arcee.ai/api/v1/chat/completions",
+                "model": os.environ.get("ARCEE_MODEL", "thinkingmachines/inkling-small"),
+                "key": ARCEE_KEY,
                 "type": "openai",
             },
         )
     )
 
-# 2. Ollama deepseek-r1:14b (cluster) — fallback
+# 2. Ollama (cluster/self-hosted) — fallback
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "")
 if OLLAMA_URL:
     PROVIDERS.append(
@@ -41,7 +46,7 @@ if OLLAMA_URL:
                 "url": OLLAMA_URL
                 if "/api/generate" in OLLAMA_URL
                 else f"{OLLAMA_URL}/api/generate",
-                "model": os.environ.get("SMART_MODEL", "deepseek-r1:14b"),
+                "model": os.environ.get("SMART_MODEL", "llama3.1:8b"),
                 "type": "ollama",
             },
         )
@@ -55,7 +60,7 @@ if OR_KEY:
             "openrouter",
             {
                 "url": "https://openrouter.ai/api/v1/chat/completions",
-                "model": "deepseek/deepseek-chat-v3-0324",
+                "model": "openai/gpt-4o-mini",
                 "key": OR_KEY,
                 "type": "openai",
             },
@@ -196,7 +201,7 @@ def expand_query(user_query):
 User query: {user_query}
 
 Query: """
-    expanded = ask(prompt, max_tokens=200)
+    expanded = ask(prompt, max_tokens=512)
     # Extract just the query line
     for line in expanded.split("\n"):
         line = line.strip()
@@ -232,7 +237,7 @@ PAPERS:
 
 Return: {{"ranking": [3, 7, 1, ...]}} — indices of top 10 papers in order of relevance.
 """
-    response = ask(prompt, max_tokens=200)
+    response = ask(prompt, max_tokens=512)
     try:
         # Extract JSON
         start = response.find("{")
