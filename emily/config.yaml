@@ -2,57 +2,54 @@
 # Hermes agent configuration for the Emily local agent (Alpha).
 #
 # LLM provider is configured via environment variables:
-#   DEEPSEEK_API_KEY  → DeepSeek API (default)
+#   ARCEE_API_KEY     → Arcee router (default — Trinity Large Thinking)
 #   OLLAMA_BASE_URL   → local Ollama instance (Ollama / LM Studio)
-#   ECOCODER_URL      → EcoCoder-7B via LM Studio or Ollama (OpenAI-compatible)
+#
+# Policy: no Chinese AI providers or models (no DeepSeek, Mimo/Xiaomi, GLM,
+# Kimi, Qwen — including Qwen-based fine-tunes like EcoCoder-7B). Emily runs
+# on Trinity Large Thinking (Arcee AI, US) via the OpenAI-compatible
+# Arcee router at https://api.arcee.ai/api/v1.
 #
 # Remote delegation to Hermes Beta (reumanlab) requires:
 #   HERMES_ECOSEEK_API_KEY → API key for hermes.ecoseek.org
 #
 # Reasoning mode (frontend toggle):
 #   Users can select Fast/Auto/Deep in the UI.
-#   Fast → deepseek-v4-flash, thinking disabled, skips DiDAL (cheapest)
+#   Fast → trinity-large-thinking, skips DiDAL (cheapest)
 #   Auto → classifier decides (default)
-#   Deep → deepseek-v4-flash, thinking enabled, full DiDAL protocol
-#   DeepSeek V4 pricing: flash $0.14/M in, $0.28/M out; pro $0.435/M in, $0.87/M out
+#   Deep → trinity-large-thinking, full DiDAL protocol
+#   NOTE: trinity rejects the reasoning_effort request param (always thinks);
+#   Hermes handles this internally — do not forward reasoning_effort raw.
 #
 # DiDAL Protocol v2 env vars:
 #   DIDAL_ENABLED               → enable/disable DiDAL (default: true)
 #   DIDAL_MAX_CRITIQUE_ROUNDS   → max debate rounds (default: 2)
-#
-# EcoCoder-7B (https://huggingface.co/alrobles/EcoCoder-7B):
-#   Domain-specialized ecological LLM (Qwen2.5-Coder-7B + LoRA, GGUF Q4_K_M).
-#   ⚠️  4.5 GB download. Compatible with LM Studio and Ollama.
-#   Set ECOCODER_URL=http://localhost:1234/v1 (LM Studio default) to use it.
 #
 # The entrypoint script (entrypoint.sh) writes ~/.hermes/.env with the
 # appropriate keys before starting the gateway.
 
 # Top-level model config — read by the gateway's _resolve_gateway_model()
 model:
-  default: deepseek-v4-flash
+  default: trinity-large-thinking
+  provider: arcee
+
+providers:
+  arcee:
+    base_url: https://api.arcee.ai/api/v1
+    api_mode: chat_completions
+  openrouter:
+    base_url: https://openrouter.ai/api/v1
+    api_mode: chat_completions
+
+fallback_providers:
+- provider: openrouter
+  model: gpt-5.1-codex-mini
+  base_url: https://openrouter.ai/api/v1
 
 agent:
   max_turns: 90
   gateway_timeout: 1800
   reasoning_effort: medium
-  provider: deepseek
-  model: deepseek-v4-flash
-  providers:
-    deepseek:
-      base_url: https://api.deepseek.com/v1
-      api_mode: chat_completions
-      model: deepseek-v4-flash
-    # EcoCoder-7B — domain-specialized ecological LLM
-    # https://huggingface.co/alrobles/EcoCoder-7B (GGUF Q4_K_M, ~4.5 GB)
-    # Base: Qwen2.5-Coder-7B-Instruct + ecological LoRA
-    # Use via LM Studio (localhost:1234) or Ollama:
-    #   ollama run hf.co/alrobles/EcoCoder-7B
-    # Activate with: ECOCODER_URL=http://localhost:1234/v1 bash emily-start.sh
-    ecocoder:
-      base_url: ${ECOCODER_URL:-http://localhost:1234/v1}
-      api_mode: chat_completions
-      model: ecocoder-7b
   personalities:
     emily:
       system_prompt: |
@@ -148,7 +145,7 @@ agent:
 
         ### Your remote partner: Hermes Beta on reumanlab
         Accessible via hermes.ecoseek.org. Beta has:
-        - DeepSeek v4 Pro (advanced reasoning, large context)
+        - Trinity Large Thinking via Arcee AI (advanced reasoning, large context)
         - KU HPC cluster (A100/MI210 GPUs via Slurm)
         - eco_analyze tool (25 ecological actions via EcoAgent)
         - ku_hpc tool (submit/monitor/cancel HPC jobs)

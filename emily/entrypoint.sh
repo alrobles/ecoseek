@@ -15,26 +15,19 @@ echo "API_SERVER_ENABLED=true" >> "$ENV_FILE"
 # Default 127.0.0.1 is the container's loopback — unreachable from the host.
 echo "API_SERVER_HOST=0.0.0.0" >> "$ENV_FILE"
 
-# DeepSeek API key and model
-if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
-    echo "DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}" >> "$ENV_FILE"
-    # DeepSeek V4 API requires explicit model names: deepseek-v4-pro or deepseek-v4-flash.
-    # The old "deepseek-chat" name is no longer accepted.
-    DEEPSEEK_MODEL="${DEEPSEEK_MODEL:-deepseek-v4-flash}"
-    echo "DEEPSEEK_MODEL=${DEEPSEEK_MODEL}" >> "$ENV_FILE"
-    echo "[emily] DeepSeek configured: model=${DEEPSEEK_MODEL}"
+# Arcee router — PRIMARY provider (Trinity Large Thinking, Arcee AI US).
+# Policy: no Chinese AI providers/models — DeepSeek, Mimo, GLM, Kimi and
+# Qwen-based models (incl. EcoCoder-7B) are intentionally not wired here.
+# Hermes reads the provider key as ARCEEAI_API_KEY.
+if [ -n "${ARCEE_API_KEY:-}" ]; then
+    echo "ARCEEAI_API_KEY=${ARCEE_API_KEY}" >> "$ENV_FILE"
+    echo "[emily] Arcee configured: model=${ARCEE_MODEL:-trinity-large-thinking}"
 fi
 
-# Ollama base URL (override provider in config if set)
+# Ollama base URL (local fallback; use a US/open model, e.g. llama3.1)
 if [ -n "${OLLAMA_BASE_URL:-}" ]; then
     echo "OLLAMA_BASE_URL=${OLLAMA_BASE_URL}" >> "$ENV_FILE"
     echo "[emily] Ollama configured at ${OLLAMA_BASE_URL}"
-fi
-
-# EcoCoder-7B via LM Studio or Ollama (OpenAI-compatible endpoint)
-if [ -n "${ECOCODER_URL:-}" ]; then
-    echo "ECOCODER_URL=${ECOCODER_URL}" >> "$ENV_FILE"
-    echo "[emily] EcoCoder-7B configured at ${ECOCODER_URL}"
 fi
 
 # Hermes remote credentials (for DiDAL escalation to hermes.ecoseek.org)
@@ -128,9 +121,9 @@ if [ -n "${API_SERVER_CORS_ORIGINS:-}" ]; then
 fi
 
 # Validate: at least one LLM backend must be configured
-if [ -z "${DEEPSEEK_API_KEY:-}" ] && [ -z "${OLLAMA_BASE_URL:-}" ] && [ -z "${ECOCODER_URL:-}" ]; then
+if [ -z "${ARCEE_API_KEY:-}" ] && [ -z "${OLLAMA_BASE_URL:-}" ]; then
     echo "[emily] WARNING: No LLM backend configured!"
-    echo "[emily] Set DEEPSEEK_API_KEY, OLLAMA_BASE_URL, or ECOCODER_URL."
+    echo "[emily] Set ARCEE_API_KEY or OLLAMA_BASE_URL."
     echo "[emily] Emily will start but cannot generate responses."
 fi
 

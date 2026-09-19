@@ -6,10 +6,11 @@
 # Chat goes to Emily local at :8642.
 #
 # Usage:
-#   DEEPSEEK_API_KEY=sk-... HERMES_ECOSEEK_API_KEY=agenticplu-... bash emily-start.sh
-#   DEEPSEEK_API_KEY=sk-... bash emily-start.sh            # local only (no remote delegation)
+#   ARCEE_API_KEY=rcai-... HERMES_ECOSEEK_API_KEY=agenticplu-... bash emily-start.sh
+#   ARCEE_API_KEY=rcai-... bash emily-start.sh             # local only (no remote delegation)
 #   OLLAMA_BASE_URL=http://host:11434 bash emily-start.sh  # use local Ollama
-#   ECOCODER_URL=http://localhost:1234/v1 bash emily-start.sh  # use EcoCoder-7B via LM Studio
+#
+# Policy: no Chinese AI — Emily runs on Trinity Large Thinking (Arcee AI, US).
 #
 # No Python, Node.js, or npm required — only Docker.
 
@@ -48,8 +49,7 @@ HERMES_URL="${HERMES_REMOTE_URL:-https://hermes.ecoseek.org}"
 EMILY_PORT="${EMILY_PORT:-8642}"
 FRONTEND_PORT="${FRONTEND_PORT:-4000}"
 TERMINAL_PORT="${TERMINAL_PORT:-8001}"
-DEEPSEEK_KEY="${DEEPSEEK_API_KEY:-}"
-DEEPSEEK_MODEL="${DEEPSEEK_MODEL:-deepseek-v4-flash}"
+ARCEE_KEY="${ARCEE_API_KEY:-}"
 OLLAMA_URL="${OLLAMA_BASE_URL:-}"
 
 # Shared key for Emily <-> frontend auth.  Hermes requires API_SERVER_KEY
@@ -83,9 +83,8 @@ EMILY_ENV+=(-e "API_SERVER_CORS_ORIGINS=http://localhost:${FRONTEND_PORT},http:/
 EMILY_ENV+=(-e "HERMES_REMOTE_URL=$HERMES_URL")
 [ -n "$HERMES_KEY" ] && EMILY_ENV+=(-e "HERMES_ECOSEEK_API_KEY=$HERMES_KEY")
 [ -n "$BROKER_KEY" ] && EMILY_ENV+=(-e "ECOSEEK_BROKER_KEY=$BROKER_KEY")
-[ -n "$DEEPSEEK_KEY" ] && EMILY_ENV+=(-e "DEEPSEEK_API_KEY=$DEEPSEEK_KEY") && EMILY_ENV+=(-e "DEEPSEEK_MODEL=$DEEPSEEK_MODEL")
+[ -n "$ARCEE_KEY" ] && EMILY_ENV+=(-e "ARCEE_API_KEY=$ARCEE_KEY")
 [ -n "$OLLAMA_URL" ] && EMILY_ENV+=(-e "OLLAMA_BASE_URL=$OLLAMA_URL")
-[ -n "${ECOCODER_URL:-}" ] && EMILY_ENV+=(-e "ECOCODER_URL=$ECOCODER_URL")
 [ -n "${PHOENIX_COLLECTOR_ENDPOINT:-}" ] && EMILY_ENV+=(-e "PHOENIX_COLLECTOR_ENDPOINT=$PHOENIX_COLLECTOR_ENDPOINT")
 [ -n "${PHOENIX_PROJECT_NAME:-}" ] && EMILY_ENV+=(-e "PHOENIX_PROJECT_NAME=$PHOENIX_PROJECT_NAME")
 [ -n "${DIDAL_MEMORY_ENABLED:-}" ] && EMILY_ENV+=(-e "DIDAL_MEMORY_ENABLED=$DIDAL_MEMORY_ENABLED")

@@ -621,7 +621,7 @@ ESCALATE_REMOTE_SCHEMA = {
     "name": "escalate_remote",
     "description": (
         "Delegate a task to Hermes Beta on reumanlab (hermes.ecoseek.org). "
-        "Beta has DeepSeek v4 Pro, KU HPC cluster (A100/MI210 GPUs via Slurm), "
+        "Beta has Trinity Large Thinking via Arcee AI, KU HPC cluster (A100/MI210 GPUs via Slurm), "
         "eco_analyze (GBIF, SDM, diversity, taxonomy), ku_hpc, GitHub CLI, and "
         "shell access. Use this for ANY task that involves: heavy computation, "
         "HPC jobs, large datasets, ecological pipelines, code execution on "

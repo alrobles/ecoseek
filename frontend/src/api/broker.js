@@ -464,7 +464,7 @@ export async function chatCompletionStream(
           callbacks.onToken?.(delta.content);
         }
 
-        // Reasoning tokens (DeepSeek extended field)
+        // Reasoning tokens (reasoning_content extended field)
         if (delta.reasoning_content) {
           fullReasoning += delta.reasoning_content;
           callbacks.onReasoning?.(delta.reasoning_content);
