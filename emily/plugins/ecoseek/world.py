@@ -655,16 +655,88 @@ def export_events() -> dict:
     return {"success": True, "events": events, "path": path}
 
 
+_STATUS_PRECEDENCE = {
+    "proposed": 0,
+    "tested": 1,
+    "installed": 2,
+    "validated": 3,
+    "retired": 4,
+}
+
+
+def _merge_artifact_row(conn, incoming: dict) -> str:
+    """Merge an incoming artifact into an existing row. Returns 'updated'
+    or 'kept'. Status wins by precedence; metrics/evidence/parents union;
+    earliest created_at, latest updated_at."""
+    aid = incoming["id"]
+    row = conn.execute("SELECT * FROM artifacts WHERE id = ?", (aid,)).fetchone()
+    local = _row_to_artifact(row)
+
+    inc_status = incoming.get("status", "proposed")
+    status = (
+        inc_status
+        if _STATUS_PRECEDENCE.get(inc_status, 0)
+        > _STATUS_PRECEDENCE.get(local["status"], 0)
+        else local["status"]
+    )
+    metrics = dict(local["metrics"])
+    for k, v in (incoming.get("metrics") or {}).items():
+        metrics.setdefault(k, v)
+    evidence = list(local["evidence"])
+    for e in incoming.get("evidence") or []:
+        if e not in evidence:
+            evidence.append(e)
+    parents = list(local["parents"])
+    for p in incoming.get("parents") or []:
+        if p not in parents:
+            parents.append(p)
+    summary = local["summary"] or incoming.get("summary", "")
+
+    changed = (
+        status != local["status"]
+        or metrics != local["metrics"]
+        or evidence != local["evidence"]
+        or parents != local["parents"]
+        or summary != local["summary"]
+    )
+    if not changed:
+        return "kept"
+    conn.execute(
+        "UPDATE artifacts SET status=?, summary=?, metrics=?, evidence=?,"
+        " parents=?, created_at=?, updated_at=? WHERE id=?",
+        (
+            status,
+            summary,
+            json.dumps(metrics, ensure_ascii=False),
+            json.dumps(evidence, ensure_ascii=False),
+            json.dumps(parents, ensure_ascii=False),
+            min(local["created_at"], incoming.get("created_at", local["created_at"])),
+            max(local["updated_at"], incoming.get("updated_at", local["updated_at"])),
+            aid,
+        ),
+    )
+    return "updated"
+
+
 def import_artifact(artifact: dict, events: list | None = None) -> dict:
     """Merge a remote artifact (+ optional events) into this world.
-    Artifacts are content-addressed: re-import is idempotent."""
+    Artifacts are content-addressed: re-import is idempotent. When the
+    artifact exists, fields merge by status precedence — never a downgrade."""
     aid = artifact.get("id")
     if not aid:
         return {"success": False, "error": "artifact missing id"}
     with _connect() as conn:
         exists = conn.execute("SELECT 1 FROM artifacts WHERE id = ?", (aid,)).fetchone()
         if exists:
-            return {"success": True, "artifact_id": aid, "merged": False}
+            outcome = _merge_artifact_row(conn, artifact)
+            for ev in events or []:
+                _insert_event_dedup(conn, aid, ev)
+            return {
+                "success": True,
+                "artifact_id": aid,
+                "merged": False,
+                "outcome": outcome,
+            }
         conn.execute(
             "INSERT INTO artifacts"
             " (id, name, type, status, summary, spec, executable, parents,"
@@ -698,16 +770,34 @@ def import_artifact(artifact: dict, events: list | None = None) -> dict:
             ),
         )
         for ev in events or []:
-            conn.execute(
-                "INSERT INTO events (ts, artifact_id, agent, kind, payload, task_id)"
-                " VALUES (?,?,?,?,?,?)",
-                (
-                    ev.get("ts", time.time()),
-                    aid,
-                    ev.get("agent", "remote"),
-                    ev.get("kind", "propose"),
-                    json.dumps(ev.get("payload") or {}, ensure_ascii=False),
-                    ev.get("task_id", ""),
-                ),
-            )
+            _insert_event_dedup(conn, aid, ev)
     return {"success": True, "artifact_id": aid, "merged": True}
+
+
+def _insert_event_dedup(conn, artifact_id: str, ev: dict) -> bool:
+    """Insert an event unless an identical row already exists (natural key:
+    artifact_id + ts + agent + kind + canonical payload). Returns True when
+    a row was inserted."""
+    payload = json.dumps(ev.get("payload") or {}, ensure_ascii=False)
+    ts = ev.get("ts", time.time())
+    agent = ev.get("agent", "remote")
+    kind = ev.get("kind", "propose")
+    # compare payload semantically — key order may differ across instances
+    candidates = conn.execute(
+        "SELECT payload FROM events WHERE artifact_id=? AND ts=? AND agent=?"
+        " AND kind=?",
+        (artifact_id, ts, agent, kind),
+    ).fetchall()
+    incoming_payload = ev.get("payload") or {}
+    for c in candidates:
+        try:
+            if json.loads(c["payload"] or "{}") == incoming_payload:
+                return False
+        except (json.JSONDecodeError, TypeError):
+            continue
+    conn.execute(
+        "INSERT INTO events (ts, artifact_id, agent, kind, payload, task_id)"
+        " VALUES (?,?,?,?,?,?)",
+        (ts, artifact_id, agent, kind, payload, ev.get("task_id", "")),
+    )
+    return True

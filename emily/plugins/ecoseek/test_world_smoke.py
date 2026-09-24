@@ -449,3 +449,137 @@ class TestMethods:
     def test_missing_artifact(self, world, methods):
         r = methods.render_methods("deadbeef")
         assert not r["success"]
+
+
+@pytest.fixture()
+def sync(world, tmp_path, monkeypatch):
+    """world_sync bound to the test world; `peer_world(dir)` helper builds a
+    second live world in another dir (same module, re-pointed env)."""
+    import world_sync as ws
+
+    def peer_world(path):
+        monkeypatch.setenv("ECOSEEK_WORLD_DIR", str(path))
+        world._local.conn = None
+        return world
+
+    def back_to_main():
+        monkeypatch.setenv("ECOSEEK_WORLD_DIR", str(tmp_path / "world"))
+        world._local.conn = None
+
+    ws._peer_world = peer_world
+    ws._back = back_to_main
+    return ws
+
+
+class TestSync:
+    def test_file_sync_pulls_artifacts_and_events(self, world, sync, tmp_path):
+        peer_dir = tmp_path / "peer"
+        sync._peer_world(peer_dir)
+        aid = _pipeline(world)["artifact_id"]
+        world.record_event(aid, "test", {"metrics": {"tss": 0.71}})
+        world.record_event(aid, "install")
+        world.validate(aid, {"tss": 0.7}, {"run_id": "r1", "exit_code": 0})
+        sync.export_state()
+        sync._back()
+
+        r = sync.sync_file(str(peer_dir))
+        assert r["success"] and r["artifacts_merged"] == 1
+        art = world.get(aid)["artifact"]
+        assert art["status"] == "validated"
+        assert len(art["events"]) == 4
+
+    def test_status_precedence_never_downgrades(self, world, sync, tmp_path):
+        aid = _pipeline(world)["artifact_id"]
+        world.record_event(aid, "test", {"metrics": {"tss": 0.9}})
+        world.record_event(aid, "install")
+        world.validate(aid, {"tss": 0.9}, {"run_id": "r1", "exit_code": 0})
+        sync.export_state()
+
+        # peer has the SAME artifact id but only at proposed (stale replica)
+        peer_dir = tmp_path / "peer"
+        peer_dir.mkdir()
+        art = world.get(aid)["artifact"]
+        stale = dict(art, status="proposed", metrics={})
+        stale.pop("events", None)
+        with open(peer_dir / "artifacts.jsonl", "w") as f:
+            f.write(json.dumps(stale, sort_keys=True) + "\n")
+
+        r = sync.sync_file(str(peer_dir))
+        assert r["artifacts_kept"] == 1
+        assert world.get(aid)["artifact"]["status"] == "validated"
+
+    def test_merge_union_and_idempotent(self, world, sync, tmp_path):
+        peer_dir = tmp_path / "peer"
+        sync._peer_world(peer_dir)
+        _pipeline(world)  # same content-addressed artifact in both worlds
+        remote = world.propose(name="remote-only", artifact_type="report")
+        sync.export_state()
+        sync._back()
+
+        r1 = sync.sync_file(str(peer_dir))
+        assert r1["artifacts_merged"] == 2  # local world was empty → both merge
+        assert world.get(remote["artifact_id"])["success"]
+        # second sync: nothing new
+        r2 = sync.sync_file(str(peer_dir))
+        assert r2["artifacts_merged"] == 0 and r2["events_new"] == 0
+
+    def test_bidirectional_writeback(self, world, sync, tmp_path):
+        local = world.propose(name="local-only", artifact_type="report")
+        sync.export_state()
+        peer_dir = tmp_path / "peer"
+        peer_dir.mkdir()
+        sync.sync_file(str(peer_dir))
+        # peer snapshot now carries our artifact
+        with open(peer_dir / "artifacts.jsonl") as fh:
+            rows = [json.loads(l) for l in fh if l.strip()]
+        assert any(r["id"] == local["artifact_id"] for r in rows)
+
+    def test_git_transport_merge_and_push(self, world, sync, tmp_path):
+        # remote bare repo + peer clone pre-populated with a remote artifact
+        remote = tmp_path / "remote.git"
+        peer_dir = tmp_path / "peer"
+        import subprocess
+
+        subprocess.run(
+            ["git", "init", "--bare", str(remote)], check=True, capture_output=True
+        )
+        sync._peer_world(peer_dir)
+        aid = _pipeline(world)["artifact_id"]
+        sync.export_state()
+        subprocess.run(
+            ["git", "-C", str(peer_dir), "init", "-b", "main"],
+            check=True,
+            capture_output=True,
+        )
+        for c in (
+            ["config", "user.email", "t@t"],
+            ["config", "user.name", "t"],
+            ["remote", "add", "origin", str(remote)],
+            ["add", "artifacts.jsonl", "events.jsonl"],
+            ["commit", "-m", "peer state"],
+            ["push", "-u", "origin", "main"],
+        ):
+            subprocess.run(
+                ["git", "-C", str(peer_dir), *c], check=True, capture_output=True
+            )
+        sync._back()
+
+        # our world dir becomes a repo tracking the same remote
+        sync.export_state()  # materializes the dir + snapshot first
+        wdir = world._world_dir()
+        for c in (
+            ["init", "-b", "main"],
+            ["config", "user.email", "t@t"],
+            ["config", "user.name", "t"],
+            ["remote", "add", "origin", str(remote)],
+        ):
+            subprocess.run(["git", "-C", wdir, *c], check=True, capture_output=True)
+
+        r = sync.sync_git()
+        assert r["success"] and r["pushed"], json.dumps(r)
+        assert r["artifacts_merged"] == 1
+        assert world.get(aid)["success"]
+
+    def test_not_a_git_repo(self, world, sync):
+        r = sync.sync_git()
+        assert not r["success"] and "not a git repo" in r["error"]
