@@ -44,12 +44,14 @@ ssh -t a474r867@100.105.254.1 "/bin/bash -i"
 - ~~Fallback: deepseek~~ **BANNED — retired**
 - Compliant providers: Arcee Trinity (primary), OpenRouter non-Chinese
   models, local Ollama Llama-family.
-- **Migration status (2026-09): done on reumanlab, alpha, beta** — all on
+- **Migration status (2026-09): COMPLETE on all 4 nodes** — all on
   `arcee/trinity-large-thinking` → `openrouter` `openai/o4-mini` fallback,
   banned keys renamed `.retired`, hub qwen ollama weights removed
-  (`OLLAMA_MODEL=tinyllama:latest`).
-- **Pending: reumanlab-gamma** (unreachable — Tailscale ACL + dead
-  shell-server tunnel at reumanlab:2226; `~/gamma.sh` missing on hub).
+  (`OLLAMA_MODEL=tinyllama:latest`), gamma `inclusionai` aux slots →
+  `openai/o4-mini`.
+- **Gamma SSH**: `ssh reumanlab@reumanlab-gamma` works (user `reumanlab`,
+  NOT `a474r867` — tailnet ACL only permits `reumanlab`). The old
+  `~/gamma.sh` shell-server workaround is obsolete.
 - Retire `~/env/mimo-key` and `~/env/deepseek-token` on every node.
 
 ### Tailscale
@@ -61,7 +63,7 @@ ssh -t a474r867@100.105.254.1 "/bin/bash -i"
 - **reumanlab**: Full deployment — gateway, skills, tasks, kanban, cron
 - **reumanlab-alpha**: Minimal install
 - **reumanlab-beta**: Not yet explored
-- **reumanlab-gamma**: Installed — **still on mimo-v2.5-pro (BANNED); migration pending — node unreachable (Tailscale ACL + dead shell-server tunnel)**
+- **reumanlab-gamma**: Installed, migrated to arcee Trinity (inclusionai aux slots → openai/o4-mini, banned keys .retired)
 
 ## Per-Node Details
 
@@ -82,7 +84,7 @@ ssh -t a474r867@100.105.254.1 "/bin/bash -i"
 - **GPU confirmed**: Quadro P620, CUDA 12.2, PyTorch 2.6.0+cu124, Transformers 5.12.1
 - **Quick GPU check**: `bash scripts/gpu_check.sh` (in this skill) or `ssh a474r867@100.105.254.1 'bash -s' < ~/.hermes/skills/devops/reumanlab-mesh/scripts/gpu_check.sh`
 - **Two inference backends**: llama.cpp Vulkan (GGUF, ~5.7 t/s) + PyTorch CUDA (Transformers)
-- **Hermes**: v0.14.0 at `~/.hermes/hermes-agent/`, CLI via `~/.hermes/hermes` wrapper (was on mimo-v2.5-pro — BANNED; migrate to arcee when node reachable)
+- **Hermes**: fork at `~/hermes-agent-fork/venv/bin/hermes`, on arcee Trinity
 - **Disk**: 3.6TB (3.4TB free)
 - **RAM**: 16GB (12GB free)
 - **Python**: conda 26.3.2, Python 3.13.13
