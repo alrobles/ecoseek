@@ -222,7 +222,9 @@ def _apply_transition(
             )
     elif kind == "install":
         if status != "tested":
-            raise ValueError(f"cannot install artifact in status {status} (need tested)")
+            raise ValueError(
+                f"cannot install artifact in status {status} (need tested)"
+            )
         new = "installed"
     elif kind == "validate":
         if status != "installed":
@@ -232,7 +234,9 @@ def _apply_transition(
         metrics = payload.get("metrics") or {}
         replay = payload.get("replay") or {}
         if not metrics:
-            raise ValueError("validate requires non-empty metrics (measured, not claimed)")
+            raise ValueError(
+                "validate requires non-empty metrics (measured, not claimed)"
+            )
         if not replay.get("run_id") or replay.get("exit_code") != 0:
             raise ValueError(
                 "validate requires replay evidence: {run_id, exit_code: 0, holdout}"
@@ -333,7 +337,9 @@ def propose(
                 " ".join(str(e) for e in evidence),
             ),
         )
-        _emit(conn, aid, "propose", {"name": name, "type": artifact_type}, author, task_id)
+        _emit(
+            conn, aid, "propose", {"name": name, "type": artifact_type}, author, task_id
+        )
 
     return {"success": True, "artifact_id": aid, "status": "proposed"}
 
@@ -431,9 +437,7 @@ def fork(
     return {"success": True, "artifact_id": child_id, "parent": artifact_id}
 
 
-def observe(
-    artifact_id: str, agent: str | None = None, task_id: str = ""
-) -> dict:
+def observe(artifact_id: str, agent: str | None = None, task_id: str = "") -> dict:
     """Record that an agent encountered/used an artifact (stigmergic reuse —
     the ~95% observation-first diffusion channel from SwarmWorld)."""
     return record_event(artifact_id, "observe", {}, agent, task_id)
@@ -509,9 +513,7 @@ def query(
                 if where:
                     sql += " AND " + " AND ".join(where)
                 sql += " ORDER BY a.updated_at DESC LIMIT ?"
-                rows = conn.execute(
-                    sql, [like, like, like, *params, limit]
-                ).fetchall()
+                rows = conn.execute(sql, [like, like, like, *params, limit]).fetchall()
         else:
             sql = "SELECT a.* FROM artifacts a"
             if where:
@@ -530,9 +532,12 @@ def lineage(artifact_id: str) -> dict:
     """Ancestors (walking parents) + direct descendants — executable
     inheritance graph, recorded edges only."""
     with _connect() as conn:
-        if conn.execute(
-            "SELECT 1 FROM artifacts WHERE id = ?", (artifact_id,)
-        ).fetchone() is None:
+        if (
+            conn.execute(
+                "SELECT 1 FROM artifacts WHERE id = ?", (artifact_id,)
+            ).fetchone()
+            is None
+        ):
             return {"success": False, "error": f"artifact {artifact_id} not found"}
 
         ancestors, seen, queue = [], set(), [artifact_id]
@@ -603,9 +608,7 @@ def stats() -> dict:
                 nexts = []
                 if prow:
                     nexts = [
-                        p
-                        for p in json.loads(prow["parents"] or "[]")
-                        if p not in seen
+                        p for p in json.loads(prow["parents"] or "[]") if p not in seen
                     ]
                 if nexts:
                     d += 1
@@ -621,9 +624,7 @@ def stats() -> dict:
         ).fetchone()["n"]
         event_counts = {
             r["kind"]: r["n"]
-            for r in conn.execute(
-                "SELECT kind, COUNT(*) n FROM events GROUP BY kind"
-            )
+            for r in conn.execute("SELECT kind, COUNT(*) n FROM events GROUP BY kind")
         }
     return {
         "success": True,
@@ -661,9 +662,7 @@ def import_artifact(artifact: dict, events: list | None = None) -> dict:
     if not aid:
         return {"success": False, "error": "artifact missing id"}
     with _connect() as conn:
-        exists = conn.execute(
-            "SELECT 1 FROM artifacts WHERE id = ?", (aid,)
-        ).fetchone()
+        exists = conn.execute("SELECT 1 FROM artifacts WHERE id = ?", (aid,)).fetchone()
         if exists:
             return {"success": True, "artifact_id": aid, "merged": False}
         conn.execute(

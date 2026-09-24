@@ -1626,7 +1626,16 @@ WORLD_QUERY_SCHEMA = {
             },
             "artifact_type": {
                 "type": "string",
-                "enum": ["", "pipeline", "model", "script", "dataset_pin", "methods_section", "report", "other"],
+                "enum": [
+                    "",
+                    "pipeline",
+                    "model",
+                    "script",
+                    "dataset_pin",
+                    "methods_section",
+                    "report",
+                    "other",
+                ],
             },
             "status": {
                 "type": "string",
@@ -1655,9 +1664,20 @@ WORLD_PROPOSE_SCHEMA = {
             "name": {"type": "string", "description": "Artifact name."},
             "artifact_type": {
                 "type": "string",
-                "enum": ["pipeline", "model", "script", "dataset_pin", "methods_section", "report", "other"],
+                "enum": [
+                    "pipeline",
+                    "model",
+                    "script",
+                    "dataset_pin",
+                    "methods_section",
+                    "report",
+                    "other",
+                ],
             },
-            "summary": {"type": "string", "description": "What it does, in one sentence."},
+            "summary": {
+                "type": "string",
+                "description": "What it does, in one sentence.",
+            },
             "spec": {
                 "type": "object",
                 "description": "Workflow-world declaration: tools, inputs, gates, eval schedule.",
@@ -1907,22 +1927,56 @@ def world_stats_tool(task_id: str | None = None) -> str:
 
 
 _WORLD_TOOL_REGISTRATIONS = [
-    ("world_query", WORLD_QUERY_SCHEMA, world_query_tool,
-     {"query": "query", "artifact_type": "artifact_type", "status": "status",
-      "author": "author", "limit": "limit"}),
-    ("world_propose", WORLD_PROPOSE_SCHEMA, world_propose_tool,
-     {"name": "name", "artifact_type": "artifact_type", "summary": "summary",
-      "spec": "spec", "executable": "executable", "evidence": "evidence"}),
-    ("world_event", WORLD_EVENT_SCHEMA, world_event_tool,
-     {"artifact_id": "artifact_id", "kind": "kind", "payload": "payload"}),
-    ("world_validate", WORLD_VALIDATE_SCHEMA, world_validate_tool,
-     {"artifact_id": "artifact_id", "metrics": "metrics", "replay": "replay"}),
-    ("world_fork", WORLD_FORK_SCHEMA, world_fork_tool,
-     {"artifact_id": "artifact_id", "edits": "edits"}),
-    ("world_get", WORLD_GET_SCHEMA, world_get_tool,
-     {"artifact_id": "artifact_id"}),
-    ("world_lineage", WORLD_LINEAGE_SCHEMA, world_lineage_tool,
-     {"artifact_id": "artifact_id"}),
+    (
+        "world_query",
+        WORLD_QUERY_SCHEMA,
+        world_query_tool,
+        {
+            "query": "query",
+            "artifact_type": "artifact_type",
+            "status": "status",
+            "author": "author",
+            "limit": "limit",
+        },
+    ),
+    (
+        "world_propose",
+        WORLD_PROPOSE_SCHEMA,
+        world_propose_tool,
+        {
+            "name": "name",
+            "artifact_type": "artifact_type",
+            "summary": "summary",
+            "spec": "spec",
+            "executable": "executable",
+            "evidence": "evidence",
+        },
+    ),
+    (
+        "world_event",
+        WORLD_EVENT_SCHEMA,
+        world_event_tool,
+        {"artifact_id": "artifact_id", "kind": "kind", "payload": "payload"},
+    ),
+    (
+        "world_validate",
+        WORLD_VALIDATE_SCHEMA,
+        world_validate_tool,
+        {"artifact_id": "artifact_id", "metrics": "metrics", "replay": "replay"},
+    ),
+    (
+        "world_fork",
+        WORLD_FORK_SCHEMA,
+        world_fork_tool,
+        {"artifact_id": "artifact_id", "edits": "edits"},
+    ),
+    ("world_get", WORLD_GET_SCHEMA, world_get_tool, {"artifact_id": "artifact_id"}),
+    (
+        "world_lineage",
+        WORLD_LINEAGE_SCHEMA,
+        world_lineage_tool,
+        {"artifact_id": "artifact_id"},
+    ),
     ("world_stats", WORLD_STATS_SCHEMA, world_stats_tool, {}),
 ]
 
