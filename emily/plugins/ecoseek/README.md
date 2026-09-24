@@ -27,6 +27,23 @@ The plugin also registers a frozen system-prompt section (`ecoseek.world_stigmer
 **Phoenix tracing** (`world_trace.py`): every world event emits an `ecoseek.world.event` span; `replay`, `sync`, and `methods` emit timed spans with result attributes (run_id, exit_code, transport, merged counts). Fire-and-forget POST to `PHOENIX_ENDPOINT` (default `http://localhost:6006`, `/v1/spans`); `PHOENIX_API_KEY` optional bearer; `ECOSEEK_WORLD_TRACE=0` disables. Tracing never blocks or fails a world operation — Phoenix down ⇒ debug log, keep going.
 
 **Multi-agent locking**: `journal_mode=WAL` keeps reads lock-free; write paths (`propose`/`record_event`/`fork`/`import_artifact`) take an advisory `flock` on `world.lock` covering the whole critical section — DB txn + `events.jsonl` append together, so commit order equals replication order. `busy_timeout=5000` covers writers that bypass the lock; 10s deadline → `TimeoutError`. Same-host scope — cross-node replication goes through `world_sync`, whose merge files are written atomically (temp+rename).
+
+**Executable security policy** (`world_policy.json` in the world dir — local, **never federated**: each node keeps its own trust decisions):
+
+```json
+{
+  "allowed_exec_kinds": ["ecoagent_tool", "shell", "r_script", "slurm_job"],
+  "gated_exec_kinds": ["shell", "r_script", "slurm_job"],
+  "trusted_installers": [],
+  "import_clamp_gated": false
+}
+```
+
+- `propose` — `executable.kind` must be in `allowed_exec_kinds` (unknown kinds are rejected before they ever reach the runner); `ecoagent_tool` refs are verified against the audited `tools.registry` when the hermes runtime is reachable
+- `install` — gated kinds require a **trusted installer** (`trusted_installers` ∪ the local `ECOSEEK_AGENT_ID`) or a prior `attest` event from one — `attest` becomes the review-step that unlocks installs for other agents
+- `import_artifact` — banned kinds are rejected; with `import_clamp_gated` a peer's `installed`/`validated` gated artifact arrives clamped to `tested` (must re-earn trust locally)
+
+Trust boundary note: agent identity is self-asserted (the `agent` field) — the policy gates *who may assert install*, not cryptographic identity. The hard execution boundary remains `ECOSEEK_WORLD_REPLAY_EXEC=1`.
 | `hermes_status` | Check if Hermes Beta is available |
 | `escalate_remote` | One-shot delegation to Beta (execution tasks) |
 | `dialectical_exchange` | Legacy DiDAL exchange (iterative execution tasks) |
