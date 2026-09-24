@@ -240,6 +240,101 @@ def _emit(
 
 
 # ---------------------------------------------------------------------------
+# Executable security policy — local trust, not federated
+#
+# `world_policy.json` in the world dir (each node keeps its own — like git
+# config vs objects). Absent ⇒ defaults below; operators edit the file.
+# Enforced at three points:
+#   propose         — executable.kind must be in allowed_exec_kinds; an
+#                     ecoagent_tool ref is verified against the audited
+#                     tool registry when that runtime is reachable
+#   install event   — gated_exec_kinds require a trusted installer
+#                     (trusted_installers ∪ local agent) OR a prior
+#                     `attest` event from one
+#   import_artifact — kind not allowed ⇒ rejected; import_clamp_gated ⇒
+#                     installed/validated statuses clamp to tested, so a
+#                     peer can't push a ready-to-run gated executable
+# ---------------------------------------------------------------------------
+
+_DEFAULT_POLICY = {
+    "version": 1,
+    "allowed_exec_kinds": ["ecoagent_tool", "shell", "r_script", "slurm_job"],
+    "gated_exec_kinds": ["shell", "r_script", "slurm_job"],
+    "trusted_installers": [],
+    "import_clamp_gated": False,
+}
+
+
+def _policy_path() -> str:
+    return os.path.join(_world_dir(), "world_policy.json")
+
+
+def _policy() -> dict:
+    """This world's local trust policy (never federated). Defaults when the
+    file is absent or malformed."""
+    try:
+        with open(_policy_path()) as fh:
+            loaded = json.load(fh)
+        if isinstance(loaded, dict):
+            return {**_DEFAULT_POLICY, **loaded}
+    except (OSError, ValueError):
+        pass
+    return dict(_DEFAULT_POLICY)
+
+
+def _check_exec_proposable(executable: dict) -> str | None:
+    """Per-kind allowlist at proposal time. Returns an error string or None."""
+    kind = (executable or {}).get("kind")
+    if kind is None:
+        return None  # no executable payload — nothing to gate
+    allowed = _policy()["allowed_exec_kinds"]
+    if kind not in allowed:
+        return (
+            f"executable kind {kind!r} not allowed by world_policy.json "
+            f"(allowed: {allowed})"
+        )
+    if kind == "ecoagent_tool":
+        # the audited tool registry IS the ref allowlist — verify when the
+        # hermes runtime is reachable; Emily-local can't verify → record only
+        try:
+            from tools.registry import registry
+        except ImportError:
+            return None
+        get_entry = getattr(registry, "get_entry", None)
+        if get_entry is None:
+            return None  # older/shim registry without the accessor — can't verify
+        if get_entry(executable.get("ref")) is None:
+            return (
+                f"ecoagent_tool ref {executable.get('ref')!r} is not a "
+                "registered tool — executables must point at the audited "
+                "toolset"
+            )
+    return None
+
+
+def _check_install_trusted(conn, artifact: dict, agent: str) -> str | None:
+    """install on a gated-executable artifact requires a trusted installer,
+    or a prior `attest` event from one. Returns an error string or None."""
+    kind = (artifact.get("executable") or {}).get("kind")
+    if kind not in _policy()["gated_exec_kinds"]:
+        return None
+    trusted = sorted(set(_policy()["trusted_installers"]) | {_agent_id()})
+    if agent in trusted:
+        return None
+    attest = conn.execute(
+        "SELECT 1 FROM events WHERE artifact_id=? AND kind='attest'"
+        f" AND agent IN ({','.join('?' * len(trusted))})",
+        (artifact["id"], *trusted),
+    ).fetchone()
+    if attest:
+        return None
+    return (
+        f"install of gated executable kind {kind!r} requires a trusted "
+        f"installer {trusted} or a prior attest event from one"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Artifact identity + status machine
 # ---------------------------------------------------------------------------
 
@@ -351,6 +446,9 @@ def propose(
     spec = spec or {}
     executable = executable or {}
     evidence = evidence or []
+    err = _check_exec_proposable(executable)
+    if err:
+        return {"success": False, "error": err}
     aid = _artifact_id(name, artifact_type, spec, executable, evidence)
     now = time.time()
 
@@ -417,6 +515,25 @@ def record_event(
     """Append an event to an artifact's history and apply the status machine."""
     payload = payload or {}
     with _connect(write=True) as conn:
+        if kind == "install":
+            row = conn.execute(
+                "SELECT executable FROM artifacts WHERE id = ?", (artifact_id,)
+            ).fetchone()
+            if row is None:
+                return {
+                    "success": False,
+                    "error": f"artifact {artifact_id} not found",
+                }
+            err = _check_install_trusted(
+                conn,
+                {
+                    "id": artifact_id,
+                    "executable": json.loads(row["executable"] or "{}"),
+                },
+                agent or _agent_id(),
+            )
+            if err:
+                return {"success": False, "error": err}
         try:
             new_status = _apply_transition(
                 conn, artifact_id, kind, payload, agent or _agent_id()
@@ -812,6 +929,21 @@ def import_artifact(artifact: dict, events: list | None = None) -> dict:
     aid = artifact.get("id")
     if not aid:
         return {"success": False, "error": "artifact missing id"}
+    kind = (artifact.get("executable") or {}).get("kind")
+    pol = _policy()
+    if kind is not None and kind not in pol["allowed_exec_kinds"]:
+        return {
+            "success": False,
+            "error": f"executable kind {kind!r} not allowed by world_policy.json",
+        }
+    # a peer can push a ready-to-run gated executable — clamp its status so
+    # install/validate must be re-earned under THIS node's trust policy
+    if (
+        pol["import_clamp_gated"]
+        and kind in pol["gated_exec_kinds"]
+        and artifact.get("status") in ("installed", "validated")
+    ):
+        artifact = {**artifact, "status": "tested"}
     with _connect(write=True) as conn:
         exists = conn.execute("SELECT 1 FROM artifacts WHERE id = ?", (aid,)).fetchone()
         if exists:

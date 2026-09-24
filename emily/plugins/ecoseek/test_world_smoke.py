@@ -283,8 +283,10 @@ with open(os.environ["REPLAY_METRICS_PATH"], "w") as f:
         r = world.propose(name="no-exe")
         out = replay.replay(r["artifact_id"])
         assert not out["success"] and "unsupported" in out["error"]
+        # unknown kinds are now rejected at proposal by world_policy —
+        # they never reach the runner
         r = world.propose(name="bad-kind", executable={"kind": "magic", "ref": "x"})
-        assert not replay.replay(r["artifact_id"])["success"]
+        assert not r["success"] and "not allowed" in r["error"]
         r = world.propose(name="no-ref", executable={"kind": "shell"})
         out = replay.replay(r["artifact_id"])
         assert not out["success"] and "ref" in out["error"]
@@ -756,3 +758,134 @@ class TestLocking:
         monkeypatch.setattr(world.fcntl, "flock", _always_busy)
         with pytest.raises(TimeoutError):
             world.propose(name="blocked", artifact_type="other")
+
+
+class TestSecurityPolicy:
+    """world_policy.json — local, non-federated trust policy for executables."""
+
+    def _write_policy(self, tmp_path, **over):
+        import json as _json
+
+        wdir = tmp_path / "world"
+        wdir.mkdir(parents=True, exist_ok=True)
+        pol = {
+            "version": 1,
+            "allowed_exec_kinds": [
+                "ecoagent_tool",
+                "shell",
+                "r_script",
+                "slurm_job",
+            ],
+            "gated_exec_kinds": ["shell", "r_script", "slurm_job"],
+            "trusted_installers": [],
+            "import_clamp_gated": False,
+            **over,
+        }
+        with open(wdir / "world_policy.json", "w") as fh:
+            _json.dump(pol, fh)
+
+    def test_unknown_kind_rejected_at_propose(self, world):
+        r = world.propose(
+            name="evil",
+            artifact_type="script",
+            executable={"kind": "docker", "ref": "alpine"},
+        )
+        assert not r["success"] and "not allowed" in r["error"]
+
+    def test_default_policy_allows_known_kinds(self, world):
+        for kind in ("shell", "r_script", "slurm_job", "ecoagent_tool"):
+            r = world.propose(
+                name=f"p-{kind}",
+                artifact_type="pipeline",
+                executable={"kind": kind, "ref": "x"},
+            )
+            assert r["success"], kind
+
+    def test_policy_narrows_allowed_kinds(self, world, tmp_path):
+        self._write_policy(tmp_path, allowed_exec_kinds=["ecoagent_tool"])
+        r = world.propose(
+            name="shell-pipe",
+            artifact_type="pipeline",
+            executable={"kind": "shell", "ref": "true"},
+        )
+        assert not r["success"] and "not allowed" in r["error"]
+
+    def _tested_shell_pipe(self, world):
+        aid = world.propose(
+            name="shell-pipe",
+            artifact_type="pipeline",
+            executable={"kind": "shell", "ref": "true"},
+        )["artifact_id"]
+        world.record_event(aid, "test", {"metrics": {"x": 1}})
+        return aid
+
+    def test_install_gated_untrusted_agent(self, world):
+        aid = self._tested_shell_pipe(world)
+        r = world.record_event(aid, "install", agent="random-peer")
+        assert not r["success"] and "trusted installer" in r["error"]
+
+    def test_install_gated_self_allowed(self, world):
+        aid = self._tested_shell_pipe(world)
+        r = world.record_event(aid, "install")  # agent defaults to emily (self)
+        assert r["success"]
+
+    def test_install_gated_after_trusted_attest(self, world):
+        aid = self._tested_shell_pipe(world)
+        # trusted agent attests → untrusted installer may now install
+        world.record_event(aid, "attest", {"note": "reviewed"}, agent="emily")
+        r = world.record_event(aid, "install", agent="peer-agent")
+        assert r["success"]
+
+    def test_install_nongated_anyone(self, world):
+        aid = world.propose(
+            name="pin",
+            artifact_type="dataset_pin",
+            spec={"doi": "10.x/y"},
+        )["artifact_id"]
+        world.record_event(aid, "test", {"metrics": {"x": 1}})
+        r = world.record_event(aid, "install", agent="random-peer")
+        assert r["success"]  # no executable → not gated
+
+    def test_policy_trusted_installers_file(self, world, tmp_path):
+        self._write_policy(tmp_path, trusted_installers=["peer-agent"])
+        aid = self._tested_shell_pipe(world)
+        assert world.record_event(aid, "install", agent="peer-agent")["success"]
+
+    def test_import_banned_kind_rejected(self, world):
+        r = world.import_artifact(
+            {
+                "id": "a" * 16,
+                "name": "evil",
+                "type": "script",
+                "status": "validated",
+                "executable": {"kind": "docker", "ref": "alpine"},
+            }
+        )
+        assert not r["success"] and "not allowed" in r["error"]
+
+    def test_import_clamp_gated(self, world, tmp_path):
+        self._write_policy(tmp_path, import_clamp_gated=True)
+        r = world.import_artifact(
+            {
+                "id": "b" * 16,
+                "name": "peer-pipe",
+                "type": "pipeline",
+                "status": "validated",
+                "executable": {"kind": "shell", "ref": "run.sh"},
+            }
+        )
+        assert r["success"]
+        art = world.get("b" * 16)["artifact"]
+        assert art["status"] == "tested"  # must re-earn install locally
+
+    def test_malformed_policy_falls_back_to_defaults(self, world, tmp_path):
+        wdir = tmp_path / "world"
+        wdir.mkdir(parents=True, exist_ok=True)
+        with open(wdir / "world_policy.json", "w") as fh:
+            fh.write("{not json")
+        r = world.propose(
+            name="p",
+            artifact_type="pipeline",
+            executable={"kind": "shell", "ref": "true"},
+        )
+        assert r["success"]  # defaults allow all known kinds
