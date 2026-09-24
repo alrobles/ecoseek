@@ -18,6 +18,7 @@ Emily (Alpha, local) ↔ Hermes (Beta, remote on reumanlab) via `hermes.ecoseek.
 | `world_get` | Full artifact record + provenance event history |
 | `world_lineage` | Ancestors/descendants inheritance graph |
 | `world_stats` | Portfolio metrics (validated inventions, lineage depth, reuse fraction) |
+| `world_replay` | Frozen agent-free replay of `artifact.executable` on held-out inputs — emits `world_validate` evidence |
 | `hermes_status` | Check if Hermes Beta is available |
 | `escalate_remote` | One-shot delegation to Beta (execution tasks) |
 | `dialectical_exchange` | Legacy DiDAL exchange (iterative execution tasks) |

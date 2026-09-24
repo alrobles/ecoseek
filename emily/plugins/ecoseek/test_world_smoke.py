@@ -178,3 +178,178 @@ class TestFederation:
         )
         assert r["success"] and r["merged"] is True
         assert world.get("deadbeefcafef00d")["success"]
+
+
+@pytest.fixture()
+def replay(world, monkeypatch):
+    """Frozen replay runner bound to the same temp world dir."""
+    import world_replay as wr
+
+    monkeypatch.setenv("ECOSEEK_WORLD_REPLAY_EXEC", "1")
+    return wr
+
+
+def _installed_shell(world, tmp_path, script_body, args=None, script_name="pipe.py"):
+    """Propose + install a shell-executable artifact; returns (aid, script)."""
+    script = tmp_path / script_name
+    script.write_text(script_body)
+    r = world.propose(
+        name="frozen-pipe",
+        artifact_type="pipeline",
+        executable={
+            "kind": "shell",
+            "ref": f"{sys.executable} {script}",
+            "args": args or {},
+        },
+    )
+    aid = r["artifact_id"]
+    world.record_event(aid, "test", {"metrics": {"tss": 0.71}})
+    world.record_event(aid, "install")
+    return aid
+
+
+_OK_SCRIPT = """\
+import json, os
+with open(os.environ["REPLAY_METRICS_PATH"], "w") as f:
+    json.dump({"tss": 0.74, "auc": 0.91}, f)
+print("replay done")
+"""
+
+
+class TestFrozenReplay:
+    def test_gated_by_default(self, world, tmp_path, monkeypatch):
+        monkeypatch.delenv("ECOSEEK_WORLD_REPLAY_EXEC", raising=False)
+        import world_replay as wr
+
+        aid = _installed_shell(world, tmp_path, _OK_SCRIPT)
+        r = wr.replay(aid)
+        assert not r["success"] and "fail-closed" in r["error"]
+
+    def test_shell_replay_metrics_and_evidence(self, world, replay, tmp_path):
+        aid = _installed_shell(world, tmp_path, _OK_SCRIPT)
+        r = replay.replay(aid, holdout={"name": "gbif-2026-09"})
+        assert r["success"] and r["exit_code"] == 0
+        assert r["metrics"]["tss"] == 0.74
+        assert r["holdout"] == "gbif-2026-09"
+        # durable evidence on disk
+        with open(os.path.join(r["run_dir"], "replay.json")) as f:
+            ev = json.load(f)
+        assert ev["run_id"] == r["run_id"] and ev["artifact_id"] == aid
+        assert os.path.exists(os.path.join(r["run_dir"], "stdout.log"))
+
+    def test_replay_and_validate_promotes(self, world, replay, tmp_path):
+        aid = _installed_shell(world, tmp_path, _OK_SCRIPT)
+        r = replay.replay_and_validate(
+            aid, holdout={"name": "block-cv"}, gate={"tss": 0.6}
+        )
+        assert r["validation"]["success"] and r["validation"]["status"] == "validated"
+        assert world.get(aid)["artifact"]["status"] == "validated"
+
+    def test_gate_blocks_below_floor(self, world, replay, tmp_path):
+        aid = _installed_shell(world, tmp_path, _OK_SCRIPT)
+        r = replay.replay_and_validate(aid, gate={"tss": 0.9})
+        assert r["exit_code"] == 0 and not r["validation"]["success"]
+        assert world.get(aid)["artifact"]["status"] == "installed"
+
+    def test_nonzero_exit_preserves_code_and_skips(self, world, replay, tmp_path):
+        aid = _installed_shell(
+            world, tmp_path, 'import sys; sys.stderr.write("boom"); sys.exit(3)\n'
+        )
+        r = replay.replay_and_validate(aid)
+        assert r["exit_code"] == 3 and r["validation"]["skipped"]
+        assert world.get(aid)["artifact"]["status"] == "installed"
+
+    def test_no_metrics_no_validate(self, world, replay, tmp_path):
+        aid = _installed_shell(world, tmp_path, 'print("no metrics here")\n')
+        r = replay.replay_and_validate(aid)
+        assert r["exit_code"] == 0 and r["metrics"] == {}
+        assert r["validation"]["skipped"]
+
+    def test_holdout_args_merged_and_exposed(self, world, replay, tmp_path):
+        body = """\
+import json, os
+h = json.loads(os.environ["REPLAY_HOLDOUT"])
+with open(os.environ["REPLAY_METRICS_PATH"], "w") as f:
+    json.dump({"species": h["args"]["species"], "reps": h["args"]["reps"]}, f)
+"""
+        aid = _installed_shell(world, tmp_path, body, args={"reps": 1})
+        r = replay.replay(
+            aid, holdout={"name": "h1", "args": {"species": "Q. rubra", "reps": 5}}
+        )
+        # holdout args override executable.args
+        assert r["metrics"] == {"species": "Q. rubra", "reps": 5}
+
+    def test_missing_and_malformed_executables(self, world, replay, tmp_path):
+        r = world.propose(name="no-exe")
+        out = replay.replay(r["artifact_id"])
+        assert not out["success"] and "unsupported" in out["error"]
+        r = world.propose(name="bad-kind", executable={"kind": "magic", "ref": "x"})
+        assert not replay.replay(r["artifact_id"])["success"]
+        r = world.propose(name="no-ref", executable={"kind": "shell"})
+        out = replay.replay(r["artifact_id"])
+        assert not out["success"] and "ref" in out["error"]
+
+    def test_timeout_and_secrets_stripped(self, world, replay, tmp_path, monkeypatch):
+        monkeypatch.setenv("GBIF_API_KEY", "secret-key-123")
+        body = """\
+import json, os
+with open(os.environ["REPLAY_METRICS_PATH"], "w") as f:
+    json.dump({"has_key": "GBIF_API_KEY" in os.environ}, f)
+"""
+        aid = _installed_shell(world, tmp_path, body)
+        r = replay.replay(aid)
+        assert r["exit_code"] == 0 and r["metrics"]["has_key"] is False
+        # timeout → exit 124
+        aid2 = _installed_shell(
+            world, tmp_path, "import time; time.sleep(30)\n", script_name="s2.py"
+        )
+        r = replay.replay(aid2, timeout_s=1)
+        assert r["exit_code"] == 124
+
+    def test_ecoagent_tool_dispatch(self, world, replay, monkeypatch):
+        """ecoagent_tool runs via tools.registry.dispatch — zero LLM."""
+        import types
+
+        calls = {}
+
+        class FakeRegistry:
+            def dispatch(self, name, args, **kw):
+                calls["name"], calls["args"] = name, args
+                return json.dumps({"metrics": {"tss": 0.66}, "ok": True})
+
+        reg_mod = types.ModuleType("tools.registry")
+        reg_mod.registry = FakeRegistry()
+        pkg = types.ModuleType("tools")
+        pkg.registry = reg_mod
+        monkeypatch.setitem(sys.modules, "tools", pkg)
+        monkeypatch.setitem(sys.modules, "tools.registry", reg_mod)
+
+        aid = _pipeline(world)["artifact_id"]
+        r = replay.replay(aid)
+        assert r["exit_code"] == 0
+        assert calls["name"] == "sdm_pipeline"
+        assert calls["args"]["species"] == "Quercus alba"
+        assert r["metrics"]["tss"] == 0.66
+
+    def test_ecoagent_tool_error_payload_and_missing_registry(
+        self, world, replay, monkeypatch
+    ):
+        import types
+
+        class ErrRegistry:
+            def dispatch(self, name, args, **kw):
+                return {"error": f"Unknown tool: {name}"}
+
+        reg_mod = types.ModuleType("tools.registry")
+        reg_mod.registry = ErrRegistry()
+        monkeypatch.setitem(sys.modules, "tools.registry", reg_mod)
+        aid = _pipeline(world)["artifact_id"]
+        r = replay.replay(aid)
+        assert r["exit_code"] == 1 and "Unknown tool" in r["stderr_tail"]
+
+        # no registry at all → exit 2
+        monkeypatch.setitem(sys.modules, "tools", None)
+        monkeypatch.delitem(sys.modules, "tools.registry", raising=False)
+        aid2 = world.fork(aid, edits={"name": "sdm-v2"})["artifact_id"]
+        r = replay.replay(aid2)
+        assert r["exit_code"] == 2 and "tools.registry" in r["stderr_tail"]
