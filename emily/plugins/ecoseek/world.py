@@ -34,12 +34,17 @@ import os
 import sqlite3
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 
 try:
     from . import world_trace
 except ImportError:  # top-level import in tests
     import world_trace  # type: ignore[no-redef]
+
+try:
+    import fcntl
+except ImportError:  # non-POSIX: degrade to the in-process lock only
+    fcntl = None
 
 logger = logging.getLogger(__name__)
 
@@ -118,19 +123,65 @@ CREATE VIRTUAL TABLE IF NOT EXISTS world_fts USING fts5(
 """
 
 
+# ---------------------------------------------------------------------------
+# Multi-agent write locking
+#
+# N processes may share one world dir (agents on one host, sync pulls racing
+# local writes). SQLite is single-writer: WAL keeps readers lock-free, and a
+# flock on `world.lock` serializes the whole write critical section — DB txn
+# AND events.jsonl append together, so commit order equals replication order.
+# busy_timeout covers writers that bypass the flock (sqlite3 CLI, raw sync).
+# Scope: same-host only — cross-node replication goes through world_sync.
+# ---------------------------------------------------------------------------
+
+_proc_write_lock = threading.Lock()
+_LOCK_DEADLINE_S = 10.0
+
+
 @contextmanager
-def _connect():
+def _write_lock():
+    """Exclusive cross-process write lock (advisory flock on world.lock)."""
+    with _proc_write_lock:
+        if fcntl is None:
+            yield
+            return
+        os.makedirs(_world_dir(), exist_ok=True)
+        deadline = time.time() + _LOCK_DEADLINE_S
+        with open(os.path.join(_world_dir(), "world.lock"), "a") as fh:
+            while True:
+                try:
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    if time.time() >= deadline:
+                        raise TimeoutError(
+                            "world write lock held >10s — another agent is "
+                            "mid-write; retry the operation"
+                        )
+                    time.sleep(0.05)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def _connect(write: bool = False):
     os.makedirs(_world_dir(), exist_ok=True)
     if not hasattr(_local, "conn") or _local.conn is None:
         _local.conn = sqlite3.connect(_db_path())
         _local.conn.row_factory = sqlite3.Row
         _local.conn.executescript(_SCHEMA)
-    try:
-        yield _local.conn
-        _local.conn.commit()
-    except Exception:
-        _local.conn.rollback()
-        raise
+        _local.conn.execute("PRAGMA journal_mode=WAL")
+        _local.conn.execute("PRAGMA busy_timeout=5000")
+    lock = _write_lock() if write else nullcontext()
+    with lock:
+        try:
+            yield _local.conn
+            _local.conn.commit()
+        except Exception:
+            _local.conn.rollback()
+            raise
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +354,7 @@ def propose(
     aid = _artifact_id(name, artifact_type, spec, executable, evidence)
     now = time.time()
 
-    with _connect() as conn:
+    with _connect(write=True) as conn:
         existing = conn.execute(
             "SELECT id, status FROM artifacts WHERE id = ?", (aid,)
         ).fetchone()
@@ -365,7 +416,7 @@ def record_event(
 ) -> dict:
     """Append an event to an artifact's history and apply the status machine."""
     payload = payload or {}
-    with _connect() as conn:
+    with _connect(write=True) as conn:
         try:
             new_status = _apply_transition(
                 conn, artifact_id, kind, payload, agent or _agent_id()
@@ -425,7 +476,7 @@ def fork(
         return child
 
     child_id = child["artifact_id"]
-    with _connect() as conn:
+    with _connect(write=True) as conn:
         conn.execute(
             "UPDATE artifacts SET parents = ? WHERE id = ?",
             (json.dumps([artifact_id]), child_id),
@@ -761,7 +812,7 @@ def import_artifact(artifact: dict, events: list | None = None) -> dict:
     aid = artifact.get("id")
     if not aid:
         return {"success": False, "error": "artifact missing id"}
-    with _connect() as conn:
+    with _connect(write=True) as conn:
         exists = conn.execute("SELECT 1 FROM artifacts WHERE id = ?", (aid,)).fetchone()
         if exists:
             outcome = _merge_artifact_row(conn, artifact)

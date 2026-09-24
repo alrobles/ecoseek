@@ -48,10 +48,12 @@ def export_state() -> dict:
         rows = conn.execute("SELECT * FROM artifacts ORDER BY id").fetchall()
         artifacts = [world._row_to_artifact(r) for r in rows]
     path = os.path.join(d, "artifacts.jsonl")
-    with open(path, "w", encoding="utf-8") as fh:
+    tmp = f"{path}.tmp{os.getpid()}"
+    with open(tmp, "w", encoding="utf-8") as fh:
         for a in artifacts:
             a = {k: v for k, v in a.items() if k != "events"}
             fh.write(json.dumps(a, ensure_ascii=False, sort_keys=True) + "\n")
+    os.replace(tmp, path)  # atomic — peers never read a half-written snapshot
     # a world with zero events still exports an (empty) replication log
     open(os.path.join(d, "events.jsonl"), "a", encoding="utf-8").close()
     return {"success": True, "path": path, "count": len(artifacts)}
@@ -73,10 +75,14 @@ def _read_jsonl(path: str) -> list:
 
 
 def _write_jsonl(path: str, rows: list) -> None:
-    with open(path, "w", encoding="utf-8") as fh:
+    """Atomic rewrite via temp+rename — a mid-pull peer never sees a
+    half-written replication file."""
+    tmp = f"{path}.tmp{os.getpid()}"
+    with open(tmp, "w", encoding="utf-8") as fh:
         fh.writelines(
             json.dumps(r, ensure_ascii=False, sort_keys=True) + "\n" for r in rows
         )
+    os.replace(tmp, path)
 
 
 def _merge_event_files(local_path: str, remote_events: list) -> int:
@@ -121,17 +127,24 @@ def import_state(state_dir: str) -> dict:
         else:
             kept += 1
 
-    # events for artifacts we already had locally but whose event lines are new
-    with world._connect() as conn:
-        known = {r["id"] for r in conn.execute("SELECT id FROM artifacts").fetchall()}
-        for aid, evs in by_artifact.items():
-            if aid in known and aid not in incoming_ids:
-                for ev in evs:
-                    if world._insert_event_dedup(conn, aid, ev):
-                        events_inserted += 1
+    # events for artifacts we already had locally but whose event lines are
+    # new — one lock for the dedup inserts + the jsonl union rewrite, so a
+    # concurrent local append can't interleave and get lost.
+    with world._write_lock():
+        with world._connect() as conn:
+            known = {
+                r["id"] for r in conn.execute("SELECT id FROM artifacts").fetchall()
+            }
+            for aid, evs in by_artifact.items():
+                if aid in known and aid not in incoming_ids:
+                    for ev in evs:
+                        if world._insert_event_dedup(conn, aid, ev):
+                            events_inserted += 1
 
-    # mirror the union into local events.jsonl (replication unit)
-    added_lines = _merge_event_files(os.path.join(_world_dir(), "events.jsonl"), events)
+        # mirror the union into local events.jsonl (replication unit)
+        added_lines = _merge_event_files(
+            os.path.join(_world_dir(), "events.jsonl"), events
+        )
     return {
         "success": True,
         "artifacts_merged": merged,
