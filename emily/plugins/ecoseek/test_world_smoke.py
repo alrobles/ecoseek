@@ -600,3 +600,80 @@ class TestPromptSection:
         text = world.prompt_section(None)
         assert "0 artifact(s), 0 validated" in text
         assert "## EcoSeek World" in text
+
+
+class TestWorldTrace:
+    """Phoenix span export — fire-and-forget, never blocks world ops."""
+
+    @pytest.fixture()
+    def spans(self, monkeypatch):
+        captured = []
+        import world_trace
+
+        monkeypatch.setattr(
+            world_trace, "_post", lambda span: captured.append(span) or True
+        )
+        yield captured
+
+    def test_event_span_emitted(self, world, spans):
+        aid = _pipeline(world)["artifact_id"]
+        assert spans, "propose should emit an event span"
+        span = spans[-1]
+        assert span["name"] == "ecoseek.world.event"
+        assert span["status"] == "OK"
+        attrs = span["attributes"]
+        assert attrs["ecoseek.world.kind"] == "propose"
+        assert attrs["ecoseek.world.artifact_id"] == aid
+        assert attrs["ecoseek.world.agent"] == "emily"
+
+    def test_replay_span_with_result_attrs(self, world, spans, monkeypatch):
+        monkeypatch.setenv("ECOSEEK_WORLD_REPLAY_EXEC", "1")
+        aid = world.propose(
+            name="noop-pipe",
+            artifact_type="pipeline",
+            executable={"kind": "shell", "ref": "true"},
+        )["artifact_id"]
+        world.record_event(aid, "install")
+        import world_replay
+
+        rep = world_replay.replay(aid)
+        assert rep["success"]
+        rspan = [s for s in spans if s["name"] == "ecoseek.world.replay"][-1]
+        assert rspan["status"] == "OK"
+        assert rspan["attributes"]["ecoseek.world.exit_code"] == 0
+        assert rspan["attributes"]["ecoseek.world.run_id"] == rep["run_id"]
+
+    def test_error_status_on_exception(self, world, spans):
+        import world_trace
+
+        with pytest.raises(ValueError), world_trace.span("boom"):
+            raise ValueError("x")
+        assert spans[-1]["status"] == "ERROR"
+        assert spans[-1]["name"] == "ecoseek.world.boom"
+
+    def test_disabled_env_suppresses(self, world, monkeypatch):
+        import world_trace
+
+        calls = []
+        monkeypatch.setattr(world_trace, "_post", lambda s: calls.append(s) or True)
+        monkeypatch.setenv("ECOSEEK_WORLD_TRACE", "0")
+        _pipeline(world)
+        assert calls == []
+
+    def test_endpoint_down_still_works(self, world, monkeypatch):
+        # No mock: real urlopen to a closed port must not break world ops.
+        monkeypatch.setenv("PHOENIX_ENDPOINT", "http://127.0.0.1:1")
+        import world_trace
+
+        monkeypatch.setattr(world_trace, "_ENDPOINT", "http://127.0.0.1:1")
+        aid = _pipeline(world)["artifact_id"]
+        assert world.get(aid)["success"]
+
+    def test_sync_span(self, world, sync, spans, tmp_path):
+        peer = tmp_path / "peer"
+        peer.mkdir()
+        r = sync.sync(transport="file", peer=str(peer))
+        assert r["success"]
+        sspan = [s for s in spans if s["name"] == "ecoseek.world.sync"][-1]
+        assert sspan["attributes"]["ecoseek.world.transport"] == "file"
+        assert sspan["attributes"]["ecoseek.world.success"] is True

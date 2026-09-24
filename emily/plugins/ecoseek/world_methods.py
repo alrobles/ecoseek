@@ -17,9 +17,10 @@ import json
 import time
 
 try:
-    from . import world
+    from . import world, world_trace
 except ImportError:  # top-level import in tests
     import world
+    import world_trace
 
 
 def _ts(ts: float) -> str:
@@ -80,6 +81,17 @@ def render_methods(
     ``methods_section`` artifact (content-addressed; re-rendering the same
     world state is a no-op that returns the existing id).
     """
+    with world_trace.span("methods", artifact_id=artifact_id) as _attrs:
+        result = _render(artifact_id, register=register, author=author, task_id=task_id)
+    return result
+
+
+def _render(
+    artifact_id: str,
+    register: bool = True,
+    author: str | None = None,
+    task_id: str = "",
+) -> dict:
     rec = world.get(artifact_id)
     if not rec.get("success"):
         return rec

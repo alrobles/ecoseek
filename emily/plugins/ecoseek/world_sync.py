@@ -28,9 +28,10 @@ import subprocess
 import tempfile
 
 try:
-    from . import world
+    from . import world, world_trace
 except ImportError:  # top-level import in tests
     import world
+    import world_trace
 
 _STATE_FILES = ("artifacts.jsonl", "events.jsonl")
 
@@ -303,10 +304,16 @@ def sync(peer: str = "", transport: str = "", **kwargs) -> dict:
             transport = "git"
         else:
             transport = "file"
-    if transport == "ssh":
-        return sync_ssh(peer.removeprefix("ssh:"))
-    if transport == "git":
-        return sync_git(
-            remote=kwargs.get("remote", "origin"), branch=kwargs.get("branch", "main")
-        )
-    return sync_file(peer)
+    with world_trace.span("sync", transport=transport, peer=peer) as attrs:
+        if transport == "ssh":
+            result = sync_ssh(peer.removeprefix("ssh:"))
+        elif transport == "git":
+            result = sync_git(
+                remote=kwargs.get("remote", "origin"),
+                branch=kwargs.get("branch", "main"),
+            )
+        else:
+            result = sync_file(peer)
+        attrs["merged"] = result.get("artifacts_merged", 0)
+        attrs["success"] = result.get("success", False)
+    return result

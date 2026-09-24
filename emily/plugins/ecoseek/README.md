@@ -23,6 +23,8 @@ Emily (Alpha, local) ↔ Hermes (Beta, remote on reumanlab) via `hermes.ecoseek.
 | `world_sync` | Federate world state — merge `artifacts.jsonl` + `events.jsonl` with a peer (file path, `ssh:host:path`, or git remote); status-precedence merge, event dedup |
 
 The plugin also registers a frozen system-prompt section (`ecoseek.world_stigmergy`) that injects the stigmergic policy — `world_query` before expensive work, `observe` on reuse, promote only via `world_replay` — plus live world stats at session start (prompt-caching safe: rendered once, byte-stable for the session).
+
+**Phoenix tracing** (`world_trace.py`): every world event emits an `ecoseek.world.event` span; `replay`, `sync`, and `methods` emit timed spans with result attributes (run_id, exit_code, transport, merged counts). Fire-and-forget POST to `PHOENIX_ENDPOINT` (default `http://localhost:6006`, `/v1/spans`); `PHOENIX_API_KEY` optional bearer; `ECOSEEK_WORLD_TRACE=0` disables. Tracing never blocks or fails a world operation — Phoenix down ⇒ debug log, keep going.
 | `hermes_status` | Check if Hermes Beta is available |
 | `escalate_remote` | One-shot delegation to Beta (execution tasks) |
 | `dialectical_exchange` | Legacy DiDAL exchange (iterative execution tasks) |

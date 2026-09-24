@@ -36,6 +36,11 @@ import threading
 import time
 from contextlib import contextmanager
 
+try:
+    from . import world_trace
+except ImportError:  # top-level import in tests
+    import world_trace  # type: ignore[no-redef]
+
 logger = logging.getLogger(__name__)
 
 _EVENT_KINDS = (
@@ -173,6 +178,13 @@ def _emit(
         ),
     )
     _append_jsonl(event)
+    world_trace.emit(
+        "event",
+        kind=kind,
+        artifact_id=artifact_id,
+        agent=event["agent"],
+        task_id=task_id,
+    )
     return event
 
 
