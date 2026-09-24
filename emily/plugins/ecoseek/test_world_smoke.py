@@ -148,7 +148,8 @@ class TestProvenance:
         _pipeline(world)
         path = os.path.join(world._world_dir(), "events.jsonl")
         assert os.path.exists(path)
-        lines = [json.loads(l) for l in open(path) if l.strip()]
+        with open(path) as f:
+            lines = [json.loads(l) for l in f if l.strip()]
         assert lines[0]["kind"] == "propose" and lines[0]["agent"] == "emily"
 
 
