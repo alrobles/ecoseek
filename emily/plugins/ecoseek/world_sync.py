@@ -180,7 +180,9 @@ def sync_ssh(target: str) -> dict:
         )
         pulled = [f for f in _STATE_FILES if os.path.exists(os.path.join(tmp, f))]
         # empty pull = fresh replica (bootstrap) — push-only
-        result = import_state(tmp) if pulled else {"artifacts_merged": 0, "events_new": 0}
+        result = (
+            import_state(tmp) if pulled else {"artifacts_merged": 0, "events_new": 0}
+        )
         result["bootstrapped"] = not pulled
         # ensure remote dir exists, then push the merged snapshot back —
         # peer converges on its next import
