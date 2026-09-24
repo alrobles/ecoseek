@@ -21,6 +21,7 @@ Provides tools for the dual-agent architecture (Alpha↔Beta):
   ``world_lineage``          — ancestors/descendants inheritance graph
   ``world_stats``            — portfolio metrics (SwarmWorld endpoints)
   ``world_replay``           — frozen agent-free replay + validation evidence
+  ``world_methods``          — render a Methods section from provenance edges
 
 Emily (Alpha, local) uses these tools to delegate heavy computation to
 Hermes (Beta, remote) on reumanlab.  Communication goes directly to
@@ -1850,6 +1851,29 @@ WORLD_REPLAY_SCHEMA = {
     },
 }
 
+WORLD_METHODS_SCHEMA = {
+    "name": "world_methods",
+    "description": (
+        "Render a publication-grade Methods section from an artifact's "
+        "recorded provenance — lineage ancestors (data pins, pipelines, "
+        "models), spec parameters, and frozen-replay validation evidence. "
+        "Deterministic (zero LLM): same world state ⇒ identical text. "
+        "The section is itself registered as a methods_section artifact "
+        "linked to its sources."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "artifact_id": {"type": "string"},
+            "register": {
+                "type": "boolean",
+                "description": "Register the rendered section as a methods_section artifact (default true).",
+            },
+        },
+        "required": ["artifact_id"],
+    },
+}
+
 
 def world_query_tool(
     query: str = "",
@@ -1987,6 +2011,21 @@ def world_replay_tool(
     return json.dumps(result, ensure_ascii=False)
 
 
+def world_methods_tool(
+    artifact_id: str,
+    register: bool = True,
+    task_id: str | None = None,
+) -> str:
+    from . import world_methods
+
+    return json.dumps(
+        world_methods.render_methods(
+            artifact_id, register=register, task_id=task_id or ""
+        ),
+        ensure_ascii=False,
+    )
+
+
 _WORLD_TOOL_REGISTRATIONS = [
     (
         "world_query",
@@ -2051,11 +2090,17 @@ _WORLD_TOOL_REGISTRATIONS = [
             "validate": "validate",
         },
     ),
+    (
+        "world_methods",
+        WORLD_METHODS_SCHEMA,
+        world_methods_tool,
+        {"artifact_id": "artifact_id", "register": "register"},
+    ),
 ]
 
 
 def _register_world_tools(register_fn, **register_kwargs) -> None:
-    """Register the 9 world_* tools via either ctx.register_tool or the
+    """Register the 10 world_* tools via either ctx.register_tool or the
     legacy tools.registry.register signature."""
     for name, schema, handler, arg_map in _WORLD_TOOL_REGISTRATIONS:
 

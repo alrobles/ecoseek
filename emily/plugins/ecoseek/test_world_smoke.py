@@ -353,3 +353,99 @@ with open(os.environ["REPLAY_METRICS_PATH"], "w") as f:
         aid2 = world.fork(aid, edits={"name": "sdm-v2"})["artifact_id"]
         r = replay.replay(aid2)
         assert r["exit_code"] == 2 and "tools.registry" in r["stderr_tail"]
+
+
+@pytest.fixture()
+def methods(world):
+    import world_methods as wm
+
+    return wm
+
+
+def _validated_pipeline(world):
+    aid = _pipeline(world)["artifact_id"]
+    world.record_event(aid, "test", {"metrics": {"tss": 0.71}})
+    world.record_event(aid, "install")
+    world.validate(
+        aid,
+        {"tss": 0.68, "auc": 0.91},
+        {"run_id": "run-abc", "exit_code": 0, "holdout": {"name": "block-cv"}},
+    )
+    return aid
+
+
+class TestMethods:
+    def test_render_validated_sections(self, world, methods):
+        aid = _validated_pipeline(world)
+        r = methods.render_methods(aid)
+        assert r["success"] and r["validated"] and r["registered"]
+        t = r["methods_text"]
+        assert "## Methods" in t
+        assert "**Workflow.**" in t and "sdm-maxent-gbif" in t
+        assert "**Validation.**" in t and "run-abc" in t and "block-cv" in t
+        assert "tss=0.68" in t and "auc=0.91" in t
+        assert "**Reproducibility.**" in t
+        # the section itself became a methods_section artifact
+        art = world.get(r["artifact_id"])["artifact"]
+        assert art["type"] == "methods_section"
+        assert aid in art["evidence"] and aid in art["spec"]["sources"]
+
+    def test_lineage_sources_included(self, world, methods):
+        world.propose(
+            name="gbif-pin",
+            artifact_type="dataset_pin",
+            spec={"source": "gbif", "n_records": 4211},
+        )["artifact_id"]
+        parent = _pipeline(world)["artifact_id"]
+        child = world.fork(parent, edits={"name": "sdm-v2"})["artifact_id"]
+        r = methods.render_methods(child, register=False)
+        assert r["sources"][0] == parent and r["sources"][-1] == child
+        assert "sdm-maxent-gbif" in r["methods_text"]
+        assert not r["registered"]
+
+    def test_evidence_linked_pin_rendered(self, world, methods):
+        """dataset_pin cited via evidence[] joins the Data paragraph."""
+        pin = world.propose(
+            name="gbif-quercus-pin",
+            artifact_type="dataset_pin",
+            spec={"source": "gbif", "n_records": 4211},
+        )["artifact_id"]
+        r = world.propose(
+            name="sdm-pin-cited",
+            artifact_type="pipeline",
+            evidence=[pin],
+        )
+        out = methods.render_methods(r["artifact_id"], register=False)
+        assert "**Data.**" in out["methods_text"]
+        assert "gbif-quercus-pin" in out["methods_text"]
+        assert pin in out["sources"]
+
+    def test_data_pin_paragraph(self, world, methods):
+        pin = world.propose(
+            name="gbif-pin",
+            artifact_type="dataset_pin",
+            spec={"source": "gbif", "n_records": 4211},
+        )["artifact_id"]
+        r = methods.render_methods(pin, register=False)
+        assert "**Data.**" in r["methods_text"]
+        assert "n_records=4211" in r["methods_text"]
+
+    def test_unvalidated_marks_not_validated(self, world, methods):
+        aid = _pipeline(world)["artifact_id"]
+        world.record_event(aid, "test", {"metrics": {"tss": 0.71}})
+        r = methods.render_methods(aid, register=False)
+        assert r["validated"] is False
+        assert "not yet validated by replay" in r["methods_text"]
+        assert "**Validation.**" not in r["methods_text"]
+
+    def test_deterministic_and_idempotent(self, world, methods):
+        aid = _validated_pipeline(world)
+        r1 = methods.render_methods(aid)
+        r2 = methods.render_methods(aid)
+        assert r1["methods_text"] == r2["methods_text"]
+        assert r1["artifact_id"] == r2["artifact_id"]
+        assert r2.get("idempotent")
+
+    def test_missing_artifact(self, world, methods):
+        r = methods.render_methods("deadbeef")
+        assert not r["success"]
