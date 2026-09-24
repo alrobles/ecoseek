@@ -29,7 +29,9 @@ if ARCEE_KEY:
             "arcee",
             {
                 "url": "https://api.arcee.ai/api/v1/chat/completions",
-                "model": os.environ.get("ARCEE_MODEL", "thinkingmachines/inkling-small"),
+                "model": os.environ.get(
+                    "ARCEE_MODEL", "thinkingmachines/inkling-small"
+                ),
                 "key": ARCEE_KEY,
                 "type": "openai",
             },
