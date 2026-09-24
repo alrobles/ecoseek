@@ -22,6 +22,7 @@ Provides tools for the dual-agent architecture (Alpha↔Beta):
   ``world_stats``            — portfolio metrics (SwarmWorld endpoints)
   ``world_replay``           — frozen agent-free replay + validation evidence
   ``world_methods``          — render a Methods section from provenance edges
+  ``world_sync``             — federate world state (events.jsonl + artifacts.jsonl)
 
 Emily (Alpha, local) uses these tools to delegate heavy computation to
 Hermes (Beta, remote) on reumanlab.  Communication goes directly to
@@ -1874,6 +1875,37 @@ WORLD_METHODS_SCHEMA = {
     },
 }
 
+WORLD_SYNC_SCHEMA = {
+    "name": "world_sync",
+    "description": (
+        "Federate world state with a peer — merges artifacts.jsonl + "
+        "events.jsonl (the replication unit) bidirectionally. Deterministic "
+        "merge: artifacts by content-id with status precedence (never a "
+        "downgrade); events by natural-key dedup. Transports: file (peer "
+        "world dir path), ssh:<user@host:path> (scp pull+push over the "
+        "mesh), or git (world dir is a repo — pull/merge/push)."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "peer": {
+                "type": "string",
+                "description": (
+                    "Peer spec: '/path/to/world' | 'ssh:user@host:path' | "
+                    "'user@host:path' | 'git' (uses world dir repo)."
+                ),
+            },
+            "transport": {
+                "type": "string",
+                "enum": ["file", "ssh", "git"],
+                "description": "Force a transport (default: inferred from peer).",
+            },
+            "remote": {"type": "string", "description": "git remote (default origin)."},
+            "branch": {"type": "string", "description": "git branch (default main)."},
+        },
+    },
+}
+
 
 def world_query_tool(
     query: str = "",
@@ -2026,6 +2058,26 @@ def world_methods_tool(
     )
 
 
+def world_sync_tool(
+    peer: str = "",
+    transport: str = "",
+    remote: str = "",
+    branch: str = "",
+    task_id: str | None = None,
+) -> str:
+    from . import world_sync
+
+    kwargs = {}
+    if remote:
+        kwargs["remote"] = remote
+    if branch:
+        kwargs["branch"] = branch
+    return json.dumps(
+        world_sync.sync(peer=peer, transport=transport, **kwargs),
+        ensure_ascii=False,
+    )
+
+
 _WORLD_TOOL_REGISTRATIONS = [
     (
         "world_query",
@@ -2096,11 +2148,22 @@ _WORLD_TOOL_REGISTRATIONS = [
         world_methods_tool,
         {"artifact_id": "artifact_id", "register": "register"},
     ),
+    (
+        "world_sync",
+        WORLD_SYNC_SCHEMA,
+        world_sync_tool,
+        {
+            "peer": "peer",
+            "transport": "transport",
+            "remote": "remote",
+            "branch": "branch",
+        },
+    ),
 ]
 
 
 def _register_world_tools(register_fn, **register_kwargs) -> None:
-    """Register the 10 world_* tools via either ctx.register_tool or the
+    """Register the 11 world_* tools via either ctx.register_tool or the
     legacy tools.registry.register signature."""
     for name, schema, handler, arg_map in _WORLD_TOOL_REGISTRATIONS:
 
