@@ -250,7 +250,7 @@ def _apply_transition(
     return new
 
 
-def _row_to_artifact(row: sqlite.Row) -> dict:
+def _row_to_artifact(row: sqlite3.Row) -> dict:
     d = dict(row)
     for key in ("spec", "executable", "metrics"):
         d[key] = json.loads(d.get(key) or "{}")
