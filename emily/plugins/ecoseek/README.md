@@ -71,7 +71,7 @@ Open Questions
 
 ```bash
 # Pass your Hermes API key when starting Emily:
-HERMES_ECOSEEK_API_KEY=agenticplu... DEEPSEEK_API_KEY=sk-... bash emily-start.sh
+HERMES_ECOSEEK_API_KEY=agenticplu... ARCEE_API_KEY=sk-... bash emily-start.sh
 ```
 
 ## Configuration
@@ -108,7 +108,7 @@ User → localhost:4000 (frontend)
                    → hermes.ecoseek.org (Hermes/Beta on reumanlab)
                         → eco_analyze (GBIF, SDM, diversity, taxonomy)
                         → ku_hpc (Slurm → A100/MI210 GPUs)
-                        → shell, GitHub CLI, DeepSeek v4 Pro
+                        → shell, GitHub CLI, Trinity Large Thinking (Arcee)
 ```
 
 ## Literature Retrieval Sources
@@ -174,9 +174,9 @@ Stats from `policy_signals` table can tune classifier thresholds, round limits, 
 
 The frontend provides a 3-way toggle that controls how Emily processes questions:
 
-| Mode | Frontend Label | Behavior | DeepSeek Cost |
+| Mode | Frontend Label | Behavior | Cost |
 |------|---------------|----------|---------------|
-| ⚡ **Fast** (Rápido) | `fast` | Skips DiDAL → direct single-call answer | Cheapest ($0.14/M in, $0.28/M out) |
+| ⚡ **Fast** (Rápido) | `fast` | Skips DiDAL → direct single-call answer | Cheapest |
 | 🔄 **Auto** | `auto` | Classifier decides (default) | Varies by complexity |
 | 🧠 **Deep** (Profundo) | `deep` | Forces full DiDAL protocol + literature retrieval | Standard cost, deeper reasoning |
 
@@ -188,16 +188,13 @@ The frontend provides a 3-way toggle that controls how Emily processes questions
    - `fast` → `direct` mode (skip dialectical loop)
    - `deep` → `didal_literature` mode (full protocol + evidence retrieval)
    - `auto` → classifier decides based on prompt complexity score
-4. The `reasoning_effort` parameter is also passed in the API body for DeepSeek V4 thinking mode hints
+4. `reasoning_effort` is NOT forwarded raw — trinity-large-thinking always thinks (Hermes handles this internally)
 
-### DeepSeek V4 Pricing Reference
+### Provider note
 
-| Model | Input | Output | Cache Hit |
-|-------|-------|--------|-----------|
-| `deepseek-v4-flash` | $0.14/M | $0.28/M | $0.0028/M |
-| `deepseek-v4-pro` | $0.435/M | $0.87/M | $0.003625/M |
-
-Both support thinking mode toggle (`thinking: {type: "enabled/disabled"}`).
+Emily's remote escalation runs on Trinity Large Thinking via Arcee AI.
+DeepSeek/Qwen/MiMo and other Chinese AI providers are banned (see
+`docs/search-providers.md`) — DeepSeek pricing references were removed.
 
 ## Literature Database (litdb)
 
@@ -226,36 +223,17 @@ store_paper(doi="10.1234/test", title="...", provider="openalex")
 stats = get_stats()  # {'total_papers': 42, 'by_provider': {...}, ...}
 ```
 
-## EcoCoder-7B Integration
+## EcoCoder-7B Integration — ⚠️ non-compliant model
 
-[EcoCoder-7B](https://huggingface.co/alrobles/EcoCoder-7B) is a domain-specialized ecological LLM (Qwen2.5-Coder-7B-Instruct + ecological LoRA, GGUF Q4_K_M).
+[EcoCoder-7B](https://huggingface.co/alrobles/EcoCoder-7B) is a domain-specialized ecological LLM — **but it is a Qwen2.5-Coder fine-tune, which is banned under the no-Chinese-AI policy** (`docs/search-providers.md`). Do not deploy it on lab infrastructure; it is retained for history until a compliant-base retrain lands (see ecocoder repo).
 
-> ⚠️ **~4.5 GB download.** Compatible with LM Studio and Ollama.
+> ⚠️ **~4.5 GB download.** Non-compliant — do not run in the EcoSeek stack.
 
-### Using with Emily
+### Benchmarking EcoCoder vs DeepSeek — DEPRECATED
 
-```bash
-# Via LM Studio (load the model, start server on default port):
-ECOCODER_URL=http://localhost:1234/v1 \
-DEEPSEEK_API_KEY=sk-... bash emily-start.sh
-
-# Via Ollama:
-ollama run hf.co/alrobles/EcoCoder-7B
-ECOCODER_URL=http://localhost:11434/v1 \
-ECOCODER_MODEL=hf.co/alrobles/EcoCoder-7B bash emily-start.sh
-```
-
-### Benchmarking EcoCoder vs DeepSeek
-
-```bash
-# Compare both models on 8 ecological prompts:
-ECOCODER_URL=http://localhost:1234/v1 DEEPSEEK_API_KEY=sk-... \
-python3 benchmarks/ecocoder_vs_deepseek.py
-
-# Results saved to benchmarks/results/
-```
-
-See `benchmarks/README.md` for full usage.
+`benchmarks/ecocoder_vs_deepseek.py` compares two models that are both
+non-compliant under the policy. See `benchmarks/README.md` for details and
+the compliant-comparator path.
 
 ## Benchmark Prompts
 

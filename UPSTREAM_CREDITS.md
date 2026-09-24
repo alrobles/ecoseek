@@ -31,5 +31,5 @@ EcoSeek is **not** affiliated with, endorsed by, or maintained by the AgenticSee
 
 ## Other referenced projects
 
-- **DeepSeek** — optional BYOK provider for stronger low-cost reasoning. EcoSeek does not embed DeepSeek code; it integrates with the DeepSeek API when the user supplies their own key. Not affiliated with DeepSeek.
+- **DeepSeek** — *historical*: was the BYOK example provider. EcoSeek does not embed DeepSeek code. **Banned under the no-Chinese-AI policy** — BYOK now targets compliant providers. Not affiliated with DeepSeek.
 - Local model runtimes and libraries used by the AgenticSeek fork will be credited in their respective module-level NOTICE entries as code lands in this repository.

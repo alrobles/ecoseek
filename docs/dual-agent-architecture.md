@@ -10,7 +10,7 @@ remote agent on reumanlab.
 User's Machine                              reumanlab (remote)
 ┌──────────────┐                           ┌──────────────────┐
 │  Frontend    │                           │  Hermes Remote   │
-│  (React SPA) │                           │  (DeepSeek v4)   │
+│  (React SPA) │                           │ (Trinity/Arcee)  │
 │  :4000       │                           │  :8642           │
 └──────┬───────┘                           │  + ku-hpc tool   │
        │                                   │  + HPC cluster   │
@@ -20,7 +20,7 @@ User's Machine                              reumanlab (remote)
 │  (Hermes)    │  POST broker.ecoseek.org           │
 │  :8642       │  /v1/chat/completions              │
 │  + Ollama or │ ◄──────────────────────────────────┘
-│    DeepSeek  │       response
+│    Arcee     │       response
 │  + ecoseek   │
 │    toolset   │
 └──────────────┘
@@ -33,10 +33,10 @@ User's Machine                              reumanlab (remote)
 **What:** A local `hermes-agent` (from `alrobles/hermes-agent` fork) running
 with a lightweight LLM.
 
-**LLM options (user's choice):**
-- **Ollama local**: `qwen2.5:14b-instruct-q4_K_M` (GPU) or `qwen2.5:1.5b` (CPU)
-- **DeepSeek API (BYOK)**: User provides their own DeepSeek API key
-- **HPC Ollama**: Tunnel to KU HPC GPU node via `ku-hpc` + SSH tunnel
+**LLM options (user's choice — non-Chinese models only, policy):**
+- **Ollama local**: Llama-family or Mistral/Gemma (e.g. `llama3.1:8b`); Qwen models are banned
+- **Cloud API (BYOK)**: User-provided key for a compliant provider (Arcee, OpenAI, etc. — DeepSeek banned)
+- **HPC Ollama**: Tunnel to KU HPC GPU node via `ku-hpc` + SSH tunnel (Llama-family models)
 
 **Configuration** (`~/.hermes/config.yaml`):
 ```yaml
@@ -77,7 +77,7 @@ tools:
 ### 2. Hermes Remote (existing, on reumanlab)
 
 **What:** The existing Hermes instance already running on reumanlab with
-DeepSeek v4 Pro, `ku-hpc` access, and full tool capabilities.
+Trinity Large Thinking via Arcee AI, `ku-hpc` access, and full tool capabilities.
 
 **No changes needed** — it already:
 - Runs on port 8642
@@ -234,7 +234,7 @@ Emily decides whether to respond locally or escalate to the remote.
 
 ## Advantages
 
-1. **Cost**: Most queries handled by free local LLM, only complex tasks use DeepSeek API
+1. **Cost**: Most queries handled by free local LLM, only complex tasks escalate to the remote (Arcee/OpenRouter)
 2. **Speed**: Local responses are instant, no network latency for simple queries
 3. **Privacy**: User data stays local unless explicitly escalated
 4. **Resilience**: Works offline for basic ecological Q&A

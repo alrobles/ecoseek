@@ -15,7 +15,7 @@ EcoSeek is built on forks of two upstream projects. This document tracks the for
 
 ### Our modifications (on top of upstream)
 
-- **DeepSeek BYOK provider** — Fernet-encrypted local keystore for API keys
+- **BYOK provider keystore** — Fernet-encrypted local keystore for API keys (non-Chinese providers only — policy)
 - **EcoCoder local/cluster providers** — domain-specialized ecological LLM integration
 - **AgenticPlug connector discovery** — runtime service registration
 - **Sandbox security hardening** — save_block jail, entrypoint safety, TruffleHog pre-commit
