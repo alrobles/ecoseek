@@ -50,6 +50,11 @@ try:
 except ImportError:  # standalone import (tests load the dir via sys.path)
     import world  # type: ignore[no-redef]
 
+try:
+    from . import world_trace
+except ImportError:  # standalone import (tests load the dir via sys.path)
+    import world_trace  # type: ignore[no-redef]
+
 logger = logging.getLogger(__name__)
 
 _GATED_KINDS = ("shell", "r_script", "slurm_job")
@@ -232,37 +237,46 @@ def replay(
     env = _frozen_env(run_dir, holdout)
 
     started = time.time()
-    if kind == "ecoagent_tool":
-        exit_code, out, err = _dispatch_ecoagent_tool(exe.get("ref"), args)
-        display = f"ecoagent_tool:{exe.get('ref')}"
-    else:
-        argv, display = _build_command(kind, exe, args, env)
-        if argv is None:
-            return {"success": False, "error": display}
-        out = err = ""
-        try:
-            proc = subprocess.run(
-                argv,
-                check=False,
-                capture_output=True,
-                timeout=timeout_s,
-                env=env,
-                cwd=work_dir,
-                text=True,
-                errors="replace",
-            )
-            exit_code, out, err = proc.returncode, proc.stdout or "", proc.stderr or ""
-        except subprocess.TimeoutExpired as exc:
-            exit_code = 124
-            out = (
-                exc.stdout.decode("utf-8", "replace")
-                if isinstance(exc.stdout, bytes)
-                else (exc.stdout or "")
-            )
-            err = f"[timeout after {timeout_s}s]"
-        except OSError as exc:
-            exit_code = 127
-            err = f"spawn failed: {exc}"
+    with world_trace.span(
+        "replay", artifact_id=artifact_id, kind=kind, holdout=holdout_name
+    ) as attrs:
+        if kind == "ecoagent_tool":
+            exit_code, out, err = _dispatch_ecoagent_tool(exe.get("ref"), args)
+            display = f"ecoagent_tool:{exe.get('ref')}"
+        else:
+            argv, display = _build_command(kind, exe, args, env)
+            if argv is None:
+                return {"success": False, "error": display}
+            out = err = ""
+            try:
+                proc = subprocess.run(
+                    argv,
+                    check=False,
+                    capture_output=True,
+                    timeout=timeout_s,
+                    env=env,
+                    cwd=work_dir,
+                    text=True,
+                    errors="replace",
+                )
+                exit_code, out, err = (
+                    proc.returncode,
+                    proc.stdout or "",
+                    proc.stderr or "",
+                )
+            except subprocess.TimeoutExpired as exc:
+                exit_code = 124
+                out = (
+                    exc.stdout.decode("utf-8", "replace")
+                    if isinstance(exc.stdout, bytes)
+                    else (exc.stdout or "")
+                )
+                err = f"[timeout after {timeout_s}s]"
+            except OSError as exc:
+                exit_code = 127
+                err = f"spawn failed: {exc}"
+        attrs["run_id"] = run_id
+        attrs["exit_code"] = exit_code
     duration_ms = int((time.time() - started) * 1000)
 
     metrics = _extract_metrics(run_dir, out)
