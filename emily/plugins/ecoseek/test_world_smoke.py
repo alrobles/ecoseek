@@ -40,7 +40,11 @@ def _pipeline(world):
         artifact_type="pipeline",
         summary="GBIF query → clean → MaxEnt SDM → TSS eval",
         spec={"tools": ["gbif_query", "run_maxent_model"], "gate": {"tss": 0.6}},
-        executable={"kind": "ecoagent_tool", "ref": "sdm_pipeline", "args": {"species": "Quercus alba"}},
+        executable={
+            "kind": "ecoagent_tool",
+            "ref": "sdm_pipeline",
+            "args": {"species": "Quercus alba"},
+        },
         evidence=["gbif:doi/10.15468/dl.test"],
         author="emily",
     )
@@ -66,7 +70,10 @@ class TestLifecycle:
         r = world.validate(aid, {"tss": 0.7}, {"run_id": "x", "exit_code": 0})
         assert not r["success"]
         # legal order
-        assert world.record_event(aid, "test", {"metrics": {"tss": 0.71}})["status"] == "tested"
+        assert (
+            world.record_event(aid, "test", {"metrics": {"tss": 0.71}})["status"]
+            == "tested"
+        )
         assert world.record_event(aid, "install")["status"] == "installed"
 
     def test_validate_requires_replay_and_metrics(self, world):
@@ -78,9 +85,9 @@ class TestLifecycle:
         # no replay → rejected
         assert not world.validate(aid, {"tss": 0.7}, {})["success"]
         # failed replay → rejected
-        assert not world.validate(
-            aid, {"tss": 0.7}, {"run_id": "r1", "exit_code": 1}
-        )["success"]
+        assert not world.validate(aid, {"tss": 0.7}, {"run_id": "r1", "exit_code": 1})[
+            "success"
+        ]
         # LLM-only evidence → rejected (attest is advisory, not a gate)
         world.record_event(aid, "attest", {"score": 0.95, "verdict": "excellent"})
         assert not world.validate(aid, {"judge": 0.95}, {})["success"]
@@ -88,7 +95,11 @@ class TestLifecycle:
         ok = world.validate(
             aid,
             {"tss": 0.68, "auc": 0.91},
-            {"run_id": "replay-001", "exit_code": 0, "holdout": "gbif-snapshot-2026-09"},
+            {
+                "run_id": "replay-001",
+                "exit_code": 0,
+                "holdout": "gbif-snapshot-2026-09",
+            },
         )
         assert ok["success"] and ok["status"] == "validated"
 
@@ -162,6 +173,8 @@ class TestFederation:
         assert r["success"] and r["merged"] is False
         # foreign artifact → merged
         foreign = dict(art, id="deadbeefcafef00d", name="remote-pipe")
-        r = world.import_artifact(foreign, events=[{"kind": "propose", "agent": "hermes"}])
+        r = world.import_artifact(
+            foreign, events=[{"kind": "propose", "agent": "hermes"}]
+        )
         assert r["success"] and r["merged"] is True
         assert world.get("deadbeefcafef00d")["success"]
