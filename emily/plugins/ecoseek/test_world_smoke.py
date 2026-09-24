@@ -677,3 +677,82 @@ class TestWorldTrace:
         sspan = [s for s in spans if s["name"] == "ecoseek.world.sync"][-1]
         assert sspan["attributes"]["ecoseek.world.transport"] == "file"
         assert sspan["attributes"]["ecoseek.world.success"] is True
+
+
+class TestLocking:
+    """Multi-agent write locking: flock on world.lock serializes the whole
+    write critical section (DB txn + events.jsonl append)."""
+
+    def test_lock_file_and_wal(self, world, tmp_path):
+        _pipeline(world)
+        assert os.path.exists(os.path.join(str(tmp_path / "world"), "world.lock"))
+        with world._connect() as conn:
+            mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        assert mode == "wal"
+        busy = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+        assert busy == 5000
+
+    def test_concurrent_threads_all_events_land(self, world):
+        aid = _pipeline(world)["artifact_id"]
+        from concurrent.futures import ThreadPoolExecutor
+
+        def worker(i):
+            return world.record_event(aid, "observe", {"i": i}, agent=f"agent-{i % 4}")[
+                "success"
+            ]
+
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            results = list(ex.map(worker, range(20)))
+        assert all(results)
+
+        rec = world.get(aid)["artifact"]
+        assert len([e for e in rec["events"] if e["kind"] == "observe"]) == 20
+        # jsonl lines == db rows: no append lost or duplicated
+        jsonl = os.path.join(world._world_dir(), "events.jsonl")
+        with open(jsonl) as fh:
+            lines = [l for l in fh.read().splitlines() if l]
+        assert len(lines) == len(rec["events"])
+
+    def test_concurrent_processes_no_lost_events(self, world, tmp_path):
+        wdir = str(tmp_path / "world")
+        aid = _pipeline(world)["artifact_id"]
+        script = (
+            "import sys, os, json;"
+            f"sys.path.insert(0, {os.path.dirname(os.path.abspath(__file__))!r});"
+            "import world;"
+            "[world.record_event(sys.argv[1], 'observe', {'p': i})"
+            " for i in range(10)]"
+        )
+        import subprocess
+
+        env = {**os.environ, "ECOSEEK_WORLD_DIR": wdir}
+        procs = [
+            subprocess.Popen(
+                [sys.executable, "-c", script, aid],
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+            for _ in range(3)
+        ]
+        for p in procs:
+            _, err = p.communicate(timeout=60)
+            assert p.returncode == 0, err.decode()
+
+        world._local.conn = None  # see the other processes' commits
+        rec = world.get(aid)["artifact"]
+        observes = [e for e in rec["events"] if e["kind"] == "observe"]
+        assert len(observes) == 30
+
+    def test_lock_timeout_raises(self, world, monkeypatch):
+        import fcntl as _fcntl
+
+        monkeypatch.setattr(world, "_LOCK_DEADLINE_S", 0.3)
+
+        def _always_busy(*a, **k):
+            raise BlockingIOError("locked")
+
+        monkeypatch.setattr(_fcntl, "flock", _always_busy)
+        monkeypatch.setattr(world.fcntl, "flock", _always_busy)
+        with pytest.raises(TimeoutError):
+            world.propose(name="blocked", artifact_type="other")
