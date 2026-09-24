@@ -27,7 +27,7 @@ OpenRouter Fusion available for multi-model panel + judge synthesis.
 reumanlab-terminal (100.106.100.62) ← orchestrator [WSL]
     ├── reumanlab (100.100.245.62)      [HUB] gateway, kanban, tasks, cron — MOST POWERFUL
     ├── reumanlab-alpha (100.123.27.68) [HPC] 62GB RAM, 916GB disk, Ubuntu
-    ├── reumanlab-beta (100.115.246.9)  [LIGHT] 8GB RAM, 1TB disk (reinstalling Ubuntu)
+    ├── reumanlab-beta (100.100.246.122)  [LIGHT] 8GB RAM, 1TB disk (reinstalling Ubuntu)
     └── reumanlab-gamma                 [GPU] Quadro P620, 3.6TB — SSH BROKEN, use ~/gamma.sh
 ```
 
@@ -135,13 +135,13 @@ When a node has Hermes but doesn't know about the mesh:
 
 ### 1. Distribute API key
 ```bash
-# Copy from reumanlab (source of truth) — xiaomi
-ssh reumanlab@100.100.245.62 'grep XIAOMI ~/.hermes/.env' | ssh USER@TARGET_IP 'cat >> ~/.hermes/.env'
+# Copy from reumanlab (source of truth) — arcee (primary)
+ssh reumanlab@100.100.245.62 'grep ARCEE ~/.hermes/.env' | ssh USER@TARGET_IP 'cat >> ~/.hermes/.env'
 
-# OpenRouter key
+# OpenRouter key (fallback)
 ssh reumanlab@100.100.245.62 'grep OPENROUTER ~/.hermes/.env' | ssh USER@TARGET_IP 'cat >> ~/.hermes/.env'
 ```
-Source keys: `/home/reumanlab/env/mimo-key`, `/home/reumanlab/env/openrouter-key`
+Source keys: `/home/reumanlab/env/arcee-key`, `/home/reumanlab/env/openrouter-key`
 
 ### 2. Distribute skills
 ```bash
@@ -158,7 +158,7 @@ ssh USER@TARGET_IP 'HERMES_CLI -z "Carga el skill meta-hermes y dime los nodos d
 
 ## Common Pitfalls
 
-1. **Skills copied but Hermes doesn't know about mesh**: The node is missing the xiaomi API key. Hermes can't load skills without a working provider. Always distribute API key with skills.
+1. **Skills copied but Hermes doesn't know about mesh**: The node is missing the arcee API key. Hermes can't load skills without a working provider. Always distribute API key with skills.
 2. **Gamma SSH**: Direct SSH doesn't work (Tailscale AllowGroups blocks pubkey, no sudo). Use `~/gamma.sh "cmd"` shell server. File transfer via base64 encoding through gamma.sh.
 3. **Gamma no curl**: Use `wget` instead
 4. **Gamma Hermes broken**: Source tree uses system Python which lacks dependencies. Run venv repair (see `reumanlab-gamma-ssh` skill) and use `~/.hermes/hermes` wrapper.
@@ -176,6 +176,7 @@ To run a task on the best available node:
 
 Example: Running LLM inference
 ```bash
-# On gamma (GPU available)
-ssh a474r867@100.105.254.1 'cd ~/llama-b9672 && LD_LIBRARY_PATH=. ./llama-cli -m ~/models/qwen2.5-0.5b-instruct-q4_k_m.gguf -p "Your prompt" -n 100 -ngl 99 --no-display-prompt'
+# Via Arcee API (primary) — run from any node
+HERMES_CLI -z "Your prompt"
+# Local llama.cpp on gamma (GPU) — use Llama-family GGUFs only; qwen weights retired per policy
 ```

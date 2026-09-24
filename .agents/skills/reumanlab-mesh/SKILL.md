@@ -43,8 +43,13 @@ ssh -t a474r867@100.105.254.1 "/bin/bash -i"
 - ~~All machines use `mimo-v2.5-pro` via Xiaomi Mimo~~ **BANNED — retired**
 - ~~Fallback: deepseek~~ **BANNED — retired**
 - Compliant providers: Arcee Trinity (primary), OpenRouter non-Chinese
-  models, local Ollama Llama-family. Migration pending — see meta-hermes
-  skill for the current chain.
+  models, local Ollama Llama-family.
+- **Migration status (2026-09): done on reumanlab, alpha, beta** — all on
+  `arcee/trinity-large-thinking` → `openrouter` `openai/o4-mini` fallback,
+  banned keys renamed `.retired`, hub qwen ollama weights removed
+  (`OLLAMA_MODEL=tinyllama:latest`).
+- **Pending: reumanlab-gamma** (unreachable — Tailscale ACL + dead
+  shell-server tunnel at reumanlab:2226; `~/gamma.sh` missing on hub).
 - Retire `~/env/mimo-key` and `~/env/deepseek-token` on every node.
 
 ### Tailscale
@@ -56,7 +61,7 @@ ssh -t a474r867@100.105.254.1 "/bin/bash -i"
 - **reumanlab**: Full deployment — gateway, skills, tasks, kanban, cron
 - **reumanlab-alpha**: Minimal install
 - **reumanlab-beta**: Not yet explored
-- **reumanlab-gamma**: Installed, uses mimo-v2.5-pro
+- **reumanlab-gamma**: Installed — **still on mimo-v2.5-pro (BANNED); migration pending — node unreachable (Tailscale ACL + dead shell-server tunnel)**
 
 ## Per-Node Details
 
@@ -77,7 +82,7 @@ ssh -t a474r867@100.105.254.1 "/bin/bash -i"
 - **GPU confirmed**: Quadro P620, CUDA 12.2, PyTorch 2.6.0+cu124, Transformers 5.12.1
 - **Quick GPU check**: `bash scripts/gpu_check.sh` (in this skill) or `ssh a474r867@100.105.254.1 'bash -s' < ~/.hermes/skills/devops/reumanlab-mesh/scripts/gpu_check.sh`
 - **Two inference backends**: llama.cpp Vulkan (GGUF, ~5.7 t/s) + PyTorch CUDA (Transformers)
-- **Hermes**: v0.14.0 at `~/.hermes/hermes-agent/`, CLI via `~/.hermes/hermes` wrapper (was on mimo-v2.5-pro — BANNED, migrate to compliant provider)
+- **Hermes**: v0.14.0 at `~/.hermes/hermes-agent/`, CLI via `~/.hermes/hermes` wrapper (was on mimo-v2.5-pro — BANNED; migrate to arcee when node reachable)
 - **Disk**: 3.6TB (3.4TB free)
 - **RAM**: 16GB (12GB free)
 - **Python**: conda 26.3.2, Python 3.13.13
