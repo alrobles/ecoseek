@@ -30,7 +30,7 @@ For the full canonical architecture with ADRs, see the [knowledgebase architectu
 +---------------------------------------------------------------+
 |  Layer 1: Substrate                                            |
 |  Local models (Ollama), browser, filesystem, OS,               |
-|  DeepSeek BYOK (Fernet-encrypted keystore),                   |
+|  BYOK keystore (Fernet-encrypted, non-Chinese providers),     |
 |  EcoCoder cluster (via AgenticPlug), HPC (via connector),      |
 |  Hermes remote orchestration (optional, via AgenticPlug)       |
 |  Client: alrobles/ecoseek-client                               |
@@ -39,7 +39,7 @@ For the full canonical architecture with ADRs, see the [knowledgebase architectu
 
 ### Layer 1 — Substrate
 
-The substrate is everything EcoSeek talks to but does not own: local model runtimes (Ollama with EcoCoder models), a controlled browser surface, the local filesystem, and — only when the user opts in — cloud LLM providers such as DeepSeek (via Fernet-encrypted BYOK keystore), remote HPC clusters (via AgenticPlug connectors), or the optional Hermes remote orchestration service.
+The substrate is everything EcoSeek talks to but does not own: local model runtimes (Ollama with EcoCoder models), a controlled browser surface, the local filesystem, and — only when the user opts in — cloud LLM providers via the Fernet-encrypted BYOK keystore (non-Chinese providers only — policy), remote HPC clusters (via AgenticPlug connectors), or the optional Hermes remote orchestration service.
 
 Substrate components are assumed to be untrusted from EcoSeek's point of view. They are wrapped by the gateway, not exposed directly to the intelligence layer.
 
@@ -76,7 +76,7 @@ EcoSeek supports three deployment modes. The architecture is identical across mo
 | Mode | Client | Gateway | Compute | Cost |
 |------|--------|---------|---------|------|
 | **DIY / Community** | EcoSeek client | Optional (local or none) | EcoCoder local, Ollama, or mock | Free |
-| **BYOK / BYOT** | EcoSeek client | Optional | DeepSeek API (user's key, Fernet-encrypted) | User pays provider |
+| **BYOK / BYOT** | EcoSeek client | Optional | Compliant provider API (user's key, Fernet-encrypted) | User pays provider |
 | **Lab / Managed** | EcoSeek client | AgenticPlug (hosted/on-prem) | Any backend via gateway | Support fee |
 
 ### DIY
@@ -89,7 +89,7 @@ EcoSeek supports three deployment modes. The architecture is identical across mo
 ### BYOK
 
 - Single user (or small team), self-hosted.
-- AgenticPlug holds the user's own keys for one or more cloud providers (DeepSeek is the recommended low-cost reasoning option, but not the only one).
+- AgenticPlug holds the user's own keys for one or more cloud providers (non-Chinese providers only — the no-Chinese-AI policy bans DeepSeek/Qwen/GLM/Kimi/MiMo).
 - Keys are stored in a Fernet-encrypted local keystore. Keys never leave the user's machine.
 - Best for individuals who want frontier-quality reasoning without giving credentials to the intelligence layer.
 

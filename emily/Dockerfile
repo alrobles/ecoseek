@@ -6,7 +6,7 @@
 #
 # Run:
 #   docker run -d -p 8642:8642 \
-#     -e DEEPSEEK_API_KEY=sk-... \
+#     -e ARCEE_API_KEY=sk-... \
 #     -e ECOSEEK_BROKER_URL=https://broker.ecoseek.org \
 #     emily-local
 

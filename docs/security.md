@@ -10,13 +10,13 @@ For the complete threat model with 24 scenarios, 12 assets, 6 threat actor profi
 
 - No API keys, no tokens, no signed URLs, no private tunnel hostnames, no `.env` files with real values, no service-account JSON.
 - This applies to commits, PR descriptions, issue comments, code comments, and docs.
-- Use placeholders (`YOUR_DEEPSEEK_API_KEY`) and document the *shape* of a secret, never an example value that could be mistaken for a real one.
+- Use placeholders (`YOUR_API_KEY`) and document the *shape* of a secret, never an example value that could be mistaken for a real one.
 - If a secret is committed by accident, rotate it first, then remove it from history. Do not assume that deleting the file is sufficient.
 - `alrobles/agenticSeek` has TruffleHog pre-commit scanning to catch secrets before they are committed.
 
 ## BYOK key rules
 
-For users who supply their own keys (e.g. DeepSeek):
+For users who supply their own keys (non-Chinese providers only — policy):
 
 1. **Custody.** Keys are stored locally on the user's machine using Fernet encryption (AES-128-CBC + HMAC-SHA256). The keystore prefers the OS keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager) and falls back to an encrypted file at `~/.config/ecoseek/keys.json`. Keys are never committed, logged, or transmitted to EcoSeek infrastructure.
 2. **Fail-closed.** If the `cryptography` library is not installed, the keystore raises `KeystoreCryptoUnavailable` with an actionable error message. It never silently downgrades to base64 or plaintext storage.

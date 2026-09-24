@@ -6,7 +6,13 @@ category: devops
 
 # Meta-Hermes: ReumanLab Mesh Orchestration
 
-Coordinate all Hermes instances across the ReumanLab Tailscale mesh. Each node runs Hermes Agent with mimo-v2.5-pro via xiaomi provider.
+Coordinate all Hermes instances across the ReumanLab Tailscale mesh.
+
+> **POLICY (no Chinese AI):** xiaomi/mimo, deepseek, and any GLM/Kimi/Qwen
+> models are BANNED on all nodes. The legacy `xiaomi → deepseek` chain
+> below is retired — nodes must migrate to compliant providers
+> (Arcee Trinity, OpenRouter non-Chinese models, or local Llama-family
+> Ollama). Do not resurrect the banned providers.
 
 ## Mesh Topology
 
@@ -14,7 +20,7 @@ All nodes run **fork** `alrobles/hermes-agent` (v0.16.0) at `~/.hermes/hermes-ag
 All tagged `tag:reumanlab` with cross-node SSH enabled.
 Load `skill_view(name='reumanlab-mesh')` for per-node details and SSH instructions.
 
-**Providers**: xiaomi (mimo-v2.5-pro, free), deepseek (v4-pro, free), openrouter (hundreds of models, paid). opencode-go CANCELLED.
+**Providers**: ~~xiaomi~~ BANNED, ~~deepseek~~ BANNED, openrouter (non-Chinese models only, paid), arcee (Trinity). opencode-go CANCELLED.
 OpenRouter Fusion available for multi-model panel + judge synthesis.
 
 ```
@@ -27,22 +33,25 @@ reumanlab-terminal (100.106.100.62) ← orchestrator [WSL]
 
 **Gamma note**: SSH direct doesn't work (Tailscale AllowGroups blocks pubkey, no sudo to fix). Use shell server: `~/gamma.sh "command"`. See `reumanlab-gamma-ssh` skill for setup details.
 
-## Providers (distributed to all nodes, Jun 2026)
+## Providers (distributed to all nodes)
 
 | Provider | Model | Cost | Status |
 |----------|-------|------|--------|
-| xiaomi | mimo-v2.5-pro | Free (Token Plan) | Primary |
-| deepseek | deepseek-v4-pro | Free | Fallback |
-| openrouter | 100+ models | Paid (sk-or-...) | Fallback |
+| ~~xiaomi~~ | mimo-v2.5-pro | Free (Token Plan) | **BANNED — Chinese AI** |
+| ~~deepseek~~ | deepseek-v4-pro | Free | **BANNED — Chinese AI** |
+| arcee | trinity-large-thinking | Paid | Primary (Emily's model) |
+| openrouter | 100+ models | Paid (sk-or-...) | Fallback — non-Chinese models only |
 
-Fallback chain: `xiaomi → deepseek → openrouter`
+Fallback chain (pending migration): `arcee → openrouter` — do NOT route to
+xiaomi/deepseek/GLM/Kimi/Qwen anywhere.
 
-API keys in `~/env/` on all nodes (mimo-key, deepseek-token, openrouter-key).
+API keys in `~/env/` on all nodes. **Legacy `mimo-key` and `deepseek-token`
+must be retired** — remove them from node `.env` files during migration.
 Use Python to write `.env` over SSH — shell `$(cat ...)` gets stripped. See `hermes-provider-setup` skill.
 
 ## OpenRouter Fusion (multi-model + judge)
 
-Fusion sends a prompt to a panel of models in parallel, then a judge synthesizes structured analysis. Can be imitated for free using xiaomi + deepseek as panel, one as judge. See `hermes-provider-setup` skill → `references/openrouter-setup.md` for API details.
+Fusion sends a prompt to a panel of models in parallel, then a judge synthesizes structured analysis. Panel members must be non-Chinese models only (policy). See `hermes-provider-setup` skill → `references/openrouter-setup.md` for API details.
 
 ## Hermes Agent Paths (fork v0.16.0)
 

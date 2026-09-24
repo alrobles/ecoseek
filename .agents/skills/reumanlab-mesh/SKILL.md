@@ -39,10 +39,13 @@ ssh -t a474r867@100.105.254.1 "/bin/bash -i"
 
 ## Shared Infrastructure
 
-### mimocode API
-- All machines use `mimo-v2.5-pro` via Xiaomi Mimo
-- Base URL: `https://token-plan-sgp.xiaomimimo.com/v1`
-- Fallback: deepseek
+### LLM providers — POLICY: no Chinese AI
+- ~~All machines use `mimo-v2.5-pro` via Xiaomi Mimo~~ **BANNED — retired**
+- ~~Fallback: deepseek~~ **BANNED — retired**
+- Compliant providers: Arcee Trinity (primary), OpenRouter non-Chinese
+  models, local Ollama Llama-family. Migration pending — see meta-hermes
+  skill for the current chain.
+- Retire `~/env/mimo-key` and `~/env/deepseek-token` on every node.
 
 ### Tailscale
 - Tailnet admin: `a.l.robles.fernandez@gmail.com`
@@ -74,7 +77,7 @@ ssh -t a474r867@100.105.254.1 "/bin/bash -i"
 - **GPU confirmed**: Quadro P620, CUDA 12.2, PyTorch 2.6.0+cu124, Transformers 5.12.1
 - **Quick GPU check**: `bash scripts/gpu_check.sh` (in this skill) or `ssh a474r867@100.105.254.1 'bash -s' < ~/.hermes/skills/devops/reumanlab-mesh/scripts/gpu_check.sh`
 - **Two inference backends**: llama.cpp Vulkan (GGUF, ~5.7 t/s) + PyTorch CUDA (Transformers)
-- **Hermes**: v0.14.0 at `~/.hermes/hermes-agent/`, CLI via `~/.hermes/hermes` wrapper
+- **Hermes**: v0.14.0 at `~/.hermes/hermes-agent/`, CLI via `~/.hermes/hermes` wrapper (was on mimo-v2.5-pro — BANNED, migrate to compliant provider)
 - **Disk**: 3.6TB (3.4TB free)
 - **RAM**: 16GB (12GB free)
 - **Python**: conda 26.3.2, Python 3.13.13
@@ -87,10 +90,10 @@ ssh -t a474r867@100.105.254.1 "/bin/bash -i"
   - No gcc (can't compile from source)
 - **Installed ML stack**:
   - PyTorch 2.6.0+cu124 (matrix mul verified on GPU)
-  - Transformers 5.12.1 + Accelerate 1.14.0 (Qwen2.5-0.5B on CUDA, 0.99GB VRAM)
+  - Transformers 5.12.1 + Accelerate 1.14.0 (Qwen2.5-0.5B on CUDA, 0.99GB VRAM — **non-compliant model, replace**)
   - llama.cpp Vulkan b9672 (`/home/a474r867/llama-b9672/llama-cli`)
-  - Qwen2.5-0.5B-Instruct GGUF (`/home/a474r867/models/`)
-  - Qwen2.5-0.5B-Instruct HF (`~/.cache/huggingface/`)
+  - ~~Qwen2.5-0.5B-Instruct GGUF~~ (`/home/a474r867/models/`) — **BANNED (Qwen), remove**
+  - ~~Qwen2.5-0.5B-Instruct HF~~ (`~/.cache/huggingface/`) — **BANNED (Qwen), remove**
   - **Two inference backends**: Vulkan (GGUF, 5.7 t/s) + CUDA (Transformers, 0.99GB VRAM)
   - **Full GPU setup**: `references/gamma-gpu-setup.md`
 - **Internet**: Yes, public IP 129.237.90.153

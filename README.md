@@ -40,7 +40,7 @@ EcoSeek is **pre-alpha** — components work individually and are tested, but th
 EcoSeek supports three deployment modes:
 
 1. **DIY** — self-hosted, fully local, no external accounts. The default for privacy-sensitive users and offline labs.
-2. **BYOK** — self-hosted with user-provided API keys for cloud models (e.g. DeepSeek). Keys stored in Fernet-encrypted local keystore; never leave the user's machine.
+2. **BYOK** — self-hosted with user-provided API keys for cloud models (e.g. Arcee Trinity, OpenAI). Keys stored in Fernet-encrypted local keystore; never leave the user's machine. Chinese AI providers/models are not supported (see `docs/search-providers.md`).
 3. **Lab-managed** — a research group operates a shared AgenticPlug for its members. Members do not handle keys directly.
 
 ---
