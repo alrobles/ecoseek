@@ -20,6 +20,7 @@ Provides tools for the dual-agent architecture (Alpha↔Beta):
   ``world_get``              — full artifact record + provenance event history
   ``world_lineage``          — ancestors/descendants inheritance graph
   ``world_stats``            — portfolio metrics (SwarmWorld endpoints)
+  ``world_replay``           — frozen agent-free replay + validation evidence
 
 Emily (Alpha, local) uses these tools to delegate heavy computation to
 Hermes (Beta, remote) on reumanlab.  Communication goes directly to
@@ -1809,6 +1810,46 @@ WORLD_STATS_SCHEMA = {
     "parameters": {"type": "object", "properties": {}},
 }
 
+WORLD_REPLAY_SCHEMA = {
+    "name": "world_replay",
+    "description": (
+        "Frozen replay — run an artifact's executable on held-out inputs with "
+        "ZERO LLM in the loop (the SwarmWorld 'remove the agents' test). "
+        "Captures stdout/stderr/metrics under runs/<run_id>/ and returns "
+        "replay evidence {run_id, exit_code, holdout} for world_validate. "
+        "Set validate=true to replay + promote in one call. Executable kinds: "
+        "ecoagent_tool (registry dispatch, always allowed); shell/r_script/"
+        "slurm_job (require ECOSEEK_WORLD_REPLAY_EXEC=1 — fail-closed)."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "artifact_id": {"type": "string"},
+            "holdout": {
+                "type": "object",
+                "description": (
+                    "Held-out input spec: {name: '<label>', args: {...}} — "
+                    "args are merged over executable.args so the frozen "
+                    "artifact runs against inputs it never saw."
+                ),
+            },
+            "gate": {
+                "type": "object",
+                "description": "Optional {metric: minimum} floors — blocks validation below threshold.",
+            },
+            "timeout_s": {
+                "type": "integer",
+                "description": "Run timeout (default 600).",
+            },
+            "validate": {
+                "type": "boolean",
+                "description": "When true, call world_validate on success (exit 0 + metrics + gates).",
+            },
+        },
+        "required": ["artifact_id"],
+    },
+}
+
 
 def world_query_tool(
     query: str = "",
@@ -1926,6 +1967,26 @@ def world_stats_tool(task_id: str | None = None) -> str:
     return json.dumps(world.stats(), ensure_ascii=False)
 
 
+def world_replay_tool(
+    artifact_id: str,
+    holdout: dict | None = None,
+    gate: dict | None = None,
+    timeout_s: int | None = None,
+    validate: bool = False,
+    task_id: str | None = None,
+) -> str:
+    from . import world_replay
+
+    kwargs = {"holdout": holdout, "agent": None, "task_id": task_id or ""}
+    if timeout_s:
+        kwargs["timeout_s"] = timeout_s
+    if validate:
+        result = world_replay.replay_and_validate(artifact_id, gate=gate, **kwargs)
+    else:
+        result = world_replay.replay(artifact_id, **kwargs)
+    return json.dumps(result, ensure_ascii=False)
+
+
 _WORLD_TOOL_REGISTRATIONS = [
     (
         "world_query",
@@ -1978,11 +2039,23 @@ _WORLD_TOOL_REGISTRATIONS = [
         {"artifact_id": "artifact_id"},
     ),
     ("world_stats", WORLD_STATS_SCHEMA, world_stats_tool, {}),
+    (
+        "world_replay",
+        WORLD_REPLAY_SCHEMA,
+        world_replay_tool,
+        {
+            "artifact_id": "artifact_id",
+            "holdout": "holdout",
+            "gate": "gate",
+            "timeout_s": "timeout_s",
+            "validate": "validate",
+        },
+    ),
 ]
 
 
 def _register_world_tools(register_fn, **register_kwargs) -> None:
-    """Register the 8 world_* tools via either ctx.register_tool or the
+    """Register the 9 world_* tools via either ctx.register_tool or the
     legacy tools.registry.register signature."""
     for name, schema, handler, arg_map in _WORLD_TOOL_REGISTRATIONS:
 
