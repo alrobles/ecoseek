@@ -21,6 +21,8 @@ Emily (Alpha, local) ↔ Hermes (Beta, remote on reumanlab) via `hermes.ecoseek.
 | `world_replay` | Frozen agent-free replay of `artifact.executable` on held-out inputs — emits `world_validate` evidence |
 | `world_methods` | Render a Methods section from provenance (lineage + evidence + replay runs) — registers a `methods_section` artifact |
 | `world_sync` | Federate world state — merge `artifacts.jsonl` + `events.jsonl` with a peer (file path, `ssh:host:path`, or git remote); status-precedence merge, event dedup |
+
+The plugin also registers a frozen system-prompt section (`ecoseek.world_stigmergy`) that injects the stigmergic policy — `world_query` before expensive work, `observe` on reuse, promote only via `world_replay` — plus live world stats at session start (prompt-caching safe: rendered once, byte-stable for the session).
 | `hermes_status` | Check if Hermes Beta is available |
 | `escalate_remote` | One-shot delegation to Beta (execution tasks) |
 | `dialectical_exchange` | Legacy DiDAL exchange (iterative execution tasks) |

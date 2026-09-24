@@ -2162,6 +2162,15 @@ _WORLD_TOOL_REGISTRATIONS = [
 ]
 
 
+_WORLD_PROMPT_SECTION_ID = "ecoseek.world_stigmergy"
+
+
+def _world_prompt_section(_session_info) -> str:
+    from . import world
+
+    return world.prompt_section(_session_info)
+
+
 def _register_world_tools(register_fn, **register_kwargs) -> None:
     """Register the 11 world_* tools via either ctx.register_tool or the
     legacy tools.registry.register signature."""
@@ -2428,10 +2437,24 @@ def register(ctx) -> None:
         check_fn=_is_configured,
     )
 
-    # EcoSeek World tools — persistent artifact substrate (8 tools)
+    # EcoSeek World tools — persistent artifact substrate (11 tools)
     _register_world_tools(ctx.register_tool)
 
-    n = 24 if _is_configured() else 19
+    # Stigmergic hook — a frozen per-session prompt section nudging agents to
+    # consult the world before expensive work (world_query first, observe on
+    # reuse). Skipped on loaders without system-prompt-section support.
+    reg_section = getattr(ctx, "register_system_prompt_section", None)
+    if callable(reg_section):
+        try:
+            reg_section(
+                _WORLD_PROMPT_SECTION_ID,
+                _world_prompt_section,
+                position="after_memory",
+            )
+        except Exception as exc:
+            logger.debug("world prompt section skipped: %s", exc)
+
+    n = 27 if _is_configured() else 22
     logger.info(
         "ecoseek plugin registered: %d tools, remote=%s configured=%s didal=v2 ecoagent=true r_workspace=true niche=true maxent=true pdf=true artifacts=true lacs=true world=true",
         n,

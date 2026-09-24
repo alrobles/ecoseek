@@ -583,3 +583,20 @@ class TestSync:
     def test_not_a_git_repo(self, world, sync):
         r = sync.sync_git()
         assert not r["success"] and "not a git repo" in r["error"]
+
+
+class TestPromptSection:
+    def test_renders_policy_and_live_stats(self, world):
+        aid = _pipeline(world)["artifact_id"]
+        world.record_event(aid, "test", {"metrics": {"tss": 0.7}})
+        world.record_event(aid, "install")
+        world.validate(aid, {"tss": 0.7}, {"run_id": "r1", "exit_code": 0})
+        text = world.prompt_section({})
+        assert "world_query" in text and "observe" in text
+        assert "world_replay" in text and "world_sync" in text
+        assert "1 artifact(s), 1 validated" in text
+
+    def test_empty_world_still_renders(self, world):
+        text = world.prompt_section(None)
+        assert "0 artifact(s), 0 validated" in text
+        assert "## EcoSeek World" in text

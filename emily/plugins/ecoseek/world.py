@@ -579,6 +579,30 @@ def lineage(artifact_id: str) -> dict:
     }
 
 
+def prompt_section(_session_info: dict | None = None) -> str:
+    """Stigmergic policy + live world stats — rendered once per session and
+    frozen into the system prompt (prompt-caching invariant: no mid-loop
+    injection; the section is byte-stable for the session's life)."""
+    try:
+        s = stats()
+        n, nv = s.get("total_artifacts", 0), s.get("validated_inventions", 0)
+    except Exception:
+        n = nv = 0
+    return (
+        "## EcoSeek World — persistent artifact substrate\n"
+        f"This world currently holds {n} artifact(s), {nv} validated.\n"
+        "- Before expensive or irreversible work (model fits, HPC jobs, heavy\n"
+        "  pipelines, long searches): `world_query(text=<task>, status='validated')`.\n"
+        "  Reuse beats rebuild — fork and extend instead of re-deriving.\n"
+        "- When you reuse an artifact, record it: `world_event(kind='observe')` —\n"
+        "  the observation-first channel is how later agents find it.\n"
+        "- Register durable results with `world_propose`; promote only through\n"
+        "  `world_replay`/`world_validate`. Never claim validation by narration.\n"
+        "- `world_methods` renders provenance into a Methods section; `world_sync`\n"
+        "  federates this world with peers."
+    )
+
+
 def stats() -> dict:
     """Portfolio-level endpoints à la SwarmWorld: breadth, validated
     inventions, lineage depth, observation-first reuse fraction."""
