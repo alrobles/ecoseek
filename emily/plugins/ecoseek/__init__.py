@@ -20,6 +20,9 @@ Provides tools for the dual-agent architecture (Alpha↔Beta):
   ``world_get``              — full artifact record + provenance event history
   ``world_lineage``          — ancestors/descendants inheritance graph
   ``world_stats``            — portfolio metrics (SwarmWorld endpoints)
+  ``world_replay``           — frozen agent-free replay + validation evidence
+  ``world_methods``          — render a Methods section from provenance edges
+  ``world_sync``             — federate world state (events.jsonl + artifacts.jsonl)
 
 Emily (Alpha, local) uses these tools to delegate heavy computation to
 Hermes (Beta, remote) on reumanlab.  Communication goes directly to
@@ -1809,6 +1812,100 @@ WORLD_STATS_SCHEMA = {
     "parameters": {"type": "object", "properties": {}},
 }
 
+WORLD_REPLAY_SCHEMA = {
+    "name": "world_replay",
+    "description": (
+        "Frozen replay — run an artifact's executable on held-out inputs with "
+        "ZERO LLM in the loop (the SwarmWorld 'remove the agents' test). "
+        "Captures stdout/stderr/metrics under runs/<run_id>/ and returns "
+        "replay evidence {run_id, exit_code, holdout} for world_validate. "
+        "Set validate=true to replay + promote in one call. Executable kinds: "
+        "ecoagent_tool (registry dispatch, always allowed); shell/r_script/"
+        "slurm_job (require ECOSEEK_WORLD_REPLAY_EXEC=1 — fail-closed)."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "artifact_id": {"type": "string"},
+            "holdout": {
+                "type": "object",
+                "description": (
+                    "Held-out input spec: {name: '<label>', args: {...}} — "
+                    "args are merged over executable.args so the frozen "
+                    "artifact runs against inputs it never saw."
+                ),
+            },
+            "gate": {
+                "type": "object",
+                "description": "Optional {metric: minimum} floors — blocks validation below threshold.",
+            },
+            "timeout_s": {
+                "type": "integer",
+                "description": "Run timeout (default 600).",
+            },
+            "validate": {
+                "type": "boolean",
+                "description": "When true, call world_validate on success (exit 0 + metrics + gates).",
+            },
+        },
+        "required": ["artifact_id"],
+    },
+}
+
+WORLD_METHODS_SCHEMA = {
+    "name": "world_methods",
+    "description": (
+        "Render a publication-grade Methods section from an artifact's "
+        "recorded provenance — lineage ancestors (data pins, pipelines, "
+        "models), spec parameters, and frozen-replay validation evidence. "
+        "Deterministic (zero LLM): same world state ⇒ identical text. "
+        "The section is itself registered as a methods_section artifact "
+        "linked to its sources."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "artifact_id": {"type": "string"},
+            "register": {
+                "type": "boolean",
+                "description": "Register the rendered section as a methods_section artifact (default true).",
+            },
+        },
+        "required": ["artifact_id"],
+    },
+}
+
+WORLD_SYNC_SCHEMA = {
+    "name": "world_sync",
+    "description": (
+        "Federate world state with a peer — merges artifacts.jsonl + "
+        "events.jsonl (the replication unit) bidirectionally. Deterministic "
+        "merge: artifacts by content-id with status precedence (never a "
+        "downgrade); events by natural-key dedup. Transports: file (peer "
+        "world dir path), ssh:<user@host:path> (scp pull+push over the "
+        "mesh), or git (world dir is a repo — pull/merge/push)."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "peer": {
+                "type": "string",
+                "description": (
+                    "Peer spec: '/path/to/world' | 'ssh:user@host:path' | "
+                    "'user@host:path' | 'git' (uses world dir repo)."
+                ),
+            },
+            "transport": {
+                "type": "string",
+                "enum": ["file", "ssh", "git"],
+                "description": "Force a transport (default: inferred from peer).",
+            },
+            "remote": {"type": "string", "description": "git remote (default origin)."},
+            "branch": {"type": "string", "description": "git branch (default main)."},
+        },
+    },
+}
+
 
 def world_query_tool(
     query: str = "",
@@ -1926,6 +2023,61 @@ def world_stats_tool(task_id: str | None = None) -> str:
     return json.dumps(world.stats(), ensure_ascii=False)
 
 
+def world_replay_tool(
+    artifact_id: str,
+    holdout: dict | None = None,
+    gate: dict | None = None,
+    timeout_s: int | None = None,
+    validate: bool = False,
+    task_id: str | None = None,
+) -> str:
+    from . import world_replay
+
+    kwargs = {"holdout": holdout, "agent": None, "task_id": task_id or ""}
+    if timeout_s:
+        kwargs["timeout_s"] = timeout_s
+    if validate:
+        result = world_replay.replay_and_validate(artifact_id, gate=gate, **kwargs)
+    else:
+        result = world_replay.replay(artifact_id, **kwargs)
+    return json.dumps(result, ensure_ascii=False)
+
+
+def world_methods_tool(
+    artifact_id: str,
+    register: bool = True,
+    task_id: str | None = None,
+) -> str:
+    from . import world_methods
+
+    return json.dumps(
+        world_methods.render_methods(
+            artifact_id, register=register, task_id=task_id or ""
+        ),
+        ensure_ascii=False,
+    )
+
+
+def world_sync_tool(
+    peer: str = "",
+    transport: str = "",
+    remote: str = "",
+    branch: str = "",
+    task_id: str | None = None,
+) -> str:
+    from . import world_sync
+
+    kwargs = {}
+    if remote:
+        kwargs["remote"] = remote
+    if branch:
+        kwargs["branch"] = branch
+    return json.dumps(
+        world_sync.sync(peer=peer, transport=transport, **kwargs),
+        ensure_ascii=False,
+    )
+
+
 _WORLD_TOOL_REGISTRATIONS = [
     (
         "world_query",
@@ -1978,11 +2130,49 @@ _WORLD_TOOL_REGISTRATIONS = [
         {"artifact_id": "artifact_id"},
     ),
     ("world_stats", WORLD_STATS_SCHEMA, world_stats_tool, {}),
+    (
+        "world_replay",
+        WORLD_REPLAY_SCHEMA,
+        world_replay_tool,
+        {
+            "artifact_id": "artifact_id",
+            "holdout": "holdout",
+            "gate": "gate",
+            "timeout_s": "timeout_s",
+            "validate": "validate",
+        },
+    ),
+    (
+        "world_methods",
+        WORLD_METHODS_SCHEMA,
+        world_methods_tool,
+        {"artifact_id": "artifact_id", "register": "register"},
+    ),
+    (
+        "world_sync",
+        WORLD_SYNC_SCHEMA,
+        world_sync_tool,
+        {
+            "peer": "peer",
+            "transport": "transport",
+            "remote": "remote",
+            "branch": "branch",
+        },
+    ),
 ]
 
 
+_WORLD_PROMPT_SECTION_ID = "ecoseek.world_stigmergy"
+
+
+def _world_prompt_section(_session_info) -> str:
+    from . import world
+
+    return world.prompt_section(_session_info)
+
+
 def _register_world_tools(register_fn, **register_kwargs) -> None:
-    """Register the 8 world_* tools via either ctx.register_tool or the
+    """Register the 11 world_* tools via either ctx.register_tool or the
     legacy tools.registry.register signature."""
     for name, schema, handler, arg_map in _WORLD_TOOL_REGISTRATIONS:
 
@@ -2247,10 +2437,24 @@ def register(ctx) -> None:
         check_fn=_is_configured,
     )
 
-    # EcoSeek World tools — persistent artifact substrate (8 tools)
+    # EcoSeek World tools — persistent artifact substrate (11 tools)
     _register_world_tools(ctx.register_tool)
 
-    n = 24 if _is_configured() else 19
+    # Stigmergic hook — a frozen per-session prompt section nudging agents to
+    # consult the world before expensive work (world_query first, observe on
+    # reuse). Skipped on loaders without system-prompt-section support.
+    reg_section = getattr(ctx, "register_system_prompt_section", None)
+    if callable(reg_section):
+        try:
+            reg_section(
+                _WORLD_PROMPT_SECTION_ID,
+                _world_prompt_section,
+                position="after_memory",
+            )
+        except Exception as exc:
+            logger.debug("world prompt section skipped: %s", exc)
+
+    n = 27 if _is_configured() else 22
     logger.info(
         "ecoseek plugin registered: %d tools, remote=%s configured=%s didal=v2 ecoagent=true r_workspace=true niche=true maxent=true pdf=true artifacts=true lacs=true world=true",
         n,

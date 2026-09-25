@@ -6,7 +6,13 @@ category: devops
 
 # Meta-Hermes: ReumanLab Mesh Orchestration
 
-Coordinate all Hermes instances across the ReumanLab Tailscale mesh. Each node runs Hermes Agent with mimo-v2.5-pro via xiaomi provider.
+Coordinate all Hermes instances across the ReumanLab Tailscale mesh.
+
+> **POLICY (no Chinese AI):** xiaomi/mimo, deepseek, and any GLM/Kimi/Qwen
+> models are BANNED on all nodes. The legacy `xiaomi → deepseek` chain
+> below is retired — nodes must migrate to compliant providers
+> (Arcee Trinity, OpenRouter non-Chinese models, or local Llama-family
+> Ollama). Do not resurrect the banned providers.
 
 ## Mesh Topology
 
@@ -14,35 +20,38 @@ All nodes run **fork** `alrobles/hermes-agent` (v0.16.0) at `~/.hermes/hermes-ag
 All tagged `tag:reumanlab` with cross-node SSH enabled.
 Load `skill_view(name='reumanlab-mesh')` for per-node details and SSH instructions.
 
-**Providers**: xiaomi (mimo-v2.5-pro, free), deepseek (v4-pro, free), openrouter (hundreds of models, paid). opencode-go CANCELLED.
+**Providers**: ~~xiaomi~~ BANNED, ~~deepseek~~ BANNED, openrouter (non-Chinese models only, paid), arcee (Trinity). opencode-go CANCELLED.
 OpenRouter Fusion available for multi-model panel + judge synthesis.
 
 ```
 reumanlab-terminal (100.106.100.62) ← orchestrator [WSL]
     ├── reumanlab (100.100.245.62)      [HUB] gateway, kanban, tasks, cron — MOST POWERFUL
     ├── reumanlab-alpha (100.123.27.68) [HPC] 62GB RAM, 916GB disk, Ubuntu
-    ├── reumanlab-beta (100.115.246.9)  [LIGHT] 8GB RAM, 1TB disk (reinstalling Ubuntu)
+    ├── reumanlab-beta (100.100.246.122)  [LIGHT] 8GB RAM, 1TB disk (reinstalling Ubuntu)
     └── reumanlab-gamma                 [GPU] Quadro P620, 3.6TB — SSH BROKEN, use ~/gamma.sh
 ```
 
 **Gamma note**: SSH direct doesn't work (Tailscale AllowGroups blocks pubkey, no sudo to fix). Use shell server: `~/gamma.sh "command"`. See `reumanlab-gamma-ssh` skill for setup details.
 
-## Providers (distributed to all nodes, Jun 2026)
+## Providers (distributed to all nodes)
 
 | Provider | Model | Cost | Status |
 |----------|-------|------|--------|
-| xiaomi | mimo-v2.5-pro | Free (Token Plan) | Primary |
-| deepseek | deepseek-v4-pro | Free | Fallback |
-| openrouter | 100+ models | Paid (sk-or-...) | Fallback |
+| ~~xiaomi~~ | mimo-v2.5-pro | Free (Token Plan) | **BANNED — Chinese AI** |
+| ~~deepseek~~ | deepseek-v4-pro | Free | **BANNED — Chinese AI** |
+| arcee | trinity-large-thinking | Paid | Primary (Emily's model) |
+| openrouter | 100+ models | Paid (sk-or-...) | Fallback — non-Chinese models only |
 
-Fallback chain: `xiaomi → deepseek → openrouter`
+Fallback chain (pending migration): `arcee → openrouter` — do NOT route to
+xiaomi/deepseek/GLM/Kimi/Qwen anywhere.
 
-API keys in `~/env/` on all nodes (mimo-key, deepseek-token, openrouter-key).
+API keys in `~/env/` on all nodes. **Legacy `mimo-key` and `deepseek-token`
+must be retired** — remove them from node `.env` files during migration.
 Use Python to write `.env` over SSH — shell `$(cat ...)` gets stripped. See `hermes-provider-setup` skill.
 
 ## OpenRouter Fusion (multi-model + judge)
 
-Fusion sends a prompt to a panel of models in parallel, then a judge synthesizes structured analysis. Can be imitated for free using xiaomi + deepseek as panel, one as judge. See `hermes-provider-setup` skill → `references/openrouter-setup.md` for API details.
+Fusion sends a prompt to a panel of models in parallel, then a judge synthesizes structured analysis. Panel members must be non-Chinese models only (policy). See `hermes-provider-setup` skill → `references/openrouter-setup.md` for API details.
 
 ## Hermes Agent Paths (fork v0.16.0)
 
@@ -126,13 +135,13 @@ When a node has Hermes but doesn't know about the mesh:
 
 ### 1. Distribute API key
 ```bash
-# Copy from reumanlab (source of truth) — xiaomi
-ssh reumanlab@100.100.245.62 'grep XIAOMI ~/.hermes/.env' | ssh USER@TARGET_IP 'cat >> ~/.hermes/.env'
+# Copy from reumanlab (source of truth) — arcee (primary)
+ssh reumanlab@100.100.245.62 'grep ARCEE ~/.hermes/.env' | ssh USER@TARGET_IP 'cat >> ~/.hermes/.env'
 
-# OpenRouter key
+# OpenRouter key (fallback)
 ssh reumanlab@100.100.245.62 'grep OPENROUTER ~/.hermes/.env' | ssh USER@TARGET_IP 'cat >> ~/.hermes/.env'
 ```
-Source keys: `/home/reumanlab/env/mimo-key`, `/home/reumanlab/env/openrouter-key`
+Source keys: `/home/reumanlab/env/arcee-key`, `/home/reumanlab/env/openrouter-key`
 
 ### 2. Distribute skills
 ```bash
@@ -149,7 +158,7 @@ ssh USER@TARGET_IP 'HERMES_CLI -z "Carga el skill meta-hermes y dime los nodos d
 
 ## Common Pitfalls
 
-1. **Skills copied but Hermes doesn't know about mesh**: The node is missing the xiaomi API key. Hermes can't load skills without a working provider. Always distribute API key with skills.
+1. **Skills copied but Hermes doesn't know about mesh**: The node is missing the arcee API key. Hermes can't load skills without a working provider. Always distribute API key with skills.
 2. **Gamma SSH**: Direct SSH doesn't work (Tailscale AllowGroups blocks pubkey, no sudo). Use `~/gamma.sh "cmd"` shell server. File transfer via base64 encoding through gamma.sh.
 3. **Gamma no curl**: Use `wget` instead
 4. **Gamma Hermes broken**: Source tree uses system Python which lacks dependencies. Run venv repair (see `reumanlab-gamma-ssh` skill) and use `~/.hermes/hermes` wrapper.
@@ -167,6 +176,7 @@ To run a task on the best available node:
 
 Example: Running LLM inference
 ```bash
-# On gamma (GPU available)
-ssh a474r867@100.105.254.1 'cd ~/llama-b9672 && LD_LIBRARY_PATH=. ./llama-cli -m ~/models/qwen2.5-0.5b-instruct-q4_k_m.gguf -p "Your prompt" -n 100 -ngl 99 --no-display-prompt'
+# Via Arcee API (primary) — run from any node
+HERMES_CLI -z "Your prompt"
+# Local llama.cpp on gamma (GPU) — use Llama-family GGUFs only; qwen weights retired per policy
 ```

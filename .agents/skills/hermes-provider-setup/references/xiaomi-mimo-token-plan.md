@@ -1,4 +1,9 @@
-# Xiaomi MiMo Token Plan
+# Xiaomi MiMo Token Plan — ⚠️ DEPRECATED / BANNED PROVIDER
+
+> **POLICY: no Chinese AI.** Xiaomi/MiMo is a Chinese AI provider and is
+> BANNED on all ReumanLab infrastructure. Do not configure, route to, or
+> purchase MiMo. This file is retained for history only — the `mimo-key`
+> credentials it references must be retired from every node `~/env/`.
 
 Session reference — MiMo Token Plan configuration on Hermes Agent (2026-06-10).
 

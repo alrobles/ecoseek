@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Benchmark: EcoCoder-7B vs DeepSeek — ecological answer quality comparison.
+"""DEPRECATED — kept for history only.
+
+Policy: no Chinese AI providers/models (see docs/search-providers.md). This
+benchmark compares two models that are both excluded under the policy —
+DeepSeek (Chinese provider) and EcoCoder-7B (a Qwen-based fine-tune). It must
+not be run against live credentials. Replace with a compliant comparator
+(e.g. Trinity Large / Llama-family) when the benchmark is revived.
+
+Benchmark: EcoCoder-7B vs DeepSeek — ecological answer quality comparison.
 
 Uses the DiDAL judge component to score both models on the same prompts.
 Prompts are taken from the DiDAL Protocol benchmark suite covering three

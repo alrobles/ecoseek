@@ -16,8 +16,8 @@ User Prompt
     v
 +-------------------+
 |   PANEL (parallel) |
-|   - mimo-v2.5-pro  |
-|   - deepseek-v4    |
+|   - trinity-large  |
+|   - gpt-5.1-mini   |
 |   - (option: 3rd)  |
 +-------------------+
     |
@@ -57,20 +57,22 @@ import httpx
 import json
 import time
 
+# POLICY: no Chinese AI providers/models (no xiaomi/mimo, deepseek, GLM,
+# Kimi, Qwen). Panel members must be non-Chinese models only.
 PROVIDERS = {
-    "xiaomi": {
-        "url": "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions",
-        "model": "mimo-v2.5-pro",
-        "key_env": "XIAOMI_API_KEY"
+    "arcee": {
+        "url": "https://api.arcee.ai/api/v1/chat/completions",
+        "model": "trinity-large-thinking",
+        "key_env": "ARCEE_API_KEY"
     },
-    "deepseek": {
-        "url": "https://api.deepseek.com/v1/chat/completions",
-        "model": "deepseek-chat",
-        "key_env": "DEEPSEEK_API_KEY"
+    "openrouter": {
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "model": "openai/gpt-5.1-codex-mini",
+        "key_env": "OPENROUTER_API_KEY"
     }
 }
 
-JUDGE_PROVIDER = "deepseek"  # or use openrouter for better judge
+JUDGE_PROVIDER = "arcee"  # or openrouter for a different judge perspective
 
 async def call_model(provider_config, messages, api_key):
     """Call a single model and return response."""

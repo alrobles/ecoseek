@@ -11,7 +11,7 @@ EcoSeek is pre-alpha. This checklist is the honest accounting of where things st
 - The product modes (DIY / BYOK / Lab-managed) are defined.
 - The relationship to upstream AgenticSeek is acknowledged, attributed, and license-aware.
 - **AgenticPlug gateway is functional** — dual-layer auth (GitHub Device Flow → opaque session), role-based access control, scoped sessions, approval workflow for 6 risky capabilities, connector discovery API, persistent SQLite session store, rate limiting. 600+ tests across 26 suites.
-- **DeepSeek BYOK provider** — Fernet-encrypted local keystore (`cryptography>=42`), OS keychain preferred with encrypted file fallback, fails closed without crypto library. 41 keystore tests.
+- **BYOK provider keystore** — Fernet-encrypted local keystore (`cryptography>=42`), OS keychain preferred with encrypted file fallback, fails closed without crypto library. 41 keystore tests. *(Built originally for DeepSeek BYOK; DeepSeek is now banned under the no-Chinese-AI policy — the keystore is provider-agnostic and remains for compliant BYOK providers.)*
 - **EcoCoder local provider** — wraps Ollama with model validation and auto-resolution of generic model names to `ecocoder`.
 - **EcoCoder cluster provider** — routes inference through AgenticPlug to remote clusters via OpenAI-compatible API.
 - **EcoAgent tool server** — 30+ ecological tools exposed via HTTP (`/v1/tools`, `/v1/tools/{name}/execute`), discoverable by AgenticPlug connector manifest. Docker-packaged.
@@ -54,7 +54,7 @@ Even after the minimum demo works internally, the following must be true before 
 - [ ] Final license decision committed to the repository and reflected in `NOTICE.md`.
 - [ ] All AgenticSeek-derived code in any EcoSeek component carries its GPLv3 headers and is identifiable.
 - [x] ~~A written threat model in `security.md`.~~ Done — full-stack threat model with 24 scenarios across 5 layers. See [security.md](./security.md).
-- [x] ~~A documented BYOK flow exercised with at least one provider.~~ Done — DeepSeek BYOK with Fernet keystore (agenticSeek PRs #23, #33). See [deepseek-byok.md](https://github.com/alrobles/agenticSeek/blob/main/docs/deepseek-byok.md).
+- [x] ~~A documented BYOK flow exercised with at least one provider.~~ Done — BYOK with Fernet keystore (agenticSeek PRs #23, #33). See [deepseek-byok.md](https://github.com/alrobles/agenticSeek/blob/main/docs/deepseek-byok.md). *(DeepSeek itself is now banned — policy; the keystore mechanism is provider-agnostic.)*
 - [ ] An audit log format that a second person, not the author, can read and reason about.
 - [ ] A "how to report a security issue" contact published in `security.md`.
 - [x] ~~A clear public statement that EcoSeek is not affiliated with or endorsed by AgenticSeek or DeepSeek.~~ Done — in README.md, NOTICE.md, UPSTREAM_CREDITS.md, and the landing page.

@@ -18,8 +18,8 @@ echo "OPENROUTER_API_KEY=$(cat /home/reumanlab/env/openrouter-key)" >> ~/.hermes
 # Register provider
 hermes config set providers.openrouter.api_mode chat_completions
 
-# Add to fallback chain
-hermes config set fallback_providers "[deepseek, openrouter]"
+# Add to fallback chain (non-Chinese providers only — policy)
+hermes config set fallback_providers "[arcee, openrouter]"
 ```
 
 No need to set `base_url` — OpenRouter is a built-in provider in Hermes.
@@ -74,16 +74,19 @@ Imitate Fusion using free providers — no OpenRouter cost:
 
 ```
 Panel (parallel, free):
-  - xiaomi/mimo-v2.5-pro
-  - deepseek/deepseek-v4-pro
+  - local Ollama Llama-family model
+  - a second non-Chinese free model
 
-Judge (sequential, free):
-  - deepseek-v4-pro (or mimo)
+Judge (sequential):
+  - any compliant model
 ```
 
-Total: 3 calls per query, $0 cost. For complex queries where single-model
+Total: 3 calls per query. For complex queries where single-model
 answers aren't enough. Use Hermes `delegate_task` with parallel subagents
 for the panel, then a final subagent as judge.
+
+**POLICY: no Chinese AI** — do NOT use xiaomi/mimo, deepseek, GLM, Kimi,
+Qwen or any Chinese-provider model in panels or judges.
 
 Quality comparison: run same prompts through single model vs DIY fusion,
 measure with a scoring rubric. If DIY fusion gets 80%+ of OpenRouter Fusion
@@ -97,7 +100,7 @@ quality at $0 cost, it wins for most tasks.
 - Free models available with rate limits (see FAQ)
 
 ## Pitfalls
-- OpenRouter is paid — unlike xiaomi/deepseek which are free Token Plan
+- OpenRouter is paid — the legacy free Token Plan providers (xiaomi/deepseek) are BANNED under the no-Chinese-AI policy
 - Fusion model alias `openrouter/fusion` resolves to a real model + plugin automatically
 - `analysis_models` in Fusion config uses `~provider/model` syntax (tilde prefix)
 - Hermes built-in provider means no `base_url` config needed, just the API key

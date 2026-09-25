@@ -18,6 +18,32 @@ Emily (Alpha, local) ↔ Hermes (Beta, remote on reumanlab) via `hermes.ecoseek.
 | `world_get` | Full artifact record + provenance event history |
 | `world_lineage` | Ancestors/descendants inheritance graph |
 | `world_stats` | Portfolio metrics (validated inventions, lineage depth, reuse fraction) |
+| `world_replay` | Frozen agent-free replay of `artifact.executable` on held-out inputs — emits `world_validate` evidence |
+| `world_methods` | Render a Methods section from provenance (lineage + evidence + replay runs) — registers a `methods_section` artifact |
+| `world_sync` | Federate world state — merge `artifacts.jsonl` + `events.jsonl` with a peer (file path, `ssh:host:path`, or git remote); status-precedence merge, event dedup |
+
+The plugin also registers a frozen system-prompt section (`ecoseek.world_stigmergy`) that injects the stigmergic policy — `world_query` before expensive work, `observe` on reuse, promote only via `world_replay` — plus live world stats at session start (prompt-caching safe: rendered once, byte-stable for the session).
+
+**Phoenix tracing** (`world_trace.py`): every world event emits an `ecoseek.world.event` span; `replay`, `sync`, and `methods` emit timed spans with result attributes (run_id, exit_code, transport, merged counts). Fire-and-forget POST to `PHOENIX_ENDPOINT` (default `http://localhost:6006`, `/v1/spans`); `PHOENIX_API_KEY` optional bearer; `ECOSEEK_WORLD_TRACE=0` disables. Tracing never blocks or fails a world operation — Phoenix down ⇒ debug log, keep going.
+
+**Multi-agent locking**: `journal_mode=WAL` keeps reads lock-free; write paths (`propose`/`record_event`/`fork`/`import_artifact`) take an advisory `flock` on `world.lock` covering the whole critical section — DB txn + `events.jsonl` append together, so commit order equals replication order. `busy_timeout=5000` covers writers that bypass the lock; 10s deadline → `TimeoutError`. Same-host scope — cross-node replication goes through `world_sync`, whose merge files are written atomically (temp+rename).
+
+**Executable security policy** (`world_policy.json` in the world dir — local, **never federated**: each node keeps its own trust decisions):
+
+```json
+{
+  "allowed_exec_kinds": ["ecoagent_tool", "shell", "r_script", "slurm_job"],
+  "gated_exec_kinds": ["shell", "r_script", "slurm_job"],
+  "trusted_installers": [],
+  "import_clamp_gated": false
+}
+```
+
+- `propose` — `executable.kind` must be in `allowed_exec_kinds` (unknown kinds are rejected before they ever reach the runner); `ecoagent_tool` refs are verified against the audited `tools.registry` when the hermes runtime is reachable
+- `install` — gated kinds require a **trusted installer** (`trusted_installers` ∪ the local `ECOSEEK_AGENT_ID`) or a prior `attest` event from one — `attest` becomes the review-step that unlocks installs for other agents
+- `import_artifact` — banned kinds are rejected; with `import_clamp_gated` a peer's `installed`/`validated` gated artifact arrives clamped to `tested` (must re-earn trust locally)
+
+Trust boundary note: agent identity is self-asserted (the `agent` field) — the policy gates *who may assert install*, not cryptographic identity. The hard execution boundary remains `ECOSEEK_WORLD_REPLAY_EXEC=1`.
 | `hermes_status` | Check if Hermes Beta is available |
 | `escalate_remote` | One-shot delegation to Beta (execution tasks) |
 | `dialectical_exchange` | Legacy DiDAL exchange (iterative execution tasks) |
@@ -70,7 +96,7 @@ Open Questions
 
 ```bash
 # Pass your Hermes API key when starting Emily:
-HERMES_ECOSEEK_API_KEY=agenticplu... DEEPSEEK_API_KEY=sk-... bash emily-start.sh
+HERMES_ECOSEEK_API_KEY=agenticplu... ARCEE_API_KEY=sk-... bash emily-start.sh
 ```
 
 ## Configuration
@@ -107,7 +133,7 @@ User → localhost:4000 (frontend)
                    → hermes.ecoseek.org (Hermes/Beta on reumanlab)
                         → eco_analyze (GBIF, SDM, diversity, taxonomy)
                         → ku_hpc (Slurm → A100/MI210 GPUs)
-                        → shell, GitHub CLI, DeepSeek v4 Pro
+                        → shell, GitHub CLI, Trinity Large Thinking (Arcee)
 ```
 
 ## Literature Retrieval Sources
@@ -173,9 +199,9 @@ Stats from `policy_signals` table can tune classifier thresholds, round limits, 
 
 The frontend provides a 3-way toggle that controls how Emily processes questions:
 
-| Mode | Frontend Label | Behavior | DeepSeek Cost |
+| Mode | Frontend Label | Behavior | Cost |
 |------|---------------|----------|---------------|
-| ⚡ **Fast** (Rápido) | `fast` | Skips DiDAL → direct single-call answer | Cheapest ($0.14/M in, $0.28/M out) |
+| ⚡ **Fast** (Rápido) | `fast` | Skips DiDAL → direct single-call answer | Cheapest |
 | 🔄 **Auto** | `auto` | Classifier decides (default) | Varies by complexity |
 | 🧠 **Deep** (Profundo) | `deep` | Forces full DiDAL protocol + literature retrieval | Standard cost, deeper reasoning |
 
@@ -187,16 +213,13 @@ The frontend provides a 3-way toggle that controls how Emily processes questions
    - `fast` → `direct` mode (skip dialectical loop)
    - `deep` → `didal_literature` mode (full protocol + evidence retrieval)
    - `auto` → classifier decides based on prompt complexity score
-4. The `reasoning_effort` parameter is also passed in the API body for DeepSeek V4 thinking mode hints
+4. `reasoning_effort` is NOT forwarded raw — trinity-large-thinking always thinks (Hermes handles this internally)
 
-### DeepSeek V4 Pricing Reference
+### Provider note
 
-| Model | Input | Output | Cache Hit |
-|-------|-------|--------|-----------|
-| `deepseek-v4-flash` | $0.14/M | $0.28/M | $0.0028/M |
-| `deepseek-v4-pro` | $0.435/M | $0.87/M | $0.003625/M |
-
-Both support thinking mode toggle (`thinking: {type: "enabled/disabled"}`).
+Emily's remote escalation runs on Trinity Large Thinking via Arcee AI.
+DeepSeek/Qwen/MiMo and other Chinese AI providers are banned (see
+`docs/search-providers.md`) — DeepSeek pricing references were removed.
 
 ## Literature Database (litdb)
 
@@ -225,36 +248,17 @@ store_paper(doi="10.1234/test", title="...", provider="openalex")
 stats = get_stats()  # {'total_papers': 42, 'by_provider': {...}, ...}
 ```
 
-## EcoCoder-7B Integration
+## EcoCoder-7B Integration — ⚠️ non-compliant model
 
-[EcoCoder-7B](https://huggingface.co/alrobles/EcoCoder-7B) is a domain-specialized ecological LLM (Qwen2.5-Coder-7B-Instruct + ecological LoRA, GGUF Q4_K_M).
+[EcoCoder-7B](https://huggingface.co/alrobles/EcoCoder-7B) is a domain-specialized ecological LLM — **but it is a Qwen2.5-Coder fine-tune, which is banned under the no-Chinese-AI policy** (`docs/search-providers.md`). Do not deploy it on lab infrastructure; it is retained for history until a compliant-base retrain lands (see ecocoder repo).
 
-> ⚠️ **~4.5 GB download.** Compatible with LM Studio and Ollama.
+> ⚠️ **~4.5 GB download.** Non-compliant — do not run in the EcoSeek stack.
 
-### Using with Emily
+### Benchmarking EcoCoder vs DeepSeek — DEPRECATED
 
-```bash
-# Via LM Studio (load the model, start server on default port):
-ECOCODER_URL=http://localhost:1234/v1 \
-DEEPSEEK_API_KEY=sk-... bash emily-start.sh
-
-# Via Ollama:
-ollama run hf.co/alrobles/EcoCoder-7B
-ECOCODER_URL=http://localhost:11434/v1 \
-ECOCODER_MODEL=hf.co/alrobles/EcoCoder-7B bash emily-start.sh
-```
-
-### Benchmarking EcoCoder vs DeepSeek
-
-```bash
-# Compare both models on 8 ecological prompts:
-ECOCODER_URL=http://localhost:1234/v1 DEEPSEEK_API_KEY=sk-... \
-python3 benchmarks/ecocoder_vs_deepseek.py
-
-# Results saved to benchmarks/results/
-```
-
-See `benchmarks/README.md` for full usage.
+`benchmarks/ecocoder_vs_deepseek.py` compares two models that are both
+non-compliant under the policy. See `benchmarks/README.md` for details and
+the compliant-comparator path.
 
 ## Benchmark Prompts
 

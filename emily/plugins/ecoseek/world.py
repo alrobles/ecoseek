@@ -34,7 +34,17 @@ import os
 import sqlite3
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
+
+try:
+    from . import world_trace
+except ImportError:  # top-level import in tests
+    import world_trace  # type: ignore[no-redef]
+
+try:
+    import fcntl
+except ImportError:  # non-POSIX: degrade to the in-process lock only
+    fcntl = None
 
 logger = logging.getLogger(__name__)
 
@@ -113,19 +123,65 @@ CREATE VIRTUAL TABLE IF NOT EXISTS world_fts USING fts5(
 """
 
 
+# ---------------------------------------------------------------------------
+# Multi-agent write locking
+#
+# N processes may share one world dir (agents on one host, sync pulls racing
+# local writes). SQLite is single-writer: WAL keeps readers lock-free, and a
+# flock on `world.lock` serializes the whole write critical section — DB txn
+# AND events.jsonl append together, so commit order equals replication order.
+# busy_timeout covers writers that bypass the flock (sqlite3 CLI, raw sync).
+# Scope: same-host only — cross-node replication goes through world_sync.
+# ---------------------------------------------------------------------------
+
+_proc_write_lock = threading.Lock()
+_LOCK_DEADLINE_S = 10.0
+
+
 @contextmanager
-def _connect():
+def _write_lock():
+    """Exclusive cross-process write lock (advisory flock on world.lock)."""
+    with _proc_write_lock:
+        if fcntl is None:
+            yield
+            return
+        os.makedirs(_world_dir(), exist_ok=True)
+        deadline = time.time() + _LOCK_DEADLINE_S
+        with open(os.path.join(_world_dir(), "world.lock"), "a") as fh:
+            while True:
+                try:
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    if time.time() >= deadline:
+                        raise TimeoutError(
+                            "world write lock held >10s — another agent is "
+                            "mid-write; retry the operation"
+                        )
+                    time.sleep(0.05)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def _connect(write: bool = False):
     os.makedirs(_world_dir(), exist_ok=True)
     if not hasattr(_local, "conn") or _local.conn is None:
         _local.conn = sqlite3.connect(_db_path())
         _local.conn.row_factory = sqlite3.Row
         _local.conn.executescript(_SCHEMA)
-    try:
-        yield _local.conn
-        _local.conn.commit()
-    except Exception:
-        _local.conn.rollback()
-        raise
+        _local.conn.execute("PRAGMA journal_mode=WAL")
+        _local.conn.execute("PRAGMA busy_timeout=5000")
+    lock = _write_lock() if write else nullcontext()
+    with lock:
+        try:
+            yield _local.conn
+            _local.conn.commit()
+        except Exception:
+            _local.conn.rollback()
+            raise
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +229,109 @@ def _emit(
         ),
     )
     _append_jsonl(event)
+    world_trace.emit(
+        "event",
+        kind=kind,
+        artifact_id=artifact_id,
+        agent=event["agent"],
+        task_id=task_id,
+    )
     return event
+
+
+# ---------------------------------------------------------------------------
+# Executable security policy — local trust, not federated
+#
+# `world_policy.json` in the world dir (each node keeps its own — like git
+# config vs objects). Absent ⇒ defaults below; operators edit the file.
+# Enforced at three points:
+#   propose         — executable.kind must be in allowed_exec_kinds; an
+#                     ecoagent_tool ref is verified against the audited
+#                     tool registry when that runtime is reachable
+#   install event   — gated_exec_kinds require a trusted installer
+#                     (trusted_installers ∪ local agent) OR a prior
+#                     `attest` event from one
+#   import_artifact — kind not allowed ⇒ rejected; import_clamp_gated ⇒
+#                     installed/validated statuses clamp to tested, so a
+#                     peer can't push a ready-to-run gated executable
+# ---------------------------------------------------------------------------
+
+_DEFAULT_POLICY = {
+    "version": 1,
+    "allowed_exec_kinds": ["ecoagent_tool", "shell", "r_script", "slurm_job"],
+    "gated_exec_kinds": ["shell", "r_script", "slurm_job"],
+    "trusted_installers": [],
+    "import_clamp_gated": False,
+}
+
+
+def _policy_path() -> str:
+    return os.path.join(_world_dir(), "world_policy.json")
+
+
+def _policy() -> dict:
+    """This world's local trust policy (never federated). Defaults when the
+    file is absent or malformed."""
+    try:
+        with open(_policy_path()) as fh:
+            loaded = json.load(fh)
+        if isinstance(loaded, dict):
+            return {**_DEFAULT_POLICY, **loaded}
+    except (OSError, ValueError):
+        pass
+    return dict(_DEFAULT_POLICY)
+
+
+def _check_exec_proposable(executable: dict) -> str | None:
+    """Per-kind allowlist at proposal time. Returns an error string or None."""
+    kind = (executable or {}).get("kind")
+    if kind is None:
+        return None  # no executable payload — nothing to gate
+    allowed = _policy()["allowed_exec_kinds"]
+    if kind not in allowed:
+        return (
+            f"executable kind {kind!r} not allowed by world_policy.json "
+            f"(allowed: {allowed})"
+        )
+    if kind == "ecoagent_tool":
+        # the audited tool registry IS the ref allowlist — verify when the
+        # hermes runtime is reachable; Emily-local can't verify → record only
+        try:
+            from tools.registry import registry
+        except ImportError:
+            return None
+        get_entry = getattr(registry, "get_entry", None)
+        if get_entry is None:
+            return None  # older/shim registry without the accessor — can't verify
+        if get_entry(executable.get("ref")) is None:
+            return (
+                f"ecoagent_tool ref {executable.get('ref')!r} is not a "
+                "registered tool — executables must point at the audited "
+                "toolset"
+            )
+    return None
+
+
+def _check_install_trusted(conn, artifact: dict, agent: str) -> str | None:
+    """install on a gated-executable artifact requires a trusted installer,
+    or a prior `attest` event from one. Returns an error string or None."""
+    kind = (artifact.get("executable") or {}).get("kind")
+    if kind not in _policy()["gated_exec_kinds"]:
+        return None
+    trusted = sorted(set(_policy()["trusted_installers"]) | {_agent_id()})
+    if agent in trusted:
+        return None
+    attest = conn.execute(
+        "SELECT 1 FROM events WHERE artifact_id=? AND kind='attest'"
+        f" AND agent IN ({','.join('?' * len(trusted))})",
+        (artifact["id"], *trusted),
+    ).fetchone()
+    if attest:
+        return None
+    return (
+        f"install of gated executable kind {kind!r} requires a trusted "
+        f"installer {trusted} or a prior attest event from one"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -288,10 +446,13 @@ def propose(
     spec = spec or {}
     executable = executable or {}
     evidence = evidence or []
+    err = _check_exec_proposable(executable)
+    if err:
+        return {"success": False, "error": err}
     aid = _artifact_id(name, artifact_type, spec, executable, evidence)
     now = time.time()
 
-    with _connect() as conn:
+    with _connect(write=True) as conn:
         existing = conn.execute(
             "SELECT id, status FROM artifacts WHERE id = ?", (aid,)
         ).fetchone()
@@ -353,7 +514,26 @@ def record_event(
 ) -> dict:
     """Append an event to an artifact's history and apply the status machine."""
     payload = payload or {}
-    with _connect() as conn:
+    with _connect(write=True) as conn:
+        if kind == "install":
+            row = conn.execute(
+                "SELECT executable FROM artifacts WHERE id = ?", (artifact_id,)
+            ).fetchone()
+            if row is None:
+                return {
+                    "success": False,
+                    "error": f"artifact {artifact_id} not found",
+                }
+            err = _check_install_trusted(
+                conn,
+                {
+                    "id": artifact_id,
+                    "executable": json.loads(row["executable"] or "{}"),
+                },
+                agent or _agent_id(),
+            )
+            if err:
+                return {"success": False, "error": err}
         try:
             new_status = _apply_transition(
                 conn, artifact_id, kind, payload, agent or _agent_id()
@@ -413,7 +593,7 @@ def fork(
         return child
 
     child_id = child["artifact_id"]
-    with _connect() as conn:
+    with _connect(write=True) as conn:
         conn.execute(
             "UPDATE artifacts SET parents = ? WHERE id = ?",
             (json.dumps([artifact_id]), child_id),
@@ -579,6 +759,30 @@ def lineage(artifact_id: str) -> dict:
     }
 
 
+def prompt_section(_session_info: dict | None = None) -> str:
+    """Stigmergic policy + live world stats — rendered once per session and
+    frozen into the system prompt (prompt-caching invariant: no mid-loop
+    injection; the section is byte-stable for the session's life)."""
+    try:
+        s = stats()
+        n, nv = s.get("total_artifacts", 0), s.get("validated_inventions", 0)
+    except Exception:
+        n = nv = 0
+    return (
+        "## EcoSeek World — persistent artifact substrate\n"
+        f"This world currently holds {n} artifact(s), {nv} validated.\n"
+        "- Before expensive or irreversible work (model fits, HPC jobs, heavy\n"
+        "  pipelines, long searches): `world_query(text=<task>, status='validated')`.\n"
+        "  Reuse beats rebuild — fork and extend instead of re-deriving.\n"
+        "- When you reuse an artifact, record it: `world_event(kind='observe')` —\n"
+        "  the observation-first channel is how later agents find it.\n"
+        "- Register durable results with `world_propose`; promote only through\n"
+        "  `world_replay`/`world_validate`. Never claim validation by narration.\n"
+        "- `world_methods` renders provenance into a Methods section; `world_sync`\n"
+        "  federates this world with peers."
+    )
+
+
 def stats() -> dict:
     """Portfolio-level endpoints à la SwarmWorld: breadth, validated
     inventions, lineage depth, observation-first reuse fraction."""
@@ -655,16 +859,103 @@ def export_events() -> dict:
     return {"success": True, "events": events, "path": path}
 
 
+_STATUS_PRECEDENCE = {
+    "proposed": 0,
+    "tested": 1,
+    "installed": 2,
+    "validated": 3,
+    "retired": 4,
+}
+
+
+def _merge_artifact_row(conn, incoming: dict) -> str:
+    """Merge an incoming artifact into an existing row. Returns 'updated'
+    or 'kept'. Status wins by precedence; metrics/evidence/parents union;
+    earliest created_at, latest updated_at."""
+    aid = incoming["id"]
+    row = conn.execute("SELECT * FROM artifacts WHERE id = ?", (aid,)).fetchone()
+    local = _row_to_artifact(row)
+
+    inc_status = incoming.get("status", "proposed")
+    status = (
+        inc_status
+        if _STATUS_PRECEDENCE.get(inc_status, 0)
+        > _STATUS_PRECEDENCE.get(local["status"], 0)
+        else local["status"]
+    )
+    metrics = dict(local["metrics"])
+    for k, v in (incoming.get("metrics") or {}).items():
+        metrics.setdefault(k, v)
+    evidence = list(local["evidence"])
+    for e in incoming.get("evidence") or []:
+        if e not in evidence:
+            evidence.append(e)
+    parents = list(local["parents"])
+    for p in incoming.get("parents") or []:
+        if p not in parents:
+            parents.append(p)
+    summary = local["summary"] or incoming.get("summary", "")
+
+    changed = (
+        status != local["status"]
+        or metrics != local["metrics"]
+        or evidence != local["evidence"]
+        or parents != local["parents"]
+        or summary != local["summary"]
+    )
+    if not changed:
+        return "kept"
+    conn.execute(
+        "UPDATE artifacts SET status=?, summary=?, metrics=?, evidence=?,"
+        " parents=?, created_at=?, updated_at=? WHERE id=?",
+        (
+            status,
+            summary,
+            json.dumps(metrics, ensure_ascii=False),
+            json.dumps(evidence, ensure_ascii=False),
+            json.dumps(parents, ensure_ascii=False),
+            min(local["created_at"], incoming.get("created_at", local["created_at"])),
+            max(local["updated_at"], incoming.get("updated_at", local["updated_at"])),
+            aid,
+        ),
+    )
+    return "updated"
+
+
 def import_artifact(artifact: dict, events: list | None = None) -> dict:
     """Merge a remote artifact (+ optional events) into this world.
-    Artifacts are content-addressed: re-import is idempotent."""
+    Artifacts are content-addressed: re-import is idempotent. When the
+    artifact exists, fields merge by status precedence — never a downgrade."""
     aid = artifact.get("id")
     if not aid:
         return {"success": False, "error": "artifact missing id"}
-    with _connect() as conn:
+    kind = (artifact.get("executable") or {}).get("kind")
+    pol = _policy()
+    if kind is not None and kind not in pol["allowed_exec_kinds"]:
+        return {
+            "success": False,
+            "error": f"executable kind {kind!r} not allowed by world_policy.json",
+        }
+    # a peer can push a ready-to-run gated executable — clamp its status so
+    # install/validate must be re-earned under THIS node's trust policy
+    if (
+        pol["import_clamp_gated"]
+        and kind in pol["gated_exec_kinds"]
+        and artifact.get("status") in ("installed", "validated")
+    ):
+        artifact = {**artifact, "status": "tested"}
+    with _connect(write=True) as conn:
         exists = conn.execute("SELECT 1 FROM artifacts WHERE id = ?", (aid,)).fetchone()
         if exists:
-            return {"success": True, "artifact_id": aid, "merged": False}
+            outcome = _merge_artifact_row(conn, artifact)
+            for ev in events or []:
+                _insert_event_dedup(conn, aid, ev)
+            return {
+                "success": True,
+                "artifact_id": aid,
+                "merged": False,
+                "outcome": outcome,
+            }
         conn.execute(
             "INSERT INTO artifacts"
             " (id, name, type, status, summary, spec, executable, parents,"
@@ -698,16 +989,34 @@ def import_artifact(artifact: dict, events: list | None = None) -> dict:
             ),
         )
         for ev in events or []:
-            conn.execute(
-                "INSERT INTO events (ts, artifact_id, agent, kind, payload, task_id)"
-                " VALUES (?,?,?,?,?,?)",
-                (
-                    ev.get("ts", time.time()),
-                    aid,
-                    ev.get("agent", "remote"),
-                    ev.get("kind", "propose"),
-                    json.dumps(ev.get("payload") or {}, ensure_ascii=False),
-                    ev.get("task_id", ""),
-                ),
-            )
+            _insert_event_dedup(conn, aid, ev)
     return {"success": True, "artifact_id": aid, "merged": True}
+
+
+def _insert_event_dedup(conn, artifact_id: str, ev: dict) -> bool:
+    """Insert an event unless an identical row already exists (natural key:
+    artifact_id + ts + agent + kind + canonical payload). Returns True when
+    a row was inserted."""
+    payload = json.dumps(ev.get("payload") or {}, ensure_ascii=False)
+    ts = ev.get("ts", time.time())
+    agent = ev.get("agent", "remote")
+    kind = ev.get("kind", "propose")
+    # compare payload semantically — key order may differ across instances
+    candidates = conn.execute(
+        "SELECT payload FROM events WHERE artifact_id=? AND ts=? AND agent=?"
+        " AND kind=?",
+        (artifact_id, ts, agent, kind),
+    ).fetchall()
+    incoming_payload = ev.get("payload") or {}
+    for c in candidates:
+        try:
+            if json.loads(c["payload"] or "{}") == incoming_payload:
+                return False
+        except (json.JSONDecodeError, TypeError):
+            continue
+    conn.execute(
+        "INSERT INTO events (ts, artifact_id, agent, kind, payload, task_id)"
+        " VALUES (?,?,?,?,?,?)",
+        (ts, artifact_id, agent, kind, payload, ev.get("task_id", "")),
+    )
+    return True

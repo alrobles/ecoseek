@@ -42,7 +42,7 @@ machine that never ran EcoSeek, then `bash scripts/smoke.sh` green.
   document it as a one-time prerequisite performed by the admin.
 
 ### F2-FIND-02 · setup.sh run order (CI mode)
-- `CI=1 DEEPSEEK_API_KEY= bash setup.sh` runs correctly when the daemon is up:
+- `CI=1 ARCEE_API_KEY= bash setup.sh` runs correctly when the daemon is up:
   it skips prompts, writes `.env` (0600), and clones `.repos/ecoagent`.
 - On this node it aborted at the `docker info` check (expected, see FIND-01).
 

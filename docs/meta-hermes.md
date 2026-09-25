@@ -23,9 +23,9 @@ User Prompt
     ▼
 ┌─────────────────────┐
 │   PANEL (parallel)   │
-│   • mimo-v2.5-pro   │  ← Free (Xiaomi Token Plan)
-│   • deepseek-v4     │  ← Free (DeepSeek)
-│   • openrouter/*    │  ← Cheap (OpenRouter)
+│   • trinity-large   │  ← Arcee (primary)
+│   • gpt-5.1-mini    │  ← OpenRouter (non-Chinese)
+│   • llama-family    │  ← Local Ollama (free)
 └─────────────────────┘
     │
     ▼ (all responses)
@@ -50,7 +50,7 @@ User Prompt
 
 1. **Wisdom of Crowds**: Multiple models with different training data catch each other's blind spots
 2. **Structured Deliberation**: The judge model performs explicit comparison, not just averaging
-3. **Diversity Helps**: Different model architectures (mimo, deepseek, gpt) have different strengths
+3. **Diversity Helps**: Different model architectures (trinity, gpt, llama) have different strengths — non-Chinese models only (policy)
 4. **Cost Efficiency**: Free models + cheap judge < expensive single model
 
 ## Architecture
@@ -75,13 +75,15 @@ reumanlab-terminal (WSL)  ← Local workstation
           16GB RAM, Quadro P620
 ```
 
-### Providers (All Free or Cheap)
+### Providers (non-Chinese only — POLICY)
 
 | Provider | Model | Cost | Use Case |
 |----------|-------|------|----------|
-| Xiaomi | mimo-v2.5-pro | Free | Primary, general tasks |
-| DeepSeek | deepseek-v4-pro | Free | Fallback, code/reasoning |
-| OpenRouter | Hundreds of models | Cheap | Specialized, judge |
+| ~~Xiaomi~~ | mimo-v2.5-pro | ~~Free~~ | **BANNED — Chinese AI** |
+| ~~DeepSeek~~ | deepseek-v4-pro | ~~Free~~ | **BANNED — Chinese AI** |
+| Arcee | trinity-large-thinking | Paid | Primary, reasoning |
+| OpenRouter | non-Chinese models | Paid | Fallback, judge |
+| Ollama local | Llama-family | Free | Offline fallback |
 
 ### Skills
 
@@ -109,20 +111,21 @@ venv/bin/pip install -e .
 ### 2. Configure Providers
 
 ```bash
-# Add API keys to ~/.hermes/.env
-echo "XIAOMI_API_KEY=your-key" >> ~/.hermes/.env
-echo "DEEPSEEK_API_KEY=your-key" >> ~/.hermes/.env
+# Add API keys to ~/.hermes/.env (non-Chinese providers only — POLICY)
+echo "ARCEE_API_KEY=your-key" >> ~/.hermes/.env
 echo "OPENROUTER_API_KEY=your-key" >> ~/.hermes/.env
 
 # Configure providers
-hermes config set providers.xiaomi.api_mode chat_completions
-hermes config set providers.xiaomi.base_url https://token-plan-sgp.xiaomimimo.com/v1
-hermes config set providers.deepseek.api_mode chat_completions
-hermes config set providers.deepseek.base_url https://api.deepseek.com/v1
+hermes config set providers.arcee.api_mode chat_completions
+hermes config set providers.arcee.base_url https://api.arcee.ai/api/v1
 hermes config set providers.openrouter.api_mode chat_completions
 hermes config set providers.openrouter.base_url https://openrouter.ai/api/v1
-hermes config set fallback_providers "[deepseek, openrouter]"
+hermes config set fallback_providers "[openrouter]"
 ```
+
+**Never configure xiaomi/deepseek/qwen/glm/kimi keys** — banned under the
+no-Chinese-AI policy. Retire legacy `XIAOMI_API_KEY`/`DEEPSEEK_API_KEY`
+entries wherever found.
 
 ### 3. Load Skills
 
@@ -146,25 +149,30 @@ result = asyncio.run(fusion(
 print(result["answer"])
 ```
 
-## Benchmark Results
+## Benchmark Results — ⚠️ historical (banned providers)
+
+> These results used mimo/deepseek, which are now **banned under the
+> no-Chinese-AI policy**. The finding (fusion ≈ frontier quality at a
+> fraction of cost) stands; rerun with a compliant panel (e.g. Arcee
+> Trinity + an OpenRouter non-Chinese model + local Llama) before citing.
 
 ### Test Setup
 
 - 20 ecological questions with expert-verified answers
-- Single model baseline vs. fusion (panel: mimo + deepseek, judge: deepseek)
+- Single model baseline vs. fusion (panel: ~~mimo + deepseek~~ BANNED, judge: ~~deepseek~~ BANNED)
 - Scoring: 0-4 scale (0=wrong, 4=excellent)
 
 ### Results
 
 | Approach | Avg Score | Latency | Cost |
 |----------|-----------|---------|------|
-| mimo-v2.5-pro alone | 2.8 | 3.2s | $0 |
-| deepseek-v4 alone | 2.9 | 2.8s | $0 |
-| Fusion (mimo + deepseek, judge: deepseek) | 3.4 | 8.5s | $0 |
-| Fusion (mimo + deepseek, judge: gpt-4o-mini) | 3.6 | 9.1s | $0.02 |
+| ~~mimo-v2.5-pro~~ alone | 2.8 | 3.2s | $0 |
+| ~~deepseek-v4~~ alone | 2.9 | 2.8s | $0 |
+| ~~Fusion (mimo + deepseek)~~ | 3.4 | 8.5s | $0 |
+| ~~Fusion (mimo + deepseek, judge: gpt-4o-mini)~~ | 3.6 | 9.1s | $0.02 |
 | GPT-4o alone | 3.5 | 4.1s | $0.15 |
 
-**Key Finding**: Free model fusion achieves 97% of GPT-4o quality at 0% of the cost.
+**Key Finding**: Free model fusion achieves 97% of GPT-4o quality at 0% of the cost — replicate with compliant models.
 
 ### Quality Breakdown
 
@@ -247,7 +255,7 @@ Identify potential issues with:
    ```
 4. Add to fallback chain:
    ```bash
-   hermes config set fallback_providers "[deepseek, newprovider, openrouter]"
+   hermes config set fallback_providers "[arcee, newprovider, openrouter]"
    ```
 
 ### Adding a New Node

@@ -14,7 +14,7 @@ description: Test the Emily frontend end-to-end — health check, login, avatar,
 ## Devin Secrets Needed
 
 - None required for basic frontend testing
-- `DEEPSEEK_API_KEY` needed only if testing actual chat responses (can mock via fetch override for avatar/UI tests)
+- `ARCEE_API_KEY` needed only if testing actual chat responses (can mock via fetch override for avatar/UI tests)
 - GitHub OAuth credentials needed only if testing real login flow (can bypass via Playwright CDP)
 
 ## Setup Steps
@@ -23,7 +23,7 @@ description: Test the Emily frontend end-to-end — health check, login, avatar,
 
 ```bash
 cd /home/ubuntu/repos/ecoseek
-DEEPSEEK_API_KEY=sk-your-key bash emily-start.sh
+ARCEE_API_KEY=sk-your-key bash emily-start.sh
 ```
 
 This builds both Docker images, generates a shared API key, and starts emily-local + ecoseek-frontend + ecoseek-terminal containers.
