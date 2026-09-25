@@ -10,6 +10,14 @@ Emily (Alpha, local) ↔ Hermes (Beta, remote on reumanlab) via `hermes.ecoseek.
 | `classify_prompt` | Classify prompt complexity (direct/didal/didal_literature) |
 | `ecoagent_query` | Execute ecological analysis on EcoAgent (reumanlab) — 25 tools: GBIF, SDM, taxonomy, cofid, etc. |
 | `literature_search` | Search the local literature database (cached papers from all retrieval sources) |
+| `world_query` | **EcoSeek World** — stigmergic lookup in the persistent artifact registry |
+| `world_propose` | Register a new durable artifact (content-addressed, novelty-gated) |
+| `world_event` | Record test/install/observe/repair/dismantle/attest on an artifact |
+| `world_validate` | Promote to `validated` — requires agent-free replay evidence + metrics |
+| `world_fork` | Executable inheritance — fork an artifact into a descendant |
+| `world_get` | Full artifact record + provenance event history |
+| `world_lineage` | Ancestors/descendants inheritance graph |
+| `world_stats` | Portfolio metrics (validated inventions, lineage depth, reuse fraction) |
 | `hermes_status` | Check if Hermes Beta is available |
 | `escalate_remote` | One-shot delegation to Beta (execution tasks) |
 | `dialectical_exchange` | Legacy DiDAL exchange (iterative execution tasks) |

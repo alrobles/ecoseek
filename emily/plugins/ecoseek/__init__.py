@@ -12,6 +12,14 @@ Provides tools for the dual-agent architecture (Alpha↔Beta):
   ``web_search``             — search the internet (GitHub, scientific APIs, general web)
   ``classify_literature``    — LACS domain-specific literature relevance scoring
   ``train_lacs_model``       — train new LACS domain model on HPC cluster
+  ``world_query``            — stigmergic lookup in the persistent artifact registry
+  ``world_propose``          — register a new durable artifact (content-addressed)
+  ``world_event``            — record test/install/observe/repair/dismantle/attest
+  ``world_validate``         — promote to validated via agent-free replay evidence
+  ``world_fork``             — executable inheritance (content-addressed lineage)
+  ``world_get``              — full artifact record + provenance event history
+  ``world_lineage``          — ancestors/descendants inheritance graph
+  ``world_stats``            — portfolio metrics (SwarmWorld endpoints)
 
 Emily (Alpha, local) uses these tools to delegate heavy computation to
 Hermes (Beta, remote) on reumanlab.  Communication goes directly to
@@ -26,6 +34,8 @@ Env vars (set in ~/.hermes/.env or passed via Docker):
   DIDAL_MAX_CRITIQUE_ROUNDS   - Max critique-revise rounds (default: 2)
   DIDAL_MAX_TURNS             - Max dialogue turns for legacy exchange (default: 12)
   DIDAL_STUCK_THRESHOLD       - Repeated errors before stopping (default: 3)
+  ECOSEEK_WORLD_DIR           - World registry dir (default: ~/.ecoseek/world)
+  ECOSEEK_AGENT_ID            - Agent identity recorded on world events (default: emily)
 """
 
 from __future__ import annotations
@@ -1594,6 +1604,411 @@ RUN_MAXENT_MODEL_SCHEMA = {
 
 
 # ---------------------------------------------------------------------------
+# EcoSeek World tools — persistent artifact substrate (SwarmWorld-aligned)
+# ---------------------------------------------------------------------------
+
+WORLD_QUERY_SCHEMA = {
+    "name": "world_query",
+    "description": (
+        "Search the EcoSeek World — the persistent artifact registry shared "
+        "by all agents. ALWAYS query the world BEFORE starting new work: a "
+        "validated pipeline, model, or dataset pin from a previous session "
+        "may already exist. This is the stigmergic channel — agents discover "
+        "each other's work through the world, not through messages. "
+        "Filter by status ('validated' = passed the agent-free replay gate)."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Search text (name, summary, spec, evidence). Empty = list recent.",
+            },
+            "artifact_type": {
+                "type": "string",
+                "enum": [
+                    "",
+                    "pipeline",
+                    "model",
+                    "script",
+                    "dataset_pin",
+                    "methods_section",
+                    "report",
+                    "other",
+                ],
+            },
+            "status": {
+                "type": "string",
+                "enum": ["", "proposed", "tested", "installed", "validated", "retired"],
+            },
+            "author": {"type": "string", "description": "Filter by authoring agent."},
+            "limit": {"type": "integer", "description": "Max results (default 10)."},
+        },
+        "required": [],
+    },
+}
+
+WORLD_PROPOSE_SCHEMA = {
+    "name": "world_propose",
+    "description": (
+        "Register a NEW artifact in the EcoSeek World (status=proposed). "
+        "Use when you create something durable: a pipeline, model, script, "
+        "dataset pin, methods section, or report. Artifacts are "
+        "content-addressed — identical content is rejected by the novelty "
+        "gate; use world_fork to derive from an existing artifact instead. "
+        "The artifact persists for future agents and sessions."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Artifact name."},
+            "artifact_type": {
+                "type": "string",
+                "enum": [
+                    "pipeline",
+                    "model",
+                    "script",
+                    "dataset_pin",
+                    "methods_section",
+                    "report",
+                    "other",
+                ],
+            },
+            "summary": {
+                "type": "string",
+                "description": "What it does, in one sentence.",
+            },
+            "spec": {
+                "type": "object",
+                "description": "Workflow-world declaration: tools, inputs, gates, eval schedule.",
+            },
+            "executable": {
+                "type": "object",
+                "description": "How to run it: {kind: 'ecoagent_tool'|'r_script'|'slurm_job'|'shell', ref, args}.",
+            },
+            "evidence": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Provenance inputs: GBIF DOIs, dataset ids, paper DOIs.",
+            },
+        },
+        "required": ["name", "artifact_type"],
+    },
+}
+
+WORLD_EVENT_SCHEMA = {
+    "name": "world_event",
+    "description": (
+        "Record an event on a world artifact: test (with measured metrics), "
+        "install (deploy as persistent), observe (another agent used it — "
+        "stigmergic reuse), repair, dismantle (retire), or attest (advisory "
+        "LLM-judge note — never promotes). Status transitions are enforced: "
+        "test requires proposed, install requires tested."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "artifact_id": {"type": "string"},
+            "kind": {
+                "type": "string",
+                "enum": ["test", "install", "observe", "repair", "dismantle", "attest"],
+            },
+            "payload": {
+                "type": "object",
+                "description": "Event data, e.g. {metrics: {tss: 0.71}} for test, {score, verdict} for attest.",
+            },
+        },
+        "required": ["artifact_id", "kind"],
+    },
+}
+
+WORLD_VALIDATE_SCHEMA = {
+    "name": "world_validate",
+    "description": (
+        "Promote an installed artifact to VALIDATED — the invention gate. "
+        "REQUIRES replay evidence: the frozen artifact must have re-run on "
+        "held-out inputs (new GBIF snapshot, spatial-block CV, different "
+        "climate product) with ZERO LLM calls. An LLM score alone can never "
+        "validate — measured outcomes only."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "artifact_id": {"type": "string"},
+            "metrics": {
+                "type": "object",
+                "description": "Measured metrics from the replay run, e.g. {tss: 0.68, auc: 0.91}.",
+            },
+            "replay": {
+                "type": "object",
+                "description": "Agent-free replay evidence: {run_id, exit_code: 0, holdout: '<spec>'}.",
+            },
+        },
+        "required": ["artifact_id", "metrics", "replay"],
+    },
+}
+
+WORLD_FORK_SCHEMA = {
+    "name": "world_fork",
+    "description": (
+        "Fork an existing artifact — executable inheritance. The child "
+        "inherits the parent's spec/executable/evidence, records "
+        "parents=[parent_id], and both get fork events. Use edits to "
+        "override fields. This is how technology accumulates: descendants "
+        "modify working designs rather than starting over."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "artifact_id": {"type": "string", "description": "Parent artifact id."},
+            "edits": {
+                "type": "object",
+                "description": "Fields to override: name, summary, spec, executable, evidence, type.",
+            },
+        },
+        "required": ["artifact_id"],
+    },
+}
+
+WORLD_GET_SCHEMA = {
+    "name": "world_get",
+    "description": (
+        "Get the full record of a world artifact: status, spec, executable, "
+        "parents, evidence, measured metrics, and its complete event history "
+        "(the provenance trail for methods sections)."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {"artifact_id": {"type": "string"}},
+        "required": ["artifact_id"],
+    },
+}
+
+WORLD_LINEAGE_SCHEMA = {
+    "name": "world_lineage",
+    "description": (
+        "Show the executable inheritance graph of an artifact: ancestors "
+        "(walking parents) and direct descendants. Lineage depth is a "
+        "portfolio metric — deep lineages mean the society is building on "
+        "its own technology."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {"artifact_id": {"type": "string"}},
+        "required": ["artifact_id"],
+    },
+}
+
+WORLD_STATS_SCHEMA = {
+    "name": "world_stats",
+    "description": (
+        "Portfolio-level world metrics: artifact counts by status/type, "
+        "validated invention count, max executable-lineage depth, and the "
+        "cross-agent observation-first reuse fraction (SwarmWorld endpoints)."
+    ),
+    "parameters": {"type": "object", "properties": {}},
+}
+
+
+def world_query_tool(
+    query: str = "",
+    artifact_type: str = "",
+    status: str = "",
+    author: str = "",
+    limit: int = 10,
+    task_id: str | None = None,
+) -> str:
+    from . import world
+
+    return json.dumps(
+        world.query(
+            text=query,
+            artifact_type=artifact_type,
+            status=status,
+            author=author,
+            limit=limit,
+        ),
+        ensure_ascii=False,
+    )
+
+
+def world_propose_tool(
+    name: str,
+    artifact_type: str = "other",
+    summary: str = "",
+    spec: dict | None = None,
+    executable: dict | None = None,
+    evidence: list | None = None,
+    task_id: str | None = None,
+) -> str:
+    from . import world
+
+    return json.dumps(
+        world.propose(
+            name=name,
+            artifact_type=artifact_type,
+            summary=summary,
+            spec=spec,
+            executable=executable,
+            evidence=evidence,
+            task_id=task_id or "",
+        ),
+        ensure_ascii=False,
+    )
+
+
+def world_event_tool(
+    artifact_id: str,
+    kind: str,
+    payload: dict | None = None,
+    task_id: str | None = None,
+) -> str:
+    from . import world
+
+    return json.dumps(
+        world.record_event(
+            artifact_id=artifact_id,
+            kind=kind,
+            payload=payload,
+            task_id=task_id or "",
+        ),
+        ensure_ascii=False,
+    )
+
+
+def world_validate_tool(
+    artifact_id: str,
+    metrics: dict,
+    replay: dict,
+    task_id: str | None = None,
+) -> str:
+    from . import world
+
+    return json.dumps(
+        world.validate(
+            artifact_id=artifact_id,
+            metrics=metrics,
+            replay=replay,
+            task_id=task_id or "",
+        ),
+        ensure_ascii=False,
+    )
+
+
+def world_fork_tool(
+    artifact_id: str,
+    edits: dict | None = None,
+    task_id: str | None = None,
+) -> str:
+    from . import world
+
+    return json.dumps(
+        world.fork(artifact_id=artifact_id, edits=edits, task_id=task_id or ""),
+        ensure_ascii=False,
+    )
+
+
+def world_get_tool(artifact_id: str, task_id: str | None = None) -> str:
+    from . import world
+
+    return json.dumps(world.get(artifact_id), ensure_ascii=False)
+
+
+def world_lineage_tool(artifact_id: str, task_id: str | None = None) -> str:
+    from . import world
+
+    return json.dumps(world.lineage(artifact_id), ensure_ascii=False)
+
+
+def world_stats_tool(task_id: str | None = None) -> str:
+    from . import world
+
+    return json.dumps(world.stats(), ensure_ascii=False)
+
+
+_WORLD_TOOL_REGISTRATIONS = [
+    (
+        "world_query",
+        WORLD_QUERY_SCHEMA,
+        world_query_tool,
+        {
+            "query": "query",
+            "artifact_type": "artifact_type",
+            "status": "status",
+            "author": "author",
+            "limit": "limit",
+        },
+    ),
+    (
+        "world_propose",
+        WORLD_PROPOSE_SCHEMA,
+        world_propose_tool,
+        {
+            "name": "name",
+            "artifact_type": "artifact_type",
+            "summary": "summary",
+            "spec": "spec",
+            "executable": "executable",
+            "evidence": "evidence",
+        },
+    ),
+    (
+        "world_event",
+        WORLD_EVENT_SCHEMA,
+        world_event_tool,
+        {"artifact_id": "artifact_id", "kind": "kind", "payload": "payload"},
+    ),
+    (
+        "world_validate",
+        WORLD_VALIDATE_SCHEMA,
+        world_validate_tool,
+        {"artifact_id": "artifact_id", "metrics": "metrics", "replay": "replay"},
+    ),
+    (
+        "world_fork",
+        WORLD_FORK_SCHEMA,
+        world_fork_tool,
+        {"artifact_id": "artifact_id", "edits": "edits"},
+    ),
+    ("world_get", WORLD_GET_SCHEMA, world_get_tool, {"artifact_id": "artifact_id"}),
+    (
+        "world_lineage",
+        WORLD_LINEAGE_SCHEMA,
+        world_lineage_tool,
+        {"artifact_id": "artifact_id"},
+    ),
+    ("world_stats", WORLD_STATS_SCHEMA, world_stats_tool, {}),
+]
+
+
+def _register_world_tools(register_fn, **register_kwargs) -> None:
+    """Register the 8 world_* tools via either ctx.register_tool or the
+    legacy tools.registry.register signature."""
+    for name, schema, handler, arg_map in _WORLD_TOOL_REGISTRATIONS:
+
+        def _make(h, am):
+            def _handler(args, **kw):
+                kwargs = {
+                    param: args[arg_name]
+                    for arg_name, param in am.items()
+                    if args.get(arg_name) is not None
+                }
+                kwargs["task_id"] = kw.get("task_id")
+                return h(**kwargs)
+
+            return _handler
+
+        register_fn(
+            name=name,
+            toolset="ecoseek",
+            schema=schema,
+            handler=_make(handler, arg_map),
+            check_fn=lambda: True,
+            **register_kwargs,
+        )
+
+
+# ---------------------------------------------------------------------------
 # register(ctx) — Plugin system entry point
 # ---------------------------------------------------------------------------
 
@@ -1832,9 +2247,12 @@ def register(ctx) -> None:
         check_fn=_is_configured,
     )
 
-    n = 16 if _is_configured() else 11
+    # EcoSeek World tools — persistent artifact substrate (8 tools)
+    _register_world_tools(ctx.register_tool)
+
+    n = 24 if _is_configured() else 19
     logger.info(
-        "ecoseek plugin registered: %d tools, remote=%s configured=%s didal=v2 ecoagent=true r_workspace=true niche=true maxent=true pdf=true artifacts=true lacs=true",
+        "ecoseek plugin registered: %d tools, remote=%s configured=%s didal=v2 ecoagent=true r_workspace=true niche=true maxent=true pdf=true artifacts=true lacs=true world=true",
         n,
         _REMOTE_URL,
         _is_configured(),
@@ -2026,5 +2444,8 @@ try:
         check_fn=_is_configured,
         requires_env=[],
     )
+
+    # EcoSeek World tools — persistent artifact substrate (8 tools)
+    _register_world_tools(registry.register, requires_env=[])
 except ImportError:
     pass
