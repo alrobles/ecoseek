@@ -1,5 +1,12 @@
 # EcoSeek Benchmarks
 
+> **Policy note (no Chinese AI):** `ecocoder_vs_deepseek.py` is **deprecated** —
+> both of its subjects are excluded under the provider policy
+> (`docs/search-providers.md`): DeepSeek is a Chinese provider and EcoCoder-7B
+> is a Qwen-based fine-tune. Kept for history; do not run against live keys.
+> Revive with a compliant comparator (e.g. Trinity Large, Llama-family,
+> Nemotron).
+
 Compares ecological answer quality between [EcoCoder-7B](https://huggingface.co/alrobles/EcoCoder-7B) (domain-specialized, 4.5 GB local) and DeepSeek v4 (cloud API).
 
 Uses the DiDAL judge component to score both models on 8 ecological prompts across three complexity levels:
@@ -11,7 +18,7 @@ Uses the DiDAL judge component to score both models on 8 ecological prompts acro
 
 ## Scripts
 
-### `ecocoder_vs_deepseek.py` — Model Quality Benchmark
+### `ecocoder_vs_deepseek.py` — Model Quality Benchmark ⚠️ DEPRECATED
 
 Compares EcoCoder-7B vs DeepSeek on ecological prompts using the DiDAL judge.
 

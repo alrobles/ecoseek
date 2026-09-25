@@ -361,7 +361,7 @@
             <div class="mode-card">
               <span class="mode-badge">BYOK</span>
               <h3>Bring Your Own Key</h3>
-              <p>Use your DeepSeek API key for stronger reasoning when you lack local GPU hardware.
+              <p>Use your own API key for a compliant cloud provider (Arcee, OpenAI, etc.) when you lack local GPU hardware.
                  Keys are stored locally and never leave your machine. Combine with EcoAgent tools for hybrid workflows.</p>
             </div>
             <div class="mode-card">
@@ -393,7 +393,7 @@ Compute backends
   EcoAgent tools ---- 25 ecological analysis tools
   Emily / Hermes ---- DiDAL v2 dialectical protocol
                         Alpha (local) ↔ Beta (remote)
-  DeepSeek BYOK ----- user-provided API key
+  BYOK keystore ---- user-provided API key (non-Chinese providers)
   HPC / Hermes ------ lab servers and clusters</div>
 
           <div class="security-rule">
@@ -411,7 +411,7 @@ Compute backends
           <ul class="component-list">
             <li>
               <span class="comp-name"><a href="https://github.com/alrobles/agenticSeek">AgenticSeek</a></span>
-              <span class="comp-desc">User-facing client foundation. Provides the agent runtime, CLI, and web UI. EcoSeek adds ecological providers (EcoCoder local, EcoCoder cluster, DeepSeek BYOK) and connector discovery.</span>
+              <span class="comp-desc">User-facing client foundation. Provides the agent runtime, CLI, and web UI. EcoSeek adds ecological providers (EcoCoder local/cluster) and connector discovery. BYOK accepts non-Chinese providers only.</span>
             </li>
             <li>
               <span class="comp-name"><a href="https://github.com/alrobles/agenticplug">AgenticPlug</a></span>
@@ -419,7 +419,7 @@ Compute backends
             </li>
             <li>
               <span class="comp-name"><a href="https://github.com/alrobles/ecocoder">EcoCoder</a></span>
-              <span class="comp-desc">Domain-adapted QLoRA fine-tune of Qwen2.5-Coder-7B-Instruct on ~80K lines of ecological computing code. Exposes an OpenAI-compatible inference endpoint. Runs on Ollama locally or on HPC clusters.</span>
+              <span class="comp-desc">Domain-adapted ecological code LLM (fine-tuned on ~80K lines of ecological computing code; retrain on a compliant base in progress — the Qwen-based 7B release is deprecated under the no-Chinese-AI policy). Exposes an OpenAI-compatible inference endpoint.</span>
             </li>
             <li>
               <span class="comp-name"><a href="https://github.com/alrobles/ecoagent">EcoAgent</a></span>
@@ -431,7 +431,7 @@ Compute backends
             </li>
             <li>
               <span class="comp-name">Hermes</span>
-              <span class="comp-desc">Remote orchestration service at <a href="https://hermes.ecoseek.org">hermes.ecoseek.org</a>. Optional advanced scientific reasoning backend. Runs on reumanlab with DeepSeek and EcoCoder models. Emily escalates complex tasks to Hermes for expert synthesis.</span>
+              <span class="comp-desc">Remote orchestration service at <a href="https://hermes.ecoseek.org">hermes.ecoseek.org</a>. Optional advanced scientific reasoning backend. Runs on reumanlab with Trinity Large Thinking (Arcee) and EcoAgent tools. Emily escalates complex tasks to Hermes for expert synthesis.</span>
             </li>
           </ul>
         </div>
@@ -519,8 +519,8 @@ python -m ecoagent.tool_server --port 8200
 docker run -p 8200:8200 -e ECOAGENT_PROFILE=ci ghcr.io/alrobles/ecoagent:0.1.0</code></pre>
 
           <h3>BYOK mode</h3>
-          <p>Store your DeepSeek API key locally, then configure EcoSeek:</p>
-          <pre><code>python -m sources.keystore set deepseek YOUR_KEY
+          <p>Store your API key locally (non-Chinese providers only), then configure EcoSeek:</p>
+          <pre><code>python -m sources.keystore set arcee YOUR_KEY
 # Key stored in OS keychain or ~/.config/ecoseek/keys.json
 # Never committed, logged, or sent to GitHub</code></pre>
 
