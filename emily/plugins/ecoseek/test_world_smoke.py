@@ -889,3 +889,93 @@ class TestSecurityPolicy:
             executable={"kind": "shell", "ref": "true"},
         )
         assert r["success"]  # defaults allow all known kinds
+
+
+class TestPinnedFileAutoRegister:
+    """artifacts.py uploads auto-register as world dataset_pin artifacts."""
+
+    _URL = "https://raw.githubusercontent.com/alrobles/ecoseek-artifacts/main/2026-09-25/s1/out.tif"
+
+    def test_pinned_file_registers(self, world):
+        r = world.propose_pinned_file(
+            name="out.tif",
+            url=self._URL,
+            repo="alrobles/ecoseek-artifacts",
+            repo_path="2026-09-25/s1/out.tif",
+            source_path="/work/sdm/out.tif",
+            size_bytes=4096,
+            session_id="s1",
+        )
+        assert r["success"] and r["status"] == "proposed"
+        art = world.get(r["artifact_id"])["artifact"]
+        assert art["type"] == "dataset_pin"
+        assert art["spec"]["url"] == self._URL
+        assert art["spec"]["repo_path"] == "2026-09-25/s1/out.tif"
+        assert self._URL in art["evidence"]
+        # discoverable through the stigmergic channel
+        assert world.query(text="out.tif")["count"] == 1
+
+    def test_pinned_file_dedup(self, world):
+        kw = {"name": "out.tif", "url": self._URL, "repo_path": "p/out.tif"}
+        r1 = world.propose_pinned_file(**kw)
+        r2 = world.propose_pinned_file(**kw)
+        assert r1["success"]
+        assert not r2["success"] and r2["error"] == "already_registered"
+        assert r2["artifact_id"] == r1["artifact_id"]
+
+    def test_pinned_file_in_methods(self, world, methods):
+        aid = world.propose_pinned_file(name="out.tif", url=self._URL, size_bytes=4096)[
+            "artifact_id"
+        ]
+        r = methods.render_methods(aid, register=False)
+        assert "**Data.**" in r["methods_text"]
+        assert self._URL in r["methods_text"]
+
+    def test_register_in_world_failopen(self, world, monkeypatch):
+        import artifacts
+
+        def _boom(**kw):
+            raise RuntimeError("world exploded")
+
+        monkeypatch.setattr(world, "propose_pinned_file", _boom)
+        r = artifacts._register_in_world(name="x", url="u", repo="r", repo_path="p")
+        assert r["registered"] is False and "world exploded" in r["reason"]
+
+    def test_upload_direct_registers_and_survives_world_failure(
+        self, world, monkeypatch
+    ):
+        import urllib.request
+
+        import artifacts
+
+        url = self._URL
+
+        class _Resp:
+            def read(self):
+                return json.dumps({"content": {"download_url": url}}).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        monkeypatch.setattr(artifacts, "_GITHUB_TOKEN", "tok")
+        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _Resp())
+
+        r = artifacts.upload_artifact_direct(
+            b"fake-tif-bytes", "out.tif", session_id="s1"
+        )
+        assert r["success"] and r["world"]["registered"] is True
+        art = world.get(r["world"]["artifact_id"])["artifact"]
+        assert art["type"] == "dataset_pin"
+        assert art["spec"]["size_bytes"] == len(b"fake-tif-bytes")
+        assert art["spec"]["sha256"]
+
+        # world broken → upload still succeeds, world key reports it
+        def _boom(**kw):
+            raise RuntimeError("world exploded")
+
+        monkeypatch.setattr(world, "propose_pinned_file", _boom)
+        r2 = artifacts.upload_artifact_direct(b"other", "out2.tif", session_id="s2")
+        assert r2["success"] and r2["world"]["registered"] is False
