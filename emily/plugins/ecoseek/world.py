@@ -623,6 +623,56 @@ def observe(artifact_id: str, agent: str | None = None, task_id: str = "") -> di
     return record_event(artifact_id, "observe", {}, agent, task_id)
 
 
+def propose_pinned_file(
+    name: str,
+    url: str,
+    summary: str = "",
+    artifact_type: str = "dataset_pin",
+    source_path: str = "",
+    repo: str = "",
+    repo_path: str = "",
+    size_bytes: int | None = None,
+    content_sha256: str = "",
+    session_id: str = "",
+    extra_spec: dict | None = None,
+    evidence: list | None = None,
+    author: str | None = None,
+    task_id: str = "",
+) -> dict:
+    """Register a file pinned at an external URL — the pin, not the bytes.
+
+    Used by the artifacts.py upload pivot: large outputs land in the
+    ecoseek-artifacts repo and the world records where they live so later
+    agents discover them via ``world_query`` / methods rendering. The pin
+    metadata IS the content address — re-uploading the same file to the
+    same ``repo_path`` dedups through the novelty gate.
+    """
+    spec: dict = {"url": url}
+    if source_path:
+        spec["source_path"] = source_path
+    if repo:
+        spec["repo"] = repo
+    if repo_path:
+        spec["repo_path"] = repo_path
+    if size_bytes is not None:
+        spec["size_bytes"] = size_bytes
+    if content_sha256:
+        spec["sha256"] = content_sha256
+    if session_id:
+        spec["session_id"] = session_id
+    if extra_spec:
+        spec.update(extra_spec)
+    return propose(
+        name=name,
+        artifact_type=artifact_type,
+        summary=summary or f"Pinned file at {url}",
+        spec=spec,
+        evidence=[url, *(evidence or [])],
+        author=author,
+        task_id=task_id,
+    )
+
+
 def get(artifact_id: str, include_events: bool = True) -> dict:
     with _connect() as conn:
         row = conn.execute(

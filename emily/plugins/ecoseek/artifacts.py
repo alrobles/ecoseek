@@ -22,6 +22,7 @@ For files <5MB, use inline base64 in the JSON response instead.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -37,6 +38,65 @@ _HERMES_REMOTE_URL = os.environ.get(
 _HERMES_API_KEY = os.environ.get("HERMES_ECOSEEK_API_KEY", "")
 
 _INLINE_SIZE_LIMIT = 5 * 1024 * 1024  # 5MB — files smaller than this go inline
+
+
+def _register_in_world(
+    *,
+    name: str,
+    url: str,
+    repo: str,
+    repo_path: str,
+    source_path: str = "",
+    size_bytes: int | None = None,
+    content_bytes: bytes | None = None,
+    session_id: str = "",
+) -> dict:
+    """Best-effort EcoSeek World registration for an uploaded file.
+
+    The world stores the pin (URL + repo path), not the bytes, so later
+    agents discover prior outputs through world_query instead of
+    regenerating them. Never raises and never fails the upload — the
+    world is additive only. Returns the dict stored under result["world"].
+    """
+    try:
+        from . import world
+    except ImportError:  # top-level import in tests
+        try:
+            import world  # type: ignore[no-redef]
+        except ImportError:
+            return {"registered": False, "reason": "world module unavailable"}
+    try:
+        sha = (
+            hashlib.sha256(content_bytes).hexdigest()
+            if content_bytes is not None
+            else ""
+        )
+        r = world.propose_pinned_file(
+            name=name,
+            url=url,
+            repo=repo,
+            repo_path=repo_path,
+            source_path=source_path,
+            size_bytes=size_bytes,
+            content_sha256=sha,
+            session_id=session_id,
+        )
+        if r.get("success"):
+            return {
+                "registered": True,
+                "artifact_id": r["artifact_id"],
+                "status": r.get("status"),
+            }
+        if r.get("error") == "already_registered":
+            return {
+                "registered": True,
+                "artifact_id": r.get("artifact_id"),
+                "idempotent": True,
+            }
+        return {"registered": False, "reason": r.get("error", "unknown")}
+    except Exception as exc:
+        logger.debug("world auto-register failed (non-fatal): %s", exc)
+        return {"registered": False, "reason": f"{type(exc).__name__}: {exc}"}
 
 
 def get_artifact_url(path: str) -> str:
@@ -118,6 +178,14 @@ def upload_artifact_via_hermes(
                 "url": url,
                 "path": repo_path,
                 "repo": _ARTIFACTS_REPO,
+                "world": _register_in_world(
+                    name=artifact_name,
+                    url=url,
+                    repo=_ARTIFACTS_REPO,
+                    repo_path=repo_path,
+                    source_path=local_path,
+                    session_id=sid,
+                ),
             }
         else:
             return {
@@ -192,6 +260,15 @@ def upload_artifact_direct(
                 "path": repo_path,
                 "size_bytes": len(content_bytes),
                 "repo": _ARTIFACTS_REPO,
+                "world": _register_in_world(
+                    name=artifact_name,
+                    url=download_url,
+                    repo=_ARTIFACTS_REPO,
+                    repo_path=repo_path,
+                    size_bytes=len(content_bytes),
+                    content_bytes=content_bytes,
+                    session_id=sid,
+                ),
             }
     except urllib.error.HTTPError as exc:
         err = ""

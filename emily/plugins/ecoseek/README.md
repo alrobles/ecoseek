@@ -44,6 +44,8 @@ The plugin also registers a frozen system-prompt section (`ecoseek.world_stigmer
 - `import_artifact` — banned kinds are rejected; with `import_clamp_gated` a peer's `installed`/`validated` gated artifact arrives clamped to `tested` (must re-earn trust locally)
 
 Trust boundary note: agent identity is self-asserted (the `agent` field) — the policy gates *who may assert install*, not cryptographic identity. The hard execution boundary remains `ECOSEEK_WORLD_REPLAY_EXEC=1`.
+
+**Artifact auto-registration**: successful `upload_artifact` pushes (both the Hermes-relayed and direct GitHub-API paths) register the file in the world as a `dataset_pin` via `world.propose_pinned_file` — the pin (raw URL + repo path), not the bytes. Upload results carry a `world` key (`{registered, artifact_id}`); `already_registered` dedups idempotently through the content address. Registration is fail-open — a world error never fails an upload.
 | `hermes_status` | Check if Hermes Beta is available |
 | `escalate_remote` | One-shot delegation to Beta (execution tasks) |
 | `dialectical_exchange` | Legacy DiDAL exchange (iterative execution tasks) |
