@@ -396,6 +396,12 @@ services:
         # Injected into nginx.conf at BUILD time (frontend/Dockerfile envsubst
         # writes /etc/nginx/conf.d/default.conf); not needed at runtime.
         EMILY_HERMES_KEY: "${EMILY_HERMES_KEY:-${EMILY_API_KEY:-}}"
+        # Emily upstream for the nginx proxy. The compose service name is
+        # always reachable; a host-published EMILY_PORT (loopback-only) is
+        # not reachable from containers — use
+        # EMILY_PROXY_TARGET=http://host.docker.internal:<port> only when
+        # Emily runs natively on the host instead of in this compose stack.
+        EMILY_PROXY_TARGET: "${EMILY_PROXY_TARGET:-http://emily:8642}"
     container_name: ecoseek-frontend
     profiles: ["frontend"]
     ports:
