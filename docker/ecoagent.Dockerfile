@@ -34,7 +34,11 @@ COPY --from=builder /build/pyproject.toml /build/README.md /opt/ecoagent/
 COPY --from=builder /build/config/ /opt/ecoagent/config/
 
 WORKDIR /opt/ecoagent
-RUN pip install --no-cache-dir -e "."
+# The build context comes from a host-side clone that can carry any umask
+# (setup.sh runs 077 for .env safety). COPY preserves those modes and the
+# ecoagent user (uid 1000) then can't read its own source — normalize.
+RUN chmod -R a+rX /opt/ecoagent && \
+    pip install --no-cache-dir -e "."
 
 ENV ECOAGENT_PROFILE=ci \
     ECOAGENT_PORT=8100 \

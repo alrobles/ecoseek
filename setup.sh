@@ -249,8 +249,13 @@ clone_repo() {
     git -C "$dest" pull --ff-only 2>/dev/null || warn "Could not update $dest (non-fatal)"
   else
     info "Cloning $repo_url into $dest ..."
-    git clone --depth 1 "$repo_url" "$dest"
+    # Public dep — relax this script's umask 077 for the clone. Files under
+    # .repos become a docker build context: COPY preserves modes and a
+    # non-root container (ecoagent runs uid 1000) can't read 700/600 trees.
+    (umask 022 && git clone --depth 1 "$repo_url" "$dest")
   fi
+  # Self-healing for checkouts made under the restrictive umask.
+  chmod -R a+rX "$dest" 2>/dev/null || true
 }
 
 mkdir -p .repos
