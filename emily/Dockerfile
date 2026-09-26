@@ -23,12 +23,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Install hermes-agent from the EcoSeek fork.
+# Upstream blocks pip wheel/sdist builds (setup.py guard — a wheel would
+# ship without bundled assets: locales, skills, plugin manifests). The
+# supported paths are the installer, their image, Nix, or an editable
+# install from a source checkout — editable keeps the runtime asset
+# layout intact, so we clone and `pip install -e`.
 # aiohttp is required by the gateway API server adapter but is an optional
 # dependency of hermes-agent (in the "messaging" extras group).
 # OpenTelemetry + OTLP exporter enable Phoenix tracing when
 # PHOENIX_COLLECTOR_ENDPOINT is set (no-op otherwise).
-RUN pip install --no-cache-dir \
-    "git+https://github.com/alrobles/hermes-agent.git@main#egg=hermes-agent" \
+RUN git clone --depth 1 https://github.com/alrobles/hermes-agent.git /opt/hermes-agent && \
+    pip install --no-cache-dir -e /opt/hermes-agent && \
+    pip install --no-cache-dir \
     aiohttp \
     opentelemetry-sdk \
     opentelemetry-exporter-otlp-proto-http \

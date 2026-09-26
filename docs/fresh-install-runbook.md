@@ -1,8 +1,8 @@
 # Fresh-Install Runbook — EcoSeek F2 Customer Test
 
-> **Status:** draft / blocked on target node (reumanlab-terminal offline on
-> Tailscale since the test's Docker snap restart). Findings recorded below are
-> REAL (observed 2026-09-04 during the first F2 attempt).
+> **Status:** in progress — second attempt running 2026-09-25 on
+> reumanlab-terminal (node recovered; Docker daemon healthy, snap group fix
+> persisted). First-attempt findings below are REAL (observed 2026-09-04).
 > **Owner:** Angel Robles · **Issue:** #127 · **Roadmap:** F2
 
 ## Goal
@@ -45,6 +45,33 @@ machine that never ran EcoSeek, then `bash scripts/smoke.sh` green.
 - `CI=1 ARCEE_API_KEY= bash setup.sh` runs correctly when the daemon is up:
   it skips prompts, writes `.env` (0600), and clones `.repos/ecoagent`.
 - On this node it aborted at the `docker info` check (expected, see FIND-01).
+
+### F2-FIND-03 · `docker compose up --build` fails — emily image can't build (second attempt, 2026-09-25)
+- `pip install git+https://github.com/alrobles/hermes-agent.git@main` in
+  `emily/Dockerfile` aborts: upstream `setup.py` (synced in via
+  alrobles/hermes-agent#22, v2026.8.18) raises `RuntimeError` on
+  `bdist_wheel`/`sdist` outside a Nix build — a wheel would ship without
+  bundled assets (locales, skills, plugin manifests) that resolve from the
+  source-checkout layout at runtime.
+- CI never caught it: `docker-compose.ci.yml` mocks emily with
+  `nginx:alpine` — the real Dockerfile is never built in CI.
+- **Fix (PR #137):** clone the fork to `/opt/hermes-agent` and
+  `pip install -e` — editable installs use `build_editable` (not
+  `bdist_wheel`) and keep the runtime asset layout. Verified: image builds,
+  gateway boots.
+- **Customer-facing note:** the stack *cannot* have worked for any external
+  customer between 2026-08-20 (upstream sync) and this fix — only existing
+  deployments with prebuilt images were unaffected.
+
+### F2-FIND-04 · Test environment carried ambient API keys (second attempt)
+- The test shell exported `ARCEE_API_KEY`/`ENTREZ_API_KEY`, so
+  `CI=1 bash setup.sh` wrote real keys into `.env` ("configured" in the
+  summary). A customer without keys takes the local-only Ollama path; this
+  run exercises the BYOK path. Noted for honesty — the clone/build/smoke
+  steps are identical either way.
+- Prior-state caveat: this node hosts the dev checkout
+  (`~/GitHub/ecoseek`) but had **zero** ecoseek Docker state (no images,
+  volumes, or `~/.ecoseek`) — the compose build was a genuine cold build.
 
 ## Remaining steps (when the target is back)
 
