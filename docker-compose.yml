@@ -154,7 +154,7 @@ services:
     environment:
       ECOAGENT_HOST: "0.0.0.0"
       ECOAGENT_PORT: "${ECOAGENT_PORT:-8000}"
-      ECOAGENT_PROFILE: "${ECOAGENT_PROFILE:-ci}"
+      ECOAGENT_PROFILE: "${ECOAGENT_PROFILE:-full}"
     ports:
       - "127.0.0.1:${ECOAGENT_PORT:-8000}:${ECOAGENT_PORT:-8000}"
     command:
