@@ -27,7 +27,11 @@ COPY nginx.conf /tmp/nginx.conf
 # hardcodea en el repo. Build: --build-arg EMILY_HERMES_KEY=<canonical-key>
 # (para emily.ecoseek.org = API_SERVER_KEY del gateway nativo :8642).
 ARG EMILY_HERMES_KEY=
-RUN envsubst '${EMILY_HERMES_KEY}' < /tmp/nginx.conf > /etc/nginx/conf.d/default.conf \
+# Emily upstream the nginx proxy forwards to. Default is the compose
+# service name (same-network, always reachable). Override with
+# http://host.docker.internal:<port> when Emily runs natively on the host.
+ARG EMILY_PROXY_TARGET=http://emily:8642
+RUN envsubst '${EMILY_HERMES_KEY} ${EMILY_PROXY_TARGET}' < /tmp/nginx.conf > /etc/nginx/conf.d/default.conf \
     && grep -Eq 'Bearer [A-Za-z0-9_-]{8,}' /etc/nginx/conf.d/default.conf \
     || { echo "ERROR: EMILY_HERMES_KEY build-arg vacío — build abortado"; exit 1; }
 
