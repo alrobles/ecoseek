@@ -122,6 +122,22 @@ machine that never ran EcoSeek, then `bash scripts/smoke.sh` green.
   expected for `react-scripts` era; schedule a Vite migration or audit
   pass separately. Not an F2 blocker.
 
+### F2-FIND-09 · `ECOAGENT_PROFILE=ci` default ships dead tools (post-F2, World dogfooding)
+- Symptom: `POST /v1/tools/query_species/execute` → `execution_error:
+  No such file or directory: stub_species.jsonl` on the fresh stack.
+- Root cause: `docker-compose.yml` defaulted `ECOAGENT_PROFILE:-ci` and
+  `docker/ecoagent.Dockerfile` baked `ENV ECOAGENT_PROFILE=ci`. In `ci`
+  mode `ingest_*` reads `tests/fixtures/stub_*.jsonl` — files never
+  shipped in the image — so every fixture-backed tool was dead on a
+  customer install. CI never caught it: `docker-compose.ci.yml` mocks
+  ecoagent with `nginx:alpine`.
+- **Fix (PR #142, merged `8f98e27`):** default `full` in both places —
+  real GBIF/CrossRef calls. Verified: `ECOAGENT_PROFILE=full` recreate →
+  `query_species` returns real GBIF data.
+- **Takeaway:** same CI blind spot as FIND-03 — the mocks protect the
+  compose-smoke job but hide runtime behavior; see follow-up issue on
+  building real images in CI.
+
 ## Steps executed (second attempt, 2026-09-26 — all green)
 
 ```bash
