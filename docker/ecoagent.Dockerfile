@@ -40,7 +40,7 @@ WORKDIR /opt/ecoagent
 RUN chmod -R a+rX /opt/ecoagent && \
     pip install --no-cache-dir -e "."
 
-ENV ECOAGENT_PROFILE=ci \
+ENV ECOAGENT_PROFILE=full \
     ECOAGENT_PORT=8100 \
     ECOAGENT_HOST=0.0.0.0 \
     PYTHONUNBUFFERED=1 \
