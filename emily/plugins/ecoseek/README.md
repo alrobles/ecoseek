@@ -21,6 +21,10 @@ Emily (Alpha, local) ↔ Hermes (Beta, remote on reumanlab) via `hermes.ecoseek.
 | `world_replay` | Frozen agent-free replay of `artifact.executable` on held-out inputs — emits `world_validate` evidence |
 | `world_methods` | Render a Methods section from provenance (lineage + evidence + replay runs) — registers a `methods_section` artifact |
 | `world_sync` | Federate world state — merge `artifacts.jsonl` + `events.jsonl` with a peer (file path, `ssh:host:path`, or git remote); status-precedence merge, event dedup |
+| `world_endpoints` | SwarmWorld endpoint metrics — validated inventions, lineage depth + cross-author forks, observation-first reuse fraction, replay resilience, per-metric best artifact, per-agent breakdown, optional timeseries (`points`) |
+| `hermes_status` | Check if Hermes Beta is available |
+| `escalate_remote` | One-shot delegation to Beta (execution tasks) |
+| `dialectical_exchange` | Legacy DiDAL exchange (iterative execution tasks) |
 
 The plugin also registers a frozen system-prompt section (`ecoseek.world_stigmergy`) that injects the stigmergic policy — `world_query` before expensive work, `observe` on reuse, promote only via `world_replay` — plus live world stats at session start (prompt-caching safe: rendered once, byte-stable for the session).
 
@@ -46,9 +50,8 @@ The plugin also registers a frozen system-prompt section (`ecoseek.world_stigmer
 Trust boundary note: agent identity is self-asserted (the `agent` field) — the policy gates *who may assert install*, not cryptographic identity. The hard execution boundary remains `ECOSEEK_WORLD_REPLAY_EXEC=1`.
 
 **Artifact auto-registration**: successful `upload_artifact` pushes (both the Hermes-relayed and direct GitHub-API paths) register the file in the world as a `dataset_pin` via `world.propose_pinned_file` — the pin (raw URL + repo path), not the bytes. Upload results carry a `world` key (`{registered, artifact_id}`); `already_registered` dedups idempotently through the content address. Registration is fail-open — a world error never fails an upload.
-| `hermes_status` | Check if Hermes Beta is available |
-| `escalate_remote` | One-shot delegation to Beta (execution tasks) |
-| `dialectical_exchange` | Legacy DiDAL exchange (iterative execution tasks) |
+
+**Endpoint measurement** (`world_metrics.py`): `swarm_endpoints()` computes the full SwarmWorld endpoint suite read-only from the registry — validated inventions, lineage depth/cross-author forks, observation-first reuse (reuses preceded by an `observe` from the same agent), replay resilience from `runs/` evidence, per-metric best artifact (the isolated-search comparator), per-agent breakdown, and `endpoint_series(n)` for per-endpoint timescales. `society.py` is the probe: a scripted two-agent scenario (`--mode shared|isolated|federated|all --exec`) that exercises the real API under the SwarmWorld conditions — the isolated control shows identical validated counts but zero reuse/lineage, so the measured signature is attributable to the substrate, not the workload.
 
 ## DiDAL Protocol v2
 
