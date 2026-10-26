@@ -829,7 +829,9 @@ def prompt_section(_session_info: dict | None = None) -> str:
         "- Register durable results with `world_propose`; promote only through\n"
         "  `world_replay`/`world_validate`. Never claim validation by narration.\n"
         "- `world_methods` renders provenance into a Methods section; `world_sync`\n"
-        "  federates this world with peers."
+        "  federates this world with peers; `world_endpoints` reports the\n"
+        "  SwarmWorld metrics (validated inventions, lineage, observation-first\n"
+        "  reuse, replay resilience) — measurement, never narration."
     )
 
 

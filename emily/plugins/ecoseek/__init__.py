@@ -1906,6 +1906,31 @@ WORLD_SYNC_SCHEMA = {
     },
 }
 
+WORLD_ENDPOINTS_SCHEMA = {
+    "name": "world_endpoints",
+    "description": (
+        "SwarmWorld endpoint metrics for this world — the measurement of "
+        "whether the shared substrate produces collective advantage: "
+        "validated inventions, portfolio breadth, executable-lineage depth "
+        "and cross-author fork fraction, observation-first reuse fraction, "
+        "frozen-replay resilience, per-metric best artifact, per-agent "
+        "breakdown, and an optional per-endpoint timeseries over the event "
+        "stream. Read-only — never writes to the world."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "points": {
+                "type": "integer",
+                "description": (
+                    "Include the per-endpoint timeseries at N event prefixes "
+                    "(0 = endpoints only, default 0)."
+                ),
+            },
+        },
+    },
+}
+
 
 def world_query_tool(
     query: str = "",
@@ -2078,6 +2103,15 @@ def world_sync_tool(
     )
 
 
+def world_endpoints_tool(points: int = 0, task_id: str | None = None) -> str:
+    from . import world_metrics
+
+    out = {"endpoints": world_metrics.swarm_endpoints()}
+    if points:
+        out["series"] = world_metrics.endpoint_series(points)
+    return json.dumps(out, ensure_ascii=False)
+
+
 _WORLD_TOOL_REGISTRATIONS = [
     (
         "world_query",
@@ -2159,6 +2193,12 @@ _WORLD_TOOL_REGISTRATIONS = [
             "branch": "branch",
         },
     ),
+    (
+        "world_endpoints",
+        WORLD_ENDPOINTS_SCHEMA,
+        world_endpoints_tool,
+        {"points": "points"},
+    ),
 ]
 
 
@@ -2172,7 +2212,7 @@ def _world_prompt_section(_session_info) -> str:
 
 
 def _register_world_tools(register_fn, **register_kwargs) -> None:
-    """Register the 11 world_* tools via either ctx.register_tool or the
+    """Register the 12 world_* tools via either ctx.register_tool or the
     legacy tools.registry.register signature."""
     for name, schema, handler, arg_map in _WORLD_TOOL_REGISTRATIONS:
 
